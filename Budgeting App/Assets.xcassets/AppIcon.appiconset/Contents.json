@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "CCF57D3B-0FDD-40BC-AE9E-E0AC6F242D09 Background Removed 3.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -12,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "24795173-2FB7-4889-9641-69E483B49C64 Background Removed.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -23,6 +25,7 @@
           "value" : "tinted"
         }
       ],
+      "filename" : "CCF57D3B-0FDD-40BC-AE9E-E0AC6F242D09 Background Removed 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
