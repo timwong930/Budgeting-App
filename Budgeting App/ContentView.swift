@@ -28,7 +28,7 @@ struct ContentView: View {
     @State private var categoryHistorySelection: CategoryHistorySelection?
     @State private var savingsHistorySelection: SavingsHistorySelection?
     @State private var isTabBarMinimized = false
-    @State private var selectedTab: BudgetMode = .plan
+    @State private var selectedTab: BudgetMode = .home
     @State private var expenseDraftSection: BudgetSection = .needs
     @State private var expenseDraftCategoryId: UUID?
     @State private var needsExpanded = true
@@ -44,6 +44,20 @@ struct ContentView: View {
     @State private var selectedIncomePoint: DailySpend?
     @State private var selectedLogTrend: LogTrend = .spending
     @State private var selectedTrendRange: TrendRange = .monthToDate
+    @State private var budgetPageFocus: BudgetPageFocus = .plan
+    @State private var selectedCalendarDay: CalendarDaySelection?
+    @State private var editingRecurringPayment: RecurringPayment?
+    @State private var calendarPageIndex: Int = 12
+    @State private var showingCreditAccounts = false
+    @State private var showingBankAccounts = false
+    @State private var selectedCreditAccount: CreditAccount?
+    @State private var showingMarginAddTransaction = false
+    @State private var showingMarginAddInvestment = false
+    @State private var showingMarginElectricBill = false
+    @State private var showingMarginSettings = false
+    @State private var showingAppSettings = false
+    @State private var showingMarginHistory = false
+    @State private var showingMarginManualHolding = false
     @State private var monthlyExpenses: [Expense] = []
     @State private var monthlyIncomes: [IncomeEntry] = []
     @State private var monthlySavingsEntries: [SavingsEntry] = []
@@ -60,7 +74,19 @@ struct ContentView: View {
     @State private var scrollToIncome = false
     @State private var highlightMonthlyIncome = false
     @State private var selectedPlanHighlight: PlanHighlightSection?
+    @State private var spyComparison: SpyComparisonResult?
+    @State private var isLoadingSpyComparison = false
+    @State private var spyComparisonError: String?
+    @State private var selectedHomeNetWorthRange: HomeNetWorthRange = .threeMonths
+    @State private var selectedHomeNetWorthPoint: PortfolioValuePoint?
     @FocusState private var focusedField: FocusedField?
+    private let marketDataService = MarketDataService()
+
+    private struct SpyComparisonResult {
+        let periodLabel: String
+        let portfolioReturn: Double
+        let spyReturn: Double
+    }
 
     private enum FocusedField: Hashable {
         case income
@@ -90,6 +116,24 @@ struct ContentView: View {
                 return "30D"
             }
         }
+    }
+
+    private enum BudgetPageFocus: String, CaseIterable, Identifiable {
+        case plan = "Plan"
+        case log = "Log"
+
+        var id: String { rawValue }
+    }
+
+    private enum HomeNetWorthRange: String, CaseIterable, Identifiable {
+        case oneDay = "1D"
+        case oneWeek = "1W"
+        case oneMonth = "1M"
+        case threeMonths = "3M"
+        case oneYear = "1Y"
+        case all = "All"
+
+        var id: String { rawValue }
     }
 
     private struct ExpenseDraft: Identifiable {
@@ -126,15 +170,32 @@ struct ContentView: View {
             goalId = goal.id
         }
     }
+
+    private struct CalendarOccurrence: Identifiable {
+        let id = UUID()
+        let payment: RecurringPayment
+        let date: Date
+    }
+
+    private struct CalendarDaySelection: Identifiable {
+        let id = UUID()
+        let date: Date
+    }
     
     var body: some View {
         NavigationStack {
-            TabView(selection: $selectedTab) {
-                planTab
-                logTab
+            Group {
+                switch selectedTab {
+                case .home:
+                    homeTab
+                case .calendar:
+                    calendarTab
+                case .budget:
+                    budgetTab
+                case .margin:
+                    marginTab
+                }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea(.container, edges: .bottom)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10)
                     .onChanged { value in
@@ -175,11 +236,37 @@ struct ContentView: View {
                     onAddIncome: {
                         Haptics.light()
                         showingAddIncome = true
+                    },
+                    onCalendarQuickAction: { action in
+                        Haptics.light()
+                        switch action {
+                        case .addCalendarEntry:
+                            selectedCalendarDay = CalendarDaySelection(date: selectedMonth)
+                        case .creditCards:
+                            showingCreditAccounts = true
+                        }
+                    },
+                    onMarginQuickAction: { action in
+                        Haptics.light()
+                        switch action {
+                        case .addTransaction:
+                            showingMarginAddTransaction = true
+                        case .addInvestment:
+                            showingMarginAddInvestment = true
+                        case .addManualHolding:
+                            showingMarginManualHolding = true
+                        case .electricBill:
+                            showingMarginElectricBill = true
+                        case .marginSettings:
+                            showingMarginSettings = true
+                        case .ledgerHistory:
+                            showingMarginHistory = true
+                        }
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: isTabBarMinimized ? .trailing : .center)
                 .padding(.trailing, isTabBarMinimized ? 12 : 0)
-                .padding(.bottom, -4)
+                .padding(.bottom, 8)
             }
             .onAppear {
                 budget.income = budget.income(for: selectedMonth)
@@ -202,6 +289,10 @@ struct ContentView: View {
             }
             .onChange(of: budget.savingsEntries) { _, _ in
                 updateMonthlyData()
+            }
+            .task(id: selectedTab) {
+                guard selectedTab == .home else { return }
+                await refreshSpyComparison()
             }
         }
         .sheet(isPresented: $showingAddNeedsCategory) {
@@ -315,17 +406,45 @@ struct ContentView: View {
         .sheet(item: $editingSavingsEntry) { entry in
             EditSavingsEntryView(budget: budget, savingsEntry: entry)
         }
+        .sheet(item: $selectedCalendarDay) { selection in
+            CalendarEntryEditorView(
+                budget: budget,
+                selectedDate: selection.date
+            )
+        }
+        .sheet(item: $editingRecurringPayment) { payment in
+            CalendarEntryEditorView(
+                budget: budget,
+                selectedDate: Calendar.current.date(from: DateComponents(
+                    year: Calendar.current.component(.year, from: selectedMonth),
+                    month: Calendar.current.component(.month, from: selectedMonth),
+                    day: payment.dayOfMonth
+                )) ?? selectedMonth,
+                existingRecurringPayment: payment
+            )
+        }
+        .sheet(isPresented: $showingCreditAccounts) {
+            CreditAccountsView(budget: budget)
+        }
+        .sheet(item: $selectedCreditAccount) { account in
+            CreditAccountDetailView(account: account, budget: budget)
+        }
+        .sheet(isPresented: $showingBankAccounts) {
+            BankAccountsView(budget: budget)
+        }
+        .sheet(isPresented: $showingAppSettings) {
+            AppSettingsView(budget: budget)
+        }
     }
 
     private var planTab: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 20) {
-                    modeBadge(
+                    pageHeader(
                         title: "Plan Mode",
                         subtitle: "Set targets and allocations.",
-                        systemImage: "list.bullet.rectangle",
-                        tint: .blue
+                        systemImage: "list.bullet.rectangle"
                     )
                     overviewSection
                     planHighlightsSection
@@ -354,17 +473,46 @@ struct ContentView: View {
                 scrollToIncome = false
             }
         }
-        .tag(BudgetMode.plan)
+    }
+
+    private var homeTab: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                pageHeader(
+                    title: "Home Dashboard",
+                    subtitle: "Full snapshot across budget, logs, and portfolio.",
+                    systemImage: "house.fill"
+                ) {
+                    Button {
+                        showingAppSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Settings")
+                }
+                overviewSection
+                homeRollupSection
+                homeNetWorthChartSection
+                homePortfolioVsSpySection
+            }
+            .padding(.horizontal)
+            .padding(.top, 28)
+            .padding(.bottom, contentBottomPadding)
+        }
     }
 
     private var logTab: some View {
         ScrollView {
             VStack(spacing: 20) {
-                modeBadge(
+                pageHeader(
                     title: "Log Mode",
                     subtitle: "Track spending and income.",
-                    systemImage: "chart.line.uptrend.xyaxis",
-                    tint: .green
+                    systemImage: "chart.line.uptrend.xyaxis"
                 )
                 logMonthSwitcher
                 logTrendsSection
@@ -378,7 +526,121 @@ struct ContentView: View {
             .padding(.top, 28)
             .padding(.bottom, contentBottomPadding)
         }
-        .tag(BudgetMode.log)
+    }
+
+    private var budgetTab: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                pageHeader(
+                    title: "Budget Hub",
+                    subtitle: "Plan targets and log activity.",
+                    systemImage: "square.grid.2x2"
+                )
+                Picker("Budget Focus", selection: $budgetPageFocus) {
+                    ForEach(BudgetPageFocus.allCases) { focus in
+                        Text(focus.rawValue).tag(focus)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if budgetPageFocus == .log {
+                    logMonthSwitcher
+                    logTrendsSection
+                    accountBalancesSection
+                } else {
+                    planHighlightsSection
+                }
+
+                if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
+                    firstTimeTipsSection
+                }
+
+                overviewSection
+                incomeSection
+                if budgetPageFocus == .plan && budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
+                    nextStepSection
+                }
+                budgetBreakdownSection
+                needsSection
+                wantsSection
+                savingsSection
+                if budgetPageFocus == .log {
+                    categorySummarySection
+                }
+                summarySection
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 28)
+            .padding(.bottom, contentBottomPadding)
+        }
+    }
+
+    private var calendarTab: some View {
+        VStack(spacing: 14) {
+            pageHeader(
+                title: "Calendar",
+                subtitle: "Upcoming recurring and one-time cash flow.",
+                systemImage: "calendar"
+            )
+            recurringCalendarSection
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 18)
+        .padding(.bottom, contentBottomPadding)
+    }
+
+    private var marginTab: some View {
+        MarginDashboardView(
+            budget: budget,
+            bottomPadding: contentBottomPadding,
+            showAddTransaction: $showingMarginAddTransaction,
+            showAddInvestment: $showingMarginAddInvestment,
+            showElectricBill: $showingMarginElectricBill,
+            showMarginSettings: $showingMarginSettings,
+            showHistory: $showingMarginHistory,
+            showManualHolding: $showingMarginManualHolding
+        )
+    }
+
+    private var isLogFocus: Bool {
+        budgetPageFocus == .log
+    }
+
+    private var recurringCalendarSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text((calendarMonths.indices.contains(calendarPageIndex) ? calendarMonths[calendarPageIndex] : selectedMonth), format: .dateTime.month(.wide).year())
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+
+            GeometryReader { proxy in
+                TabView(selection: $calendarPageIndex) {
+                    ForEach(Array(calendarMonths.enumerated()), id: \.offset) { index, month in
+                        monthCalendarGrid(
+                            for: month,
+                            dayCellHeight: dayCellHeight(for: month, availableHeight: proxy.size.height)
+                        )
+                        .tag(index)
+                    }
+                }
+                .id(calendarRefreshKey)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .onChange(of: calendarPageIndex) { _, newValue in
+                    guard calendarMonths.indices.contains(newValue) else { return }
+                    selectedMonth = calendarMonths[newValue]
+                }
+                .onAppear {
+                    alignCalendarPageToSelectedMonth()
+                }
+                .onChange(of: selectedMonth) { _, _ in
+                    alignCalendarPageToSelectedMonth()
+                }
+            }
+        }
+        .background(Color.clear)
     }
 
     private var backgroundView: some View {
@@ -397,7 +659,7 @@ struct ContentView: View {
     }
 
     private var contentBottomPadding: CGFloat {
-        96
+        128
     }
 
     private var remainingBudgetForMonth: Double {
@@ -405,6 +667,46 @@ struct ContentView: View {
         let wantsRemaining = budget.totalWantsAllocated - monthlyWantsSpent
         let savingsRemaining = budget.savingsBudget - budget.totalSavingsAllocated
         return needsRemaining + wantsRemaining + savingsRemaining
+    }
+
+    private var homePortfolioNetValue: Double {
+        let holdingsValue = budget.holdings.reduce(0) { partial, holding in
+            let quote = budget.cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
+            return partial + (holding.shares * quote)
+        }
+        return holdingsValue + budget.portfolioSnapshot.cashBalance - budget.portfolioSnapshot.marginUsed
+    }
+
+    private var homeMonthlySavingsTargetProgress: Double {
+        guard budget.totalSavingsAllocated > 0 else { return 0 }
+        return min(max(monthlySavingsLogged / budget.totalSavingsAllocated, 0), 1)
+    }
+
+    private var homeNetWorthHistoryPoints: [PortfolioValuePoint] {
+        let sorted = budget.portfolioValueHistory.sorted { $0.date < $1.date }
+        guard !sorted.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        let now = Date()
+        let startDate: Date?
+        switch selectedHomeNetWorthRange {
+        case .oneDay:
+            startDate = calendar.date(byAdding: .day, value: -1, to: now)
+        case .oneWeek:
+            startDate = calendar.date(byAdding: .day, value: -7, to: now)
+        case .oneMonth:
+            startDate = calendar.date(byAdding: .month, value: -1, to: now)
+        case .threeMonths:
+            startDate = calendar.date(byAdding: .month, value: -3, to: now)
+        case .oneYear:
+            startDate = calendar.date(byAdding: .year, value: -1, to: now)
+        case .all:
+            startDate = nil
+        }
+
+        guard let startDate else { return sorted }
+        let filtered = sorted.filter { $0.date >= startDate }
+        return filtered.isEmpty ? sorted : filtered
     }
 
     private var categorySummaryItems: [CategorySummaryItem] {
@@ -745,7 +1047,8 @@ struct ContentView: View {
                 if budget.income == 0 {
                     Button("Set Income") {
                         Haptics.light()
-                        selectedTab = .plan
+                        selectedTab = .budget
+                        budgetPageFocus = .plan
                         scrollToIncome = true
                     }
                     .buttonStyle(.bordered)
@@ -790,6 +1093,540 @@ struct ContentView: View {
         }
     }
 
+    private var calendarWeekdaySymbols: [String] {
+        let symbols = Calendar.current.shortWeekdaySymbols
+        let firstWeekdayIndex = Calendar.current.firstWeekday - 1
+        let head = Array(symbols[firstWeekdayIndex...])
+        let tail = Array(symbols[..<firstWeekdayIndex])
+        return head + tail
+    }
+
+    private var calendarMonths: [Date] {
+        let base = Self.startOfMonth(for: Date())
+        let calendar = Calendar.current
+        return (-12...12).compactMap { calendar.date(byAdding: .month, value: $0, to: base) }
+    }
+
+    private func calendarGridDates(for month: Date) -> [Date?] {
+        let calendar = Calendar.current
+        guard let monthInterval = calendar.dateInterval(of: .month, for: month),
+              let firstWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: monthInterval.start),
+              let lastDay = calendar.date(byAdding: .day, value: -1, to: monthInterval.end),
+              let lastWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: lastDay) else {
+            return []
+        }
+
+        var dates: [Date?] = []
+        var cursor = firstWeekInterval.start
+        while cursor < lastWeekInterval.end {
+            if calendar.isDate(cursor, equalTo: month, toGranularity: .month) {
+                dates.append(cursor)
+            } else {
+                dates.append(nil)
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return dates
+    }
+
+    private func monthGridHeight(for month: Date) -> CGFloat {
+        let totalCells = calendarGridDates(for: month).count
+        let rowCount = max(1, Int(ceil(Double(totalCells) / 7.0)))
+        let weekdayHeaderHeight: CGFloat = 22
+        let rowHeight: CGFloat = 86
+        let rowSpacing: CGFloat = 8
+        return weekdayHeaderHeight + (CGFloat(rowCount) * rowHeight) + (CGFloat(max(0, rowCount - 1)) * rowSpacing) + 10
+    }
+
+    private func recurringOccurrences(for date: Date) -> [CalendarOccurrence] {
+        let calendar = Calendar.current
+        return budget.recurringPayments
+            .filter { payment in
+                guard payment.isActive else { return false }
+                guard calendar.startOfDay(for: date) >= calendar.startOfDay(for: payment.startDate) else { return false }
+                return recurringOccurrenceDay(in: date, paymentDay: payment.dayOfMonth) == calendar.component(.day, from: date)
+            }
+            .map { CalendarOccurrence(payment: $0, date: date) }
+            .sorted { lhs, rhs in
+                if lhs.payment.kind == rhs.payment.kind {
+                    return lhs.payment.amount > rhs.payment.amount
+                }
+                return lhs.payment.kind == .income
+            }
+    }
+
+    private func recurringOccurrenceDay(in date: Date, paymentDay: Int) -> Int {
+        let calendar = Calendar.current
+        let maxDay = calendar.range(of: .day, in: .month, for: date)?.count ?? 31
+        return min(max(paymentDay, 1), maxDay)
+    }
+
+    private var calendarRefreshKey: String {
+        let paid = budget.recurringPayments.reduce(0) { $0 + $1.paidOccurrenceKeys.count }
+        return "\(budget.expenses.count)-\(budget.incomes.count)-\(budget.recurringPayments.count)-\(budget.creditAccounts.count)-\(paid)-\(selectedMonth.timeIntervalSinceReferenceDate)"
+    }
+
+    private func recurringOccurrenceKey(paymentId: UUID, date: Date) -> String {
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month, .day], from: date)
+        let year = comps.year ?? 0
+        let month = comps.month ?? 0
+        let day = comps.day ?? 0
+        return "\(paymentId.uuidString)_\(String(format: "%04d-%02d-%02d", year, month, day))"
+    }
+
+    private func isRecurringOccurrencePaid(_ payment: RecurringPayment, on date: Date) -> Bool {
+        payment.paidOccurrenceKeys.contains(recurringOccurrenceKey(paymentId: payment.id, date: date))
+    }
+
+    private func markRecurringOccurrencePaid(_ payment: RecurringPayment, on date: Date) {
+        let key = recurringOccurrenceKey(paymentId: payment.id, date: date)
+        guard let index = budget.recurringPayments.firstIndex(where: { $0.id == payment.id }) else { return }
+        guard !budget.recurringPayments[index].paidOccurrenceKeys.contains(key) else { return }
+        budget.recurringPayments[index].paidOccurrenceKeys.append(key)
+
+        if payment.kind == .income {
+            budget.incomes.append(
+                IncomeEntry(name: payment.name, amount: payment.amount, date: date)
+            )
+            return
+        }
+
+        var section = payment.section
+        var categoryId = payment.categoryId
+        let categories = section == .needs ? budget.needsCategories : budget.wantsCategories
+        if categoryId == nil || !categories.contains(where: { $0.id == categoryId }) {
+            if let fallback = categories.first {
+                categoryId = fallback.id
+            } else {
+                let newCategory = Category(name: "Recurring", allocatedAmount: 0)
+                if section == .needs {
+                    budget.needsCategories.append(newCategory)
+                } else {
+                    budget.wantsCategories.append(newCategory)
+                }
+                categoryId = newCategory.id
+            }
+        }
+
+        guard let categoryId else { return }
+        budget.expenses.append(
+            Expense(
+                name: payment.name,
+                amount: payment.amount,
+                date: date,
+                section: section,
+                categoryId: categoryId,
+                paymentAccount: payment.paymentAccount,
+                note: payment.note
+            )
+        )
+    }
+
+    private struct CalendarEventItem: Identifiable {
+        let id: UUID
+        let name: String
+        let amount: Double
+        let isIncome: Bool
+        let date: Date
+        let recurringPayment: RecurringPayment?
+        let expense: Expense?
+        let income: IncomeEntry?
+        let isPaid: Bool
+        let tint: Color
+        let isCreditDue: Bool
+        let paymentAccount: String
+        let iconName: String
+        let creditAccount: CreditAccount?
+    }
+
+    private func calendarEvents(for date: Date) -> [CalendarEventItem] {
+        let calendar = Calendar.current
+        let recurring = recurringOccurrences(for: date)
+            .filter { !isRecurringOccurrencePaid($0.payment, on: date) }
+            .map {
+            CalendarEventItem(
+                id: UUID(),
+                name: $0.payment.name,
+                amount: $0.payment.amount,
+                isIncome: $0.payment.kind == .income,
+                date: date,
+                recurringPayment: $0.payment,
+                expense: nil,
+                income: nil,
+                isPaid: isRecurringOccurrencePaid($0.payment, on: date),
+                tint: colorFor(section: $0.payment.section, categoryId: $0.payment.categoryId, isIncome: $0.payment.kind == .income),
+                isCreditDue: false,
+                paymentAccount: $0.payment.paymentAccount,
+                iconName: iconName(for: $0.payment.name, isCreditDue: false, paymentAccount: $0.payment.paymentAccount),
+                creditAccount: nil
+            )
+        }
+        let oneTimeExpenses = budget.expenses
+            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .map {
+                CalendarEventItem(
+                    id: $0.id,
+                    name: $0.name,
+                    amount: $0.amount,
+                    isIncome: false,
+                    date: $0.date,
+                    recurringPayment: nil,
+                    expense: $0,
+                    income: nil,
+                    isPaid: true,
+                    tint: colorFor(section: $0.section, categoryId: $0.categoryId, isIncome: false),
+                    isCreditDue: false,
+                    paymentAccount: $0.paymentAccount,
+                    iconName: iconName(for: $0.name, isCreditDue: false, paymentAccount: $0.paymentAccount),
+                    creditAccount: nil
+                )
+            }
+        let oneTimeIncome = budget.incomes
+            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .map {
+                CalendarEventItem(
+                    id: $0.id,
+                    name: $0.name,
+                    amount: $0.amount,
+                    isIncome: true,
+                    date: $0.date,
+                    recurringPayment: nil,
+                    expense: nil,
+                    income: $0,
+                    isPaid: true,
+                    tint: colorFor(section: .needs, categoryId: nil, isIncome: true),
+                    isCreditDue: false,
+                    paymentAccount: "",
+                    iconName: "dollarsign.circle",
+                    creditAccount: nil
+                )
+            }
+        let dueItems = budget.creditAccounts.compactMap { account -> CalendarEventItem? in
+            guard account.isActive else { return nil }
+            let dueDay = recurringOccurrenceDay(in: date, paymentDay: account.dueDay)
+            guard calendar.component(.day, from: date) == dueDay else { return nil }
+            return CalendarEventItem(
+                id: account.id,
+                name: "\(account.name) Due",
+                amount: creditAccountActualBalance(account),
+                isIncome: false,
+                date: date,
+                recurringPayment: nil,
+                expense: nil,
+                income: nil,
+                isPaid: false,
+                tint: colorForCreditAccount(account.id),
+                isCreditDue: true,
+                paymentAccount: account.name,
+                iconName: "creditcard",
+                creditAccount: account
+            )
+        }
+
+        return (recurring + oneTimeIncome + oneTimeExpenses + dueItems).sorted { lhs, rhs in
+            if lhs.isIncome == rhs.isIncome { return lhs.amount > rhs.amount }
+            return lhs.isIncome && !rhs.isIncome
+        }
+    }
+
+    private func colorFor(section: BudgetSection, categoryId: UUID?, isIncome: Bool) -> Color {
+        if isIncome { return .green }
+        guard let categoryId else { return section == .needs ? .blue : .orange }
+        return colorForCategory(categoryId)
+    }
+
+    private func creditAccountActualBalance(_ account: CreditAccount) -> Double {
+        let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedAccountName.isEmpty else { return 0 }
+        return budget.expenses.reduce(0) { partial, expense in
+            if let paidCard = creditCardPaymentTarget(from: expense.note),
+               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+                return partial - expense.amount
+            }
+            let paymentAccount = expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard paymentAccount == normalizedAccountName else { return partial }
+            return partial + expense.amount
+        }
+    }
+
+    private func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
+    }
+
+    private func colorForCategory(_ categoryId: UUID) -> Color {
+        let palette: [Color] = [
+            .blue, .teal, .mint, .cyan, .indigo, .purple, .orange, .pink
+        ]
+        return palette[stablePaletteIndex(for: categoryId, paletteCount: palette.count)]
+    }
+
+    private func colorForCreditAccount(_ accountId: UUID) -> Color {
+        let palette: [Color] = [.blue, .indigo, .purple, .teal]
+        return palette[stablePaletteIndex(for: accountId, paletteCount: palette.count)]
+    }
+
+    private func stablePaletteIndex(for id: UUID, paletteCount: Int) -> Int {
+        let seed = id.uuidString.unicodeScalars.reduce(0) { partial, scalar in
+            (partial &* 31 &+ Int(scalar.value)) & 0x7fffffff
+        }
+        return seed % max(paletteCount, 1)
+    }
+
+    private func iconName(for name: String, isCreditDue: Bool, paymentAccount: String) -> String {
+        let lowered = name.lowercased()
+        if isCreditDue { return "creditcard" }
+        if lowered.contains("rent") || lowered.contains("mortgage") || lowered.contains("lease") {
+            return "house.fill"
+        }
+        if !paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "creditcard"
+        }
+        if lowered.contains("utility") || lowered.contains("electric") || lowered.contains("water") || lowered.contains("gas") {
+            return "bolt.fill"
+        }
+        if lowered.contains("subscription") || lowered.contains("stream") || lowered.contains("apple") || lowered.contains("amazon") {
+            return "shippingbox.fill"
+        }
+        return "tag.fill"
+    }
+
+    private var accountBalancesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Account Balances")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Manage Banks") {
+                    showingBankAccounts = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button("Manage Cards") {
+                    showingCreditAccounts = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            let totalBank = budget.bankAccounts.reduce(0) { $0 + $1.balance }
+            let portfolioNet = homePortfolioNetValue
+            let totalCredit = budget.creditAccounts
+                .filter(\.isActive)
+                .reduce(0) { $0 + creditAccountActualBalance($1) }
+
+            GlassCard {
+                VStack(spacing: 10) {
+                    metricRow("Bank Accounts", totalBank)
+                    metricRow("Investments (Net)", portfolioNet)
+                    metricRow("Credit Cards", -totalCredit)
+                }
+            }
+
+            if !budget.bankAccounts.isEmpty {
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Bank Accounts")
+                            .font(.headline)
+                        ForEach(budget.bankAccounts) { account in
+                            HStack {
+                                Text(account.name)
+                                Spacer()
+                                Text(account.balance, format: .currency(code: "USD"))
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+            }
+
+            if !budget.creditAccounts.isEmpty {
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Credit Cards")
+                            .font(.headline)
+                        ForEach(budget.creditAccounts.filter(\.isActive)) { account in
+                            HStack {
+                                Text(account.name)
+                                Spacer()
+                                Text(creditAccountActualBalance(account), format: .currency(code: "USD"))
+                                    .foregroundStyle(.red)
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+            }
+
+            if !budget.holdings.isEmpty {
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Portfolio Holdings")
+                            .font(.headline)
+                        ForEach(budget.holdings.prefix(5)) { holding in
+                            HStack {
+                                Text(holding.ticker)
+                                Spacer()
+                                Text("\((holding.shares * holding.currentPrice), format: .currency(code: "USD"))")
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recurringCalendarDayCell(for date: Date?) -> some View {
+        if let date {
+            let events = calendarEvents(for: date)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("\(Calendar.current.component(.day, from: date))")
+                        .font(.subheadline)
+                        .fontWeight(Calendar.current.isDateInToday(date) ? .bold : .regular)
+                    Spacer()
+                }
+
+                ForEach(events.prefix(4)) { event in
+                    HStack(spacing: 4) {
+                        Button {
+                            if let account = event.creditAccount {
+                                selectedCreditAccount = account
+                            } else if let recurring = event.recurringPayment {
+                                editingRecurringPayment = recurring
+                            } else if let expense = event.expense {
+                                editingExpense = expense
+                            } else if let income = event.income {
+                                editingIncome = income
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: event.iconName)
+                                        .font(.caption2)
+                                    Text(event.name)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .allowsTightening(true)
+                                }
+                                if event.amount > 0 {
+                                    Text(event.amount.formatted(.currency(code: "USD")))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                }
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(event.tint)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(event.tint.opacity(0.16))
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if let recurring = event.recurringPayment {
+                            Button {
+                                markRecurringOccurrencePaid(recurring, on: event.date)
+                            } label: {
+                                Image(systemName: event.isPaid ? "checkmark.circle.fill" : "checkmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(event.isPaid ? Color.green : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(event.isPaid ? "Marked paid" : "Mark paid")
+                        }
+                    }
+                }
+
+                if events.count > 4 {
+                    Text("+\(events.count - 4) more")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                Rectangle()
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .overlay(
+                        Rectangle()
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectedCalendarDay = CalendarDaySelection(date: date)
+            }
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    Rectangle()
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .overlay(
+                            Rectangle()
+                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                        )
+                )
+        }
+    }
+
+    private func monthCalendarGrid(for month: Date, dayCellHeight: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 0) {
+                ForEach(calendarWeekdaySymbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 0) {
+                ForEach(calendarGridDates(for: month), id: \.self) { cellDate in
+                    recurringCalendarDayCell(for: cellDate)
+                        .frame(height: dayCellHeight)
+                }
+            }
+        }
+    }
+
+    private func dayCellHeight(for month: Date, availableHeight: CGFloat) -> CGFloat {
+        let rows = max(calendarGridDates(for: month).count / 7, 1)
+        let weekdayHeaderHeight: CGFloat = 30
+        let usableHeight = max(availableHeight - weekdayHeaderHeight, 240)
+        return floor(usableHeight / CGFloat(rows))
+    }
+
+    private func alignCalendarPageToSelectedMonth() {
+        let current = Self.startOfMonth(for: selectedMonth)
+        if let index = calendarMonths.firstIndex(where: { Calendar.current.isDate($0, equalTo: current, toGranularity: .month) }) {
+            calendarPageIndex = index
+        }
+    }
+
+    private static func startOfMonth(for date: Date) -> Date {
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: comps) ?? date
+    }
+
     private var firstTimeTipsSection: some View {
         GlassCard {
             EmptyStateView(
@@ -797,12 +1634,13 @@ struct ContentView: View {
                 message: "Set your income, then add categories and goals for the month.",
                 systemImage: "sparkles",
                 tips: [
-                    "Plan Mode: set allocations for needs, wants, and savings.",
-                    "Log Mode: quickly record spending and keep categories updated."
+                    "Plan view: set allocations for needs, wants, and savings.",
+                    "Log view: quickly record spending and keep categories updated."
                 ],
                 actionLabel: "Set Income",
                 action: {
-                    selectedTab = .plan
+                    selectedTab = .budget
+                    budgetPageFocus = .plan
                     scrollToIncome = true
                 }
             )
@@ -1337,8 +2175,8 @@ struct ContentView: View {
     // MARK: - Needs Section
     private var needsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            let needsHeaderLabel = selectedTab == .log ? "Spent this month" : "Budget this month"
-            let needsHeaderValue = selectedTab == .log ? monthlyNeedsSpent : budget.needsBudget
+            let needsHeaderLabel = isLogFocus ? "Spent this month" : "Budget this month"
+            let needsHeaderValue = isLogFocus ? monthlyNeedsSpent : budget.needsBudget
             collapsibleSectionHeader(
                 title: "Needs",
                 tint: .blue,
@@ -1348,7 +2186,7 @@ struct ContentView: View {
                 value: needsHeaderValue
             )
 
-            if selectedTab == .log, budget.income > 0 {
+            if isLogFocus, budget.income > 0 {
                 HStack {
                     Text("Allocated")
                         .font(.caption)
@@ -1378,7 +2216,7 @@ struct ContentView: View {
                             ForEach(budget.needsCategories) { category in
                                 CategoryRowView(
                                     category: category,
-                                    showLogDetails: selectedTab == .log,
+                                    showLogDetails: isLogFocus,
                                     onEdit: { editingCategory = category },
                                     onDelete: {
                                     withAnimation(.easeInOut) {
@@ -1388,12 +2226,12 @@ struct ContentView: View {
                                     }
                                         Haptics.warning()
                                     },
-                                    onAddExpense: selectedTab == .log ? {
+                                    onAddExpense: isLogFocus ? {
                                         expenseDraftSection = .needs
                                         expenseDraftCategoryId = category.id
                                         expenseDraft = ExpenseDraft(section: expenseDraftSection, categoryId: expenseDraftCategoryId)
                                     } : nil,
-                                    onTap: selectedTab == .log ? {
+                                    onTap: isLogFocus ? {
                                         categoryHistorySelection = CategoryHistorySelection(category: category)
                                     } : nil,
                                     spentAmount: needsSpentByCategoryId[category.id] ?? 0,
@@ -1411,8 +2249,8 @@ struct ContentView: View {
     // MARK: - Wants Section
     private var wantsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            let wantsHeaderLabel = selectedTab == .log ? "Spent this month" : "Budget this month"
-            let wantsHeaderValue = selectedTab == .log ? monthlyWantsSpent : budget.wantsBudget
+            let wantsHeaderLabel = isLogFocus ? "Spent this month" : "Budget this month"
+            let wantsHeaderValue = isLogFocus ? monthlyWantsSpent : budget.wantsBudget
             collapsibleSectionHeader(
                 title: "Wants",
                 tint: .orange,
@@ -1422,7 +2260,7 @@ struct ContentView: View {
                 value: wantsHeaderValue
             )
 
-            if selectedTab == .log, budget.income > 0 {
+            if isLogFocus, budget.income > 0 {
                 HStack {
                     Text("Spent this month")
                         .font(.caption)
@@ -1452,7 +2290,7 @@ struct ContentView: View {
                             ForEach(budget.wantsCategories) { category in
                                 CategoryRowView(
                                     category: category,
-                                    showLogDetails: selectedTab == .log,
+                                    showLogDetails: isLogFocus,
                                     onEdit: { editingCategory = category },
                                     onDelete: {
                                     withAnimation(.easeInOut) {
@@ -1462,15 +2300,15 @@ struct ContentView: View {
                                     }
                                         Haptics.warning()
                                     },
-                                    onAddExpense: selectedTab == .log ? {
+                                    onAddExpense: isLogFocus ? {
                                         expenseDraftSection = .wants
                                         expenseDraftCategoryId = category.id
                                         expenseDraft = ExpenseDraft(section: expenseDraftSection, categoryId: expenseDraftCategoryId)
                                     } : nil,
-                                    onTap: selectedTab == .log ? {
+                                    onTap: isLogFocus ? {
                                         categoryHistorySelection = CategoryHistorySelection(category: category)
                                     } : nil,
-                                    showRemaining: selectedTab != .log,
+                                    showRemaining: !isLogFocus,
                                     spentAmount: wantsSpentByCategoryId[category.id] ?? 0,
                                     pillLabel: "Spent",
                                     pillAmount: wantsSpentByCategoryId[category.id] ?? 0
@@ -1495,7 +2333,7 @@ struct ContentView: View {
                 value: budget.savingsBudget
             )
 
-            if selectedTab == .log, budget.income > 0 {
+            if isLogFocus, budget.income > 0 {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Saved this month")
@@ -1541,14 +2379,14 @@ struct ContentView: View {
                                         }
                                         Haptics.warning()
                                     },
-                                    onHistory: selectedTab == .log ? {
+                                    onHistory: isLogFocus ? {
                                         savingsHistorySelection = SavingsHistorySelection(goal: goal)
                                     } : nil,
-                                    onLog: selectedTab == .log ? {
+                                    onLog: isLogFocus ? {
                                         savingsEntryDraft = SavingsEntryDraft(goalId: goal.id)
                                     } : nil,
-                                    savedThisMonth: selectedTab == .log ? (savingsLoggedByGoalId[goal.id] ?? 0) : nil,
-                                    showCurrentField: selectedTab != .log,
+                                    savedThisMonth: isLogFocus ? (savingsLoggedByGoalId[goal.id] ?? 0) : nil,
+                                    showCurrentField: !isLogFocus,
                                     onCurrentChange: { amount in
                                         if let index = budget.savingsGoals.firstIndex(where: { $0.id == goal.id }) {
                                             budget.savingsGoals[index].currentAmount = max(amount, 0)
@@ -1595,8 +2433,8 @@ struct ContentView: View {
                                 )
 
                                 SummaryMetricCard(
-                                    title: selectedTab == .log ? "Savings Logged" : "Savings Planned",
-                                    amount: selectedTab == .log ? monthlySavingsLogged : budget.totalSavingsAllocated,
+                                    title: isLogFocus ? "Savings Logged" : "Savings Planned",
+                                    amount: isLogFocus ? monthlySavingsLogged : budget.totalSavingsAllocated,
                                     budget: budget.savingsBudget,
                                     color: .green
                                 )
@@ -1800,30 +2638,311 @@ struct ContentView: View {
         }
     }
 
-    private func modeBadge(
+    private func pageHeader<Trailing: View>(
         title: String,
         subtitle: String,
         systemImage: String,
-        tint: Color
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) -> some View {
-        GlassCard(padding: 12) {
-            HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.title3)
-                    .foregroundStyle(tint)
-                    .padding(8)
-                    .background(tint.opacity(0.12), in: Circle())
-
+                    .foregroundStyle(.primary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.headline)
+                        .font(.title2)
+                        .fontWeight(.bold)
                     Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            trailing()
+        }
+    }
+
+    private var homeRollupSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Everything at a Glance")
+                    .font(.headline)
+
+                metricRow("Monthly Income", budget.monthlyIncome)
+                metricRow("Spent This Month", totalMonthlySpent)
+                metricRow("Saved This Month", monthlySavingsLogged)
+                metricRow("Remaining Budget", remainingBudgetForMonth)
+                metricRow("Portfolio Net Value", homePortfolioNetValue)
+                metricRow("Margin Used", budget.portfolioSnapshot.marginUsed)
+
+                if budget.totalSavingsAllocated > 0 {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Savings Goal Progress (MTD)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(Int(homeMonthlySavingsTargetProgress * 100))%")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        ProgressView(value: homeMonthlySavingsTargetProgress)
+                            .tint(.green)
+                    }
+                }
+            }
+        }
+    }
+
+    private var homePortfolioVsSpySection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Portfolio vs SPY")
+                        .font(.headline)
+                    Spacer()
+                    if isLoadingSpyComparison {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Refresh") {
+                            Task { await refreshSpyComparison() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if let spyComparison {
+                    Text(spyComparison.periodLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        performancePill(title: "Portfolio", value: spyComparison.portfolioReturn, tint: .blue)
+                        performancePill(title: "SPY", value: spyComparison.spyReturn, tint: .orange)
+                    }
+
+                    let delta = spyComparison.portfolioReturn - spyComparison.spyReturn
+                    Text(delta >= 0 ? "Outperforming SPY by \(delta, format: .percent.precision(.fractionLength(2)))." : "Underperforming SPY by \((-delta), format: .percent.precision(.fractionLength(2))).")
+                        .font(.caption)
+                        .foregroundStyle(delta >= 0 ? .green : .red)
+                } else if let spyComparisonError {
+                    Text(spyComparisonError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Add portfolio history and market data settings to compare against SPY.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
             }
+        }
+    }
+
+    private var homeNetWorthChartSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Net Worth Over Time")
+                    .font(.headline)
+
+                Picker("Range", selection: $selectedHomeNetWorthRange) {
+                    ForEach(HomeNetWorthRange.allCases) { range in
+                        Text(range.rawValue).tag(range)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                let points = homeNetWorthHistoryPoints
+                if points.count < 2 {
+                    Text("Add more portfolio activity over time to see your trend.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Chart(points) { point in
+                        AreaMark(
+                            x: .value("Date", point.date),
+                            y: .value("Net Worth", point.netValue)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(.green.opacity(0.18))
+
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Net Worth", point.netValue)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(.green)
+
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Gross Portfolio", point.grossValue)
+                        )
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(.blue.opacity(0.7))
+
+                        if let selectedHomeNetWorthPoint {
+                            RuleMark(x: .value("Date", selectedHomeNetWorthPoint.date))
+                                .foregroundStyle(.secondary.opacity(0.35))
+                            PointMark(
+                                x: .value("Date", selectedHomeNetWorthPoint.date),
+                                y: .value("Net Worth", selectedHomeNetWorthPoint.netValue)
+                            )
+                            .foregroundStyle(.green)
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel {
+                                if let amount = value.as(Double.self) {
+                                    Text(amount, format: .currency(code: "USD"))
+                                }
+                            }
+                        }
+                    }
+                    .chartOverlay { proxy in
+                        GeometryReader { geometry in
+                            ZStack(alignment: .topLeading) {
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .contentShape(Rectangle())
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                guard let plotFrame = proxy.plotFrame.map({ geometry[$0] }) else { return }
+                                                let xPosition = value.location.x - plotFrame.origin.x
+                                                if let date: Date = proxy.value(atX: xPosition) {
+                                                    selectedHomeNetWorthPoint = nearestHomeHistoryPoint(to: date, in: points)
+                                                }
+                                            }
+                                            .onEnded { _ in
+                                                selectedHomeNetWorthPoint = nil
+                                            }
+                                    )
+
+                                if let selectedHomeNetWorthPoint,
+                                   let plotFrame = proxy.plotFrame.map({ geometry[$0] }) {
+                                    let xPosition = proxy.position(forX: selectedHomeNetWorthPoint.date) ?? plotFrame.minX
+                                    let yPosition = proxy.position(forY: selectedHomeNetWorthPoint.netValue) ?? plotFrame.minY
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(selectedHomeNetWorthPoint.date, format: .dateTime.month().day().year())
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text("Net \(selectedHomeNetWorthPoint.netValue, format: .currency(code: "USD"))")
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                        Text("Gross \(selectedHomeNetWorthPoint.grossValue, format: .currency(code: "USD"))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(6)
+                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .position(
+                                        x: min(max(xPosition, plotFrame.minX + 90), plotFrame.maxX - 90),
+                                        y: max(plotFrame.minY + 20, yPosition - 28)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 220)
+
+                    HStack(spacing: 14) {
+                        Label("Net Worth", systemImage: "line.diagonal")
+                            .foregroundStyle(.green)
+                        Label("Gross Portfolio", systemImage: "line.diagonal")
+                            .foregroundStyle(.blue)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func nearestHomeHistoryPoint(to date: Date, in points: [PortfolioValuePoint]) -> PortfolioValuePoint? {
+        points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+
+    private func performancePill(title: String, value: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value, format: .percent.precision(.fractionLength(2)))
+                .font(.title3)
+                .fontWeight(.semibold)
+                .foregroundStyle(value >= 0 ? .green : .red)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func metricRow(_ title: String, _ value: Double) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value, format: .currency(code: "USD"))
+                .font(.subheadline)
+                .fontWeight(.semibold)
+        }
+    }
+
+    @MainActor
+    private func refreshSpyComparison() async {
+        guard let firstPoint = budget.portfolioValueHistory.sorted(by: { $0.date < $1.date }).first,
+              let lastPoint = budget.portfolioValueHistory.sorted(by: { $0.date < $1.date }).last else {
+            spyComparison = nil
+            spyComparisonError = "No portfolio history yet. Log portfolio activity first."
+            return
+        }
+
+        let apiKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            spyComparison = nil
+            spyComparisonError = "Missing market data API key in Margin settings."
+            return
+        }
+
+        isLoadingSpyComparison = true
+        defer { isLoadingSpyComparison = false }
+
+        do {
+            let startPrice = try await marketDataService.fetchHistoricalClose(
+                ticker: "SPY",
+                onOrBefore: firstPoint.date,
+                provider: budget.marketDataSettings.provider,
+                apiKey: apiKey
+            )
+            let endPrice = try await marketDataService.fetchPrice(
+                ticker: "SPY",
+                provider: budget.marketDataSettings.provider,
+                apiKey: apiKey
+            )
+
+            guard firstPoint.netValue > 0, startPrice > 0 else {
+                spyComparison = nil
+                spyComparisonError = "Not enough baseline data to calculate returns."
+                return
+            }
+
+            let portfolioReturn = (lastPoint.netValue / firstPoint.netValue) - 1
+            let spyReturn = (endPrice / startPrice) - 1
+
+            spyComparison = SpyComparisonResult(
+                periodLabel: "\(firstPoint.date.formatted(date: .abbreviated, time: .omitted)) to \(lastPoint.date.formatted(date: .abbreviated, time: .omitted))",
+                portfolioReturn: portfolioReturn,
+                spyReturn: spyReturn
+            )
+            spyComparisonError = nil
+        } catch {
+            spyComparison = nil
+            spyComparisonError = error.localizedDescription
         }
     }
 }
@@ -1831,17 +2950,72 @@ struct ContentView: View {
 // MARK: - Supporting Views
 
 enum BudgetMode: String, CaseIterable, Identifiable {
-    case plan
-    case log
+    case home
+    case calendar
+    case budget
+    case margin
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .plan:
-            return "Plan"
-        case .log:
-            return "Log"
+        case .home:
+            return "Home"
+        case .calendar:
+            return "Calendar"
+        case .budget:
+            return "Budget"
+        case .margin:
+            return "Margin"
+        }
+    }
+}
+
+enum MarginQuickAction {
+    case addTransaction
+    case addInvestment
+    case addManualHolding
+    case electricBill
+    case marginSettings
+    case ledgerHistory
+}
+
+struct AppSettingsView: View {
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Market Data") {
+                    Picker("Provider", selection: $budget.marketDataSettings.provider) {
+                        ForEach(MarketDataProvider.allCases) { provider in
+                            Text(provider.rawValue).tag(provider)
+                        }
+                    }
+                    SecureField("API key", text: $budget.marketDataSettings.apiKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("Used for SPY comparison and quote refresh.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Margin Defaults") {
+                    TextField("Total margin available", value: $budget.marginSettings.totalMarginAvailable, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                    TextField("Interest-free margin limit", value: $budget.marginSettings.interestFreeMarginLimit, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                    TextField("Personal max margin cap", value: $budget.marginSettings.personalMarginCap, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }
@@ -2443,69 +3617,91 @@ struct CategorySummaryItem: Identifiable {
 }
 
 struct CustomTabBar: View {
+    enum CalendarQuickAction {
+        case addCalendarEntry
+        case creditCards
+    }
+
     @Binding var selectedTab: BudgetMode
     let minimized: Bool
     let onExpand: () -> Void
     let onAddExpense: () -> Void
     let onAddIncome: () -> Void
+    let onCalendarQuickAction: (CalendarQuickAction) -> Void
+    let onMarginQuickAction: (MarginQuickAction) -> Void
 
     var body: some View {
         HStack {
             if minimized {
-                if selectedTab == .log {
-                    Menu {
+                Menu {
+                    if selectedTab == .margin {
+                        Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
+                        Button("Add Investment") { onMarginQuickAction(.addInvestment) }
+                        Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
+                        Button("Electric Bill") { onMarginQuickAction(.electricBill) }
+                        Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
+                        Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
+                    } else if selectedTab == .calendar {
+                        Button("Add Calendar Entry") { onCalendarQuickAction(.addCalendarEntry) }
+                        Button("Credit Cards") { onCalendarQuickAction(.creditCards) }
+                    } else {
                         Button(action: onAddExpense) {
                             Label("Add Expense", systemImage: "minus.circle")
                         }
                         Button(action: onAddIncome) {
                             Label("Add Income", systemImage: "plus.circle")
                         }
-                        Button("Show Tabs", action: onExpand)
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
                     }
-                    .accessibilityLabel("Quick add menu")
-                } else {
-                    Button(action: onExpand) {
-                        Image(systemName: "list.bullet.rectangle")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Expand tabs")
+                    Button("Show Tabs", action: onExpand)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .frame(width: 36, height: 36)
                 }
+                .accessibilityLabel("Quick add menu")
             } else {
-                tabButton(.plan, systemImage: "list.bullet.rectangle")
+                tabButton(.home, systemImage: "house.fill")
                 Spacer()
-                if selectedTab == .log {
-                    Menu {
+                tabButton(.margin, systemImage: "shield.lefthalf.filled")
+                Spacer()
+                Menu {
+                    if selectedTab == .margin {
+                        Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
+                        Button("Add Investment") { onMarginQuickAction(.addInvestment) }
+                        Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
+                        Button("Electric Bill") { onMarginQuickAction(.electricBill) }
+                        Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
+                        Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
+                    } else if selectedTab == .calendar {
+                        Button("Add Calendar Entry") { onCalendarQuickAction(.addCalendarEntry) }
+                        Button("Credit Cards") { onCalendarQuickAction(.creditCards) }
+                    } else {
                         Button(action: onAddExpense) {
                             Label("Add Expense", systemImage: "minus.circle")
                         }
                         Button(action: onAddIncome) {
                             Label("Add Income", systemImage: "plus.circle")
                         }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                            )
-                            .padding(.bottom, 10)
                     }
-                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 6)
-                    .accessibilityLabel("Quick add menu")
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                        )
+                        .padding(.bottom, 10)
                 }
+                .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 6)
+                .accessibilityLabel("Quick add menu")
                 Spacer()
-                tabButton(.log, systemImage: "chart.line.uptrend.xyaxis")
+                tabButton(.calendar, systemImage: "calendar")
+                Spacer()
+                tabButton(.budget, systemImage: "square.grid.2x2")
             }
         }
         .padding(.horizontal, minimized ? 10 : 20)
@@ -2518,7 +3714,7 @@ struct CustomTabBar: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
-        .frame(maxWidth: minimized ? 80 : 320)
+        .frame(maxWidth: minimized ? 80 : 460)
         .padding(.horizontal, minimized ? 8 : 16)
         .padding(.bottom, 4)
     }
@@ -3366,9 +4562,18 @@ struct AddExpenseView: View {
     @State private var categoryId: UUID?
     @State private var useCustomCategory = false
     @State private var customCategoryName: String = ""
+    @State private var paymentAccount: String = ""
+    @State private var note: String = ""
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
+    }
+
+    private var paymentAccountOptions: [String] {
+        let names = (budget.creditAccounts.map(\.name) + budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
     }
 
     private let preselectedSection: BudgetSection
@@ -3434,6 +4639,13 @@ struct AddExpenseView: View {
                             }
                         }
                     }
+                    Picker("Paid with", selection: $paymentAccount) {
+                        Text("None").tag("")
+                        ForEach(paymentAccountOptions, id: \.self) { accountName in
+                            Text(accountName).tag(accountName)
+                        }
+                    }
+                    TextField("Note", text: $note, axis: .vertical)
                 } header: {
                     Text("Expense Details")
                 }
@@ -3481,7 +4693,15 @@ struct AddExpenseView: View {
                         }
 
                         guard let categoryId = resolvedCategoryId else { return }
-                        let expense = Expense(name: name, amount: amount, date: date, section: section, categoryId: categoryId)
+                        let expense = Expense(
+                            name: name,
+                            amount: amount,
+                            date: date,
+                            section: section,
+                            categoryId: categoryId,
+                            paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
                         withAnimation(.easeInOut) {
                             budget.expenses.append(expense)
                         }
@@ -3714,9 +4934,18 @@ struct EditExpenseView: View {
     @State private var categoryId: UUID?
     @State private var useCustomCategory = false
     @State private var customCategoryName: String = ""
+    @State private var paymentAccount: String
+    @State private var note: String
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
+    }
+
+    private var paymentAccountOptions: [String] {
+        let names = (budget.creditAccounts.map(\.name) + budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
     }
 
     init(budget: BudgetModel, expense: Expense) {
@@ -3727,6 +4956,8 @@ struct EditExpenseView: View {
         _date = State(initialValue: expense.date)
         _section = State(initialValue: expense.section)
         _categoryId = State(initialValue: expense.categoryId)
+        _paymentAccount = State(initialValue: expense.paymentAccount)
+        _note = State(initialValue: expense.note)
     }
 
     var body: some View {
@@ -3757,6 +4988,13 @@ struct EditExpenseView: View {
                             }
                         }
                     }
+                    Picker("Paid with", selection: $paymentAccount) {
+                        Text("None").tag("")
+                        ForEach(paymentAccountOptions, id: \.self) { accountName in
+                            Text(accountName).tag(accountName)
+                        }
+                    }
+                    TextField("Note", text: $note, axis: .vertical)
                 } header: {
                     Text("Expense Details")
                 }
@@ -3797,6 +5035,8 @@ struct EditExpenseView: View {
                             budget.expenses[index].date = date
                             budget.expenses[index].section = section
                             budget.expenses[index].categoryId = categoryId
+                            budget.expenses[index].paymentAccount = paymentAccount
+                            budget.expenses[index].note = note
                         }
                         Haptics.success()
                         dismiss()
@@ -3867,6 +5107,672 @@ struct EditSavingsEntryView: View {
                         dismiss()
                     }
                     .disabled(amount <= 0 || goalId == nil)
+                }
+            }
+        }
+    }
+}
+
+struct CalendarEntryEditorView: View {
+    @ObservedObject var budget: BudgetModel
+    var selectedDate: Date
+    var existingRecurringPayment: RecurringPayment?
+    @Environment(\.dismiss) private var dismiss
+
+    private enum EntryMode: String, CaseIterable, Identifiable {
+        case recurring = "Recurring"
+        case oneTime = "One-Time"
+        var id: String { rawValue }
+    }
+
+    @State private var name: String
+    @State private var amount: Double
+    @State private var date: Date
+    @State private var mode: EntryMode
+    @State private var kind: RecurringPaymentKind
+    @State private var isActive: Bool
+    @State private var section: BudgetSection = .needs
+    @State private var categoryId: UUID?
+    @State private var useCustomCategory = false
+    @State private var customCategoryName = ""
+    @State private var paymentAccount = ""
+    @State private var isCreditCardPayment = false
+    @State private var targetCreditAccountName = ""
+    @State private var note = ""
+
+    private var categories: [Category] {
+        section == .needs ? budget.needsCategories : budget.wantsCategories
+    }
+
+    private var paymentAccountOptions: [String] {
+        let names = (budget.creditAccounts.map(\.name) + budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
+    private var creditCardOptions: [String] {
+        budget.creditAccounts
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    init(
+        budget: BudgetModel,
+        selectedDate: Date,
+        existingRecurringPayment: RecurringPayment? = nil
+    ) {
+        self.budget = budget
+        self.selectedDate = selectedDate
+        self.existingRecurringPayment = existingRecurringPayment
+        _name = State(initialValue: existingRecurringPayment?.name ?? "")
+        _amount = State(initialValue: existingRecurringPayment?.amount ?? 0)
+        _date = State(initialValue: existingRecurringPayment?.startDate ?? selectedDate)
+        _mode = State(initialValue: existingRecurringPayment == nil ? .oneTime : .recurring)
+        _kind = State(initialValue: existingRecurringPayment?.kind ?? .expense)
+        _isActive = State(initialValue: existingRecurringPayment?.isActive ?? true)
+        _section = State(initialValue: existingRecurringPayment?.section ?? .needs)
+        _categoryId = State(initialValue: existingRecurringPayment?.categoryId ?? budget.needsCategories.first?.id)
+        _paymentAccount = State(initialValue: existingRecurringPayment?.paymentAccount ?? "")
+        _note = State(initialValue: existingRecurringPayment?.note ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Entry Type") {
+                    if existingRecurringPayment == nil {
+                        Picker("Mode", selection: $mode) {
+                            ForEach(EntryMode.allCases) { item in
+                                Text(item.rawValue).tag(item)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    } else {
+                        Text("Recurring")
+                            .foregroundStyle(.secondary)
+                    }
+                    Picker("Kind", selection: $kind) {
+                        Text("Expense").tag(RecurringPaymentKind.expense)
+                        Text("Income").tag(RecurringPaymentKind.income)
+                    }
+                }
+
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    TextField("Amount", value: $amount, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+
+                    DatePicker(
+                        mode == .recurring || existingRecurringPayment != nil ? "Start date" : "Date",
+                        selection: $date,
+                        displayedComponents: (mode == .oneTime ? [.date] : [.date])
+                    )
+
+                    if kind == .expense {
+                        Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                        if isCreditCardPayment {
+                            if creditCardOptions.isEmpty {
+                                Text("Add a credit card in Credit Accounts first.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Picker("Credit Card", selection: $targetCreditAccountName) {
+                                    ForEach(creditCardOptions, id: \.self) { accountName in
+                                        Text(accountName).tag(accountName)
+                                    }
+                                }
+                            }
+                        }
+                        Picker("Section", selection: $section) {
+                            ForEach(BudgetSection.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        Toggle("Other category", isOn: $useCustomCategory)
+                        if useCustomCategory {
+                            TextField("Custom category", text: $customCategoryName)
+                        } else if categories.isEmpty {
+                            Text("Add a category in Plan first.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Category", selection: $categoryId) {
+                                ForEach(categories) { category in
+                                    Text(category.name).tag(Optional(category.id))
+                                }
+                            }
+                        }
+                    }
+
+                    if kind == .expense {
+                        Picker("Paid with", selection: $paymentAccount) {
+                            Text("None").tag("")
+                            ForEach(paymentAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
+                    }
+                    TextField("Note", text: $note, axis: .vertical)
+
+                    if mode == .recurring || existingRecurringPayment != nil {
+                        Toggle("Active", isOn: $isActive)
+                    }
+                }
+            }
+            .navigationTitle(existingRecurringPayment == nil ? "Add Calendar Entry" : "Edit Recurring")
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: section) { _, _ in
+                categoryId = categories.first?.id
+                useCustomCategory = false
+                customCategoryName = ""
+            }
+            .onAppear {
+                if targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
+            }
+            .onChange(of: isCreditCardPayment) { _, newValue in
+                if newValue && targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmedName.isEmpty, amount > 0 else { return }
+
+                        if mode == .recurring || existingRecurringPayment != nil {
+                            let day = Calendar.current.component(.day, from: date)
+                            let resolvedRecurringCategoryId: UUID?
+                            if kind == .expense {
+                                if isCreditCardPayment {
+                                    let normalized = targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !normalized.isEmpty else { return }
+                                    let paymentCategoryName = "Credit Card Payment"
+                                    if let existing = budget.needsCategories.first(where: { $0.name.caseInsensitiveCompare(paymentCategoryName) == .orderedSame }) {
+                                        resolvedRecurringCategoryId = existing.id
+                                    } else {
+                                        let newCategory = Category(name: paymentCategoryName, allocatedAmount: 0)
+                                        budget.needsCategories.append(newCategory)
+                                        resolvedRecurringCategoryId = newCategory.id
+                                    }
+                                    section = .needs
+                                } else if useCustomCategory {
+                                    let custom = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !custom.isEmpty else { return }
+                                    let newCategory = Category(name: custom, allocatedAmount: 0)
+                                    if section == .needs {
+                                        budget.needsCategories.append(newCategory)
+                                    } else {
+                                        budget.wantsCategories.append(newCategory)
+                                    }
+                                    resolvedRecurringCategoryId = newCategory.id
+                                } else {
+                                    resolvedRecurringCategoryId = categoryId
+                                }
+                            } else {
+                                resolvedRecurringCategoryId = nil
+                            }
+
+                            let markerNote: String
+                            if kind == .expense && isCreditCardPayment {
+                                let prefix = "[CC_PAYMENT:\(targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines))]"
+                                let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                                markerNote = trimmedNote.isEmpty ? prefix : "\(prefix)\n\(trimmedNote)"
+                            } else {
+                                markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+
+                            let payment = RecurringPayment(
+                                id: existingRecurringPayment?.id ?? UUID(),
+                                name: trimmedName,
+                                amount: amount,
+                                dayOfMonth: day,
+                                startDate: date,
+                                kind: kind,
+                                isActive: isActive
+                                ,
+                                paidOccurrenceKeys: existingRecurringPayment?.paidOccurrenceKeys ?? [],
+                                section: (kind == .expense && isCreditCardPayment) ? .needs : section,
+                                categoryId: resolvedRecurringCategoryId,
+                                paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                                note: markerNote
+                            )
+                            if let index = budget.recurringPayments.firstIndex(where: { $0.id == payment.id }) {
+                                budget.recurringPayments[index] = payment
+                            } else {
+                                budget.recurringPayments.append(payment)
+                            }
+                        } else if kind == .income {
+                            budget.incomes.append(
+                                IncomeEntry(name: trimmedName, amount: amount, date: date)
+                            )
+                        } else {
+                            let resolvedCategoryId: UUID?
+                            if isCreditCardPayment {
+                                let normalized = targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !normalized.isEmpty else { return }
+                                let paymentCategoryName = "Credit Card Payment"
+                                if let existing = budget.needsCategories.first(where: { $0.name.caseInsensitiveCompare(paymentCategoryName) == .orderedSame }) {
+                                    resolvedCategoryId = existing.id
+                                } else {
+                                    let newCategory = Category(name: paymentCategoryName, allocatedAmount: 0)
+                                    budget.needsCategories.append(newCategory)
+                                    resolvedCategoryId = newCategory.id
+                                }
+                            } else if useCustomCategory {
+                                let custom = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !custom.isEmpty else { return }
+                                let newCategory = Category(name: custom, allocatedAmount: 0)
+                                if section == .needs {
+                                    budget.needsCategories.append(newCategory)
+                                } else {
+                                    budget.wantsCategories.append(newCategory)
+                                }
+                                resolvedCategoryId = newCategory.id
+                            } else {
+                                resolvedCategoryId = categoryId
+                            }
+                            guard let resolvedCategoryId else { return }
+                            let markerNote: String
+                            if isCreditCardPayment {
+                                let prefix = "[CC_PAYMENT:\(targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines))]"
+                                let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                                markerNote = trimmedNote.isEmpty ? prefix : "\(prefix)\n\(trimmedNote)"
+                            } else {
+                                markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                            budget.expenses.append(
+                                Expense(
+                                    name: trimmedName,
+                                    amount: amount,
+                                    date: date,
+                                    section: isCreditCardPayment ? .needs : section,
+                                    categoryId: resolvedCategoryId
+                                    ,
+                                    paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    note: markerNote
+                                )
+                            )
+                        }
+
+                        Haptics.success()
+                        dismiss()
+                    }
+                    .disabled(
+                        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        amount <= 0 ||
+                        (kind == .expense && !isCreditCardPayment && !useCustomCategory && categoryId == nil) ||
+                        (kind == .expense && isCreditCardPayment && targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    )
+                }
+            }
+        }
+    }
+}
+
+struct CreditAccountsView: View {
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showingAddAccount = false
+
+    private func actualBalance(for account: CreditAccount) -> Double {
+        let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedAccountName.isEmpty else { return 0 }
+        return budget.expenses.reduce(0) { partial, expense in
+            if let paidCard = creditCardPaymentTarget(from: expense.note),
+               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+                return partial - expense.amount
+            }
+            let paymentAccount = expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard paymentAccount == normalizedAccountName else { return partial }
+            return partial + expense.amount
+        }
+    }
+
+    private func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Add") {
+                    Button {
+                        showingAddAccount = true
+                    } label: {
+                        Label("Add Credit Account", systemImage: "plus.circle")
+                    }
+                }
+
+                Section("Accounts") {
+                    if budget.creditAccounts.isEmpty {
+                        Text("No accounts added yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach($budget.creditAccounts) { $account in
+                            NavigationLink {
+                                EditCreditAccountView(account: $account)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(account.name)
+                                        .font(.headline)
+                                    Text("Closing: \(account.closingDay)  Due: \(account.dueDay)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Text("Actual: \(actualBalance(for: account), format: .currency(code: "USD"))")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .onDelete { offsets in
+                            budget.creditAccounts.remove(atOffsets: offsets)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Credit Accounts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showingAddAccount) {
+                AddCreditAccountView(budget: budget)
+            }
+        }
+    }
+}
+
+struct AddCreditAccountView: View {
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String = ""
+    @State private var closingDay: Int = 1
+    @State private var dueDay: Int = 1
+    @State private var creditLimit: Double = 0
+    @State private var note: String = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account Details") {
+                    LabeledContent("Account Name") {
+                        TextField("Account name", text: $name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Closing Day") {
+                        TextField("1-31", value: $closingDay, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Due Day") {
+                        TextField("1-31", value: $dueDay, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section("Balances") {
+                    LabeledContent("Total Credit Limit") {
+                        TextField("0.00", value: $creditLimit, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section("Notes") {
+                    TextField("Optional note", text: $note, axis: .vertical)
+                }
+            }
+            .navigationTitle("Add Credit Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        budget.creditAccounts.append(
+                            CreditAccount(
+                                name: trimmed,
+                                closingDay: min(max(closingDay, 1), 31),
+                                dueDay: min(max(dueDay, 1), 31),
+                                creditLimit: max(creditLimit, 0),
+                                isActive: true,
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
+                        Haptics.success()
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+struct EditCreditAccountView: View {
+    @Binding var account: CreditAccount
+
+    var body: some View {
+        Form {
+            Section("Account Details") {
+                LabeledContent("Account Name") {
+                    TextField("Account name", text: $account.name)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Closing Day") {
+                    TextField(
+                        "1-31",
+                        value: Binding(
+                            get: { account.closingDay },
+                            set: { account.closingDay = min(max($0, 1), 31) }
+                        ),
+                        format: .number
+                    )
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Due Day") {
+                    TextField(
+                        "1-31",
+                        value: Binding(
+                            get: { account.dueDay },
+                            set: { account.dueDay = min(max($0, 1), 31) }
+                        ),
+                        format: .number
+                    )
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                }
+                Toggle("Active", isOn: $account.isActive)
+            }
+
+            Section("Balances") {
+                LabeledContent("Total Credit Limit") {
+                    TextField(
+                        "0.00",
+                        value: Binding(
+                            get: { account.creditLimit },
+                            set: { account.creditLimit = max($0, 0) }
+                        ),
+                        format: .currency(code: "USD")
+                    )
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                }
+            }
+
+            Section("Notes") {
+                TextField("Optional note", text: $account.note, axis: .vertical)
+            }
+        }
+        .navigationTitle("Edit Account")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct CreditAccountDetailView: View {
+    let account: CreditAccount
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var actualBalance: Double {
+        let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedAccountName.isEmpty else { return 0 }
+        return budget.expenses.reduce(0) { partial, expense in
+            if let paidCard = creditCardPaymentTarget(from: expense.note),
+               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+                return partial - expense.amount
+            }
+            let paymentAccount = expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard paymentAccount == normalizedAccountName else { return partial }
+            return partial + expense.amount
+        }
+    }
+
+    private func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                HStack {
+                    Text("Account")
+                    Spacer()
+                    Text(account.name)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Closing day")
+                    Spacer()
+                    Text("\(account.closingDay)")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Due day")
+                    Spacer()
+                    Text("\(account.dueDay)")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Actual balance")
+                    Spacer()
+                    Text(actualBalance, format: .currency(code: "USD"))
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Total credit limit")
+                    Spacer()
+                    Text(account.creditLimit, format: .currency(code: "USD"))
+                        .foregroundStyle(.secondary)
+                }
+                if !account.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Note")
+                        Text(account.note)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Card Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+struct BankAccountsView: View {
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String = ""
+    @State private var balance: Double = 0
+    @State private var note: String = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Add Bank Account") {
+                    TextField("Account name", text: $name)
+                    TextField("Balance", value: $balance, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                    TextField("Note", text: $note)
+                    Button("Add Account") {
+                        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        budget.bankAccounts.append(
+                            BankAccount(
+                                name: trimmed,
+                                balance: balance,
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
+                        name = ""
+                        balance = 0
+                        note = ""
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Section("Accounts") {
+                    if budget.bankAccounts.isEmpty {
+                        Text("No bank accounts added yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach($budget.bankAccounts) { $account in
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Name", text: $account.name)
+                                TextField("Balance", value: $account.balance, format: .currency(code: "USD"))
+                                    .keyboardType(.decimalPad)
+                                TextField("Note", text: $account.note)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .onDelete { offsets in
+                            budget.bankAccounts.remove(atOffsets: offsets)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Bank Accounts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
         }

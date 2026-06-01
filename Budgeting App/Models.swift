@@ -68,14 +68,118 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var date: Date
     var section: BudgetSection
     var categoryId: UUID
+    var paymentAccount: String
+    var note: String
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), section: BudgetSection, categoryId: UUID) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        amount: Double,
+        date: Date = Date(),
+        section: BudgetSection,
+        categoryId: UUID,
+        paymentAccount: String = "",
+        note: String = ""
+    ) {
         self.id = id
         self.name = name
         self.amount = amount
         self.date = date
         self.section = section
         self.categoryId = categoryId
+        self.paymentAccount = paymentAccount
+        self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case amount
+        case date
+        case section
+        case categoryId
+        case paymentAccount
+        case note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        amount = try container.decode(Double.self, forKey: .amount)
+        date = try container.decode(Date.self, forKey: .date)
+        section = try container.decode(BudgetSection.self, forKey: .section)
+        categoryId = try container.decode(UUID.self, forKey: .categoryId)
+        paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+    }
+}
+
+struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var closingDay: Int
+    var dueDay: Int
+    var expectedAmount: Double
+    var creditLimit: Double
+    var isActive: Bool
+    var note: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        closingDay: Int = 1,
+        dueDay: Int,
+        expectedAmount: Double = 0,
+        creditLimit: Double = 0,
+        isActive: Bool = true,
+        note: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.closingDay = min(max(closingDay, 1), 31)
+        self.dueDay = min(max(dueDay, 1), 31)
+        self.expectedAmount = expectedAmount
+        self.creditLimit = max(creditLimit, 0)
+        self.isActive = isActive
+        self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case closingDay
+        case dueDay
+        case expectedAmount
+        case creditLimit
+        case isActive
+        case note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        closingDay = min(max(try container.decodeIfPresent(Int.self, forKey: .closingDay) ?? 1, 1), 31)
+        dueDay = min(max(try container.decodeIfPresent(Int.self, forKey: .dueDay) ?? 1, 1), 31)
+        expectedAmount = try container.decodeIfPresent(Double.self, forKey: .expectedAmount) ?? 0
+        creditLimit = max(try container.decodeIfPresent(Double.self, forKey: .creditLimit) ?? 0, 0)
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+    }
+}
+
+struct BankAccount: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var balance: Double
+    var note: String
+
+    init(id: UUID = UUID(), name: String, balance: Double = 0, note: String = "") {
+        self.id = id
+        self.name = name
+        self.balance = balance
+        self.note = note
     }
 }
 
@@ -106,6 +210,87 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         self.name = name
         self.amount = amount
         self.date = date
+    }
+}
+
+enum RecurringPaymentKind: String, CaseIterable, Identifiable, Codable, Sendable {
+    case expense
+    case income
+
+    var id: String { rawValue }
+}
+
+struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var amount: Double
+    var dayOfMonth: Int
+    var startDate: Date
+    var kind: RecurringPaymentKind
+    var isActive: Bool
+    var paidOccurrenceKeys: [String]
+    var section: BudgetSection
+    var categoryId: UUID?
+    var paymentAccount: String
+    var note: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        amount: Double,
+        dayOfMonth: Int,
+        startDate: Date = Date(),
+        kind: RecurringPaymentKind = .expense,
+        isActive: Bool = true,
+        paidOccurrenceKeys: [String] = [],
+        section: BudgetSection = .needs,
+        categoryId: UUID? = nil,
+        paymentAccount: String = "",
+        note: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.dayOfMonth = min(max(dayOfMonth, 1), 31)
+        self.startDate = startDate
+        self.kind = kind
+        self.isActive = isActive
+        self.paidOccurrenceKeys = paidOccurrenceKeys
+        self.section = section
+        self.categoryId = categoryId
+        self.paymentAccount = paymentAccount
+        self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case amount
+        case dayOfMonth
+        case startDate
+        case kind
+        case isActive
+        case paidOccurrenceKeys
+        case section
+        case categoryId
+        case paymentAccount
+        case note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        amount = try container.decode(Double.self, forKey: .amount)
+        dayOfMonth = min(max(try container.decode(Int.self, forKey: .dayOfMonth), 1), 31)
+        startDate = try container.decodeIfPresent(Date.self, forKey: .startDate) ?? Date()
+        kind = try container.decodeIfPresent(RecurringPaymentKind.self, forKey: .kind) ?? .expense
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        paidOccurrenceKeys = try container.decodeIfPresent([String].self, forKey: .paidOccurrenceKeys) ?? []
+        section = try container.decodeIfPresent(BudgetSection.self, forKey: .section) ?? .needs
+        categoryId = try container.decodeIfPresent(UUID.self, forKey: .categoryId)
+        paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
     }
 }
 
@@ -162,6 +347,337 @@ struct SavingsGoal: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+struct PortfolioSnapshot: Codable, Sendable, Equatable {
+    var portfolioValue: Double
+    var cashBalance: Double
+    var marginUsed: Double
+    var freeMarginLimit: Double
+    var marginInterestRate: Double
+
+    init(
+        portfolioValue: Double = 0,
+        cashBalance: Double = 0,
+        marginUsed: Double = 0,
+        freeMarginLimit: Double = 1000,
+        marginInterestRate: Double = 0.08
+    ) {
+        self.portfolioValue = portfolioValue
+        self.cashBalance = cashBalance
+        self.marginUsed = marginUsed
+        self.freeMarginLimit = freeMarginLimit
+        self.marginInterestRate = marginInterestRate
+    }
+}
+
+struct DividendPayment: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var ticker: String
+    var amount: Double
+    var payDate: Date
+
+    init(id: UUID = UUID(), ticker: String, amount: Double, payDate: Date = Date()) {
+        self.id = id
+        self.ticker = ticker
+        self.amount = amount
+        self.payDate = payDate
+    }
+}
+
+struct MarginBill: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var amount: Double
+    var dueDate: Date
+    var paidUsingMargin: Bool
+    var isRecurring: Bool
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        amount: Double,
+        dueDate: Date = Date(),
+        paidUsingMargin: Bool = true,
+        isRecurring: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.dueDate = dueDate
+        self.paidUsingMargin = paidUsingMargin
+        self.isRecurring = isRecurring
+    }
+}
+
+enum PortfolioTransactionType: String, CaseIterable, Identifiable, Codable, Sendable {
+    case contribution
+    case buy
+    case sell
+    case dividend
+    case billPaidByMargin
+    case marginInterest
+    case manualAdjustment
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .contribution: return "Contribution"
+        case .buy: return "Buy"
+        case .sell: return "Sell"
+        case .dividend: return "Dividend"
+        case .billPaidByMargin: return "Bill Paid by Margin"
+        case .marginInterest: return "Margin Interest"
+        case .manualAdjustment: return "Manual Adjustment"
+        }
+    }
+}
+
+enum InvestmentFundingSource: String, CaseIterable, Identifiable, Codable, Sendable {
+    case cash = "Cash"
+    case margin = "Margin"
+    case newContribution = "New Contribution"
+
+    var id: String { rawValue }
+}
+
+struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var date: Date
+    var type: PortfolioTransactionType
+    var ticker: String?
+    var shares: Double?
+    var pricePerShare: Double?
+    var amount: Double
+    var notes: String?
+
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        type: PortfolioTransactionType,
+        ticker: String? = nil,
+        shares: Double? = nil,
+        pricePerShare: Double? = nil,
+        amount: Double,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.date = date
+        self.type = type
+        self.ticker = ticker
+        self.shares = shares
+        self.pricePerShare = pricePerShare
+        self.amount = amount
+        self.notes = notes
+    }
+}
+
+struct MarginSettings: Codable, Sendable, Equatable {
+    var totalMarginAvailable: Double
+    var interestFreeMarginLimit: Double
+    var marginInterestRate: Double
+    var maintenanceRequirementPercent: Double
+    var personalMarginCap: Double
+    var warningThresholdPercent: Double
+    var dangerThresholdPercent: Double
+
+    init(
+        totalMarginAvailable: Double = 0,
+        interestFreeMarginLimit: Double = 1000,
+        marginInterestRate: Double = 0.08,
+        maintenanceRequirementPercent: Double = 0.30,
+        personalMarginCap: Double = 1000,
+        warningThresholdPercent: Double = 0.70,
+        dangerThresholdPercent: Double = 0.90
+    ) {
+        self.totalMarginAvailable = totalMarginAvailable
+        self.interestFreeMarginLimit = interestFreeMarginLimit
+        self.marginInterestRate = marginInterestRate
+        self.maintenanceRequirementPercent = maintenanceRequirementPercent
+        self.personalMarginCap = personalMarginCap
+        self.warningThresholdPercent = warningThresholdPercent
+        self.dangerThresholdPercent = dangerThresholdPercent
+    }
+}
+
+struct RecurringMarginBill: Codable, Sendable, Equatable {
+    var name: String
+    var expectedAmount: Double
+    var dueDay: Int
+    var isActive: Bool
+    var paidByMargin: Bool
+
+    init(
+        name: String = "Electricity",
+        expectedAmount: Double = 0,
+        dueDay: Int = 1,
+        isActive: Bool = true,
+        paidByMargin: Bool = true
+    ) {
+        self.name = name
+        self.expectedAmount = expectedAmount
+        self.dueDay = min(max(dueDay, 1), 31)
+        self.isActive = isActive
+        self.paidByMargin = paidByMargin
+    }
+}
+
+enum DividendFrequency: String, CaseIterable, Identifiable, Codable, Sendable {
+    case weekly = "Weekly"
+    case monthly = "Monthly"
+    case quarterly = "Quarterly"
+    case annual = "Annual"
+    case irregular = "Irregular"
+
+    var id: String { rawValue }
+
+    var paymentsPerYear: Double {
+        switch self {
+        case .weekly: return 52
+        case .monthly: return 12
+        case .quarterly: return 4
+        case .annual: return 1
+        case .irregular: return 0
+        }
+    }
+}
+
+enum PortfolioAssetType: String, CaseIterable, Identifiable, Codable, Sendable {
+    case growthStock = "Growth Stock"
+    case dividendStock = "Dividend Stock"
+    case dividendETF = "Dividend ETF"
+    case coveredCallETF = "Covered-Call ETF"
+    case speculative = "Speculative"
+    case cashLike = "Cash-Like"
+
+    var id: String { rawValue }
+}
+
+enum DividendReliability: String, CaseIterable, Identifiable, Codable, Sendable {
+    case low = "Low"
+    case medium = "Medium"
+    case high = "High"
+
+    var id: String { rawValue }
+}
+
+struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var ticker: String
+    var shares: Double
+    var averageCost: Double
+    var currentPrice: Double
+    var annualDividendPerShare: Double
+    var dividendFrequency: DividendFrequency
+    var assetType: PortfolioAssetType
+    var dividendReliability: DividendReliability
+    var notes: String
+    var nextExDividendDate: Date?
+    var nextPayDate: Date?
+
+    init(
+        id: UUID = UUID(),
+        ticker: String,
+        shares: Double,
+        averageCost: Double,
+        currentPrice: Double,
+        annualDividendPerShare: Double,
+        dividendFrequency: DividendFrequency,
+        assetType: PortfolioAssetType = .dividendStock,
+        dividendReliability: DividendReliability = .medium,
+        notes: String = "",
+        nextExDividendDate: Date? = nil,
+        nextPayDate: Date? = nil
+    ) {
+        self.id = id
+        self.ticker = ticker
+        self.shares = shares
+        self.averageCost = averageCost
+        self.currentPrice = currentPrice
+        self.annualDividendPerShare = annualDividendPerShare
+        self.dividendFrequency = dividendFrequency
+        self.assetType = assetType
+        self.dividendReliability = dividendReliability
+        self.notes = notes
+        self.nextExDividendDate = nextExDividendDate
+        self.nextPayDate = nextPayDate
+    }
+}
+
+enum MarketDataProvider: String, CaseIterable, Identifiable, Codable, Sendable {
+    case alphaVantage = "Alpha Vantage"
+    case finnhub = "Finnhub"
+
+    var id: String { rawValue }
+}
+
+struct MarketDataSettings: Codable, Sendable, Equatable {
+    var provider: MarketDataProvider
+    var apiKey: String
+
+    init(provider: MarketDataProvider = .alphaVantage, apiKey: String = "") {
+        self.provider = provider
+        self.apiKey = apiKey
+    }
+}
+
+struct CachedQuote: Codable, Sendable, Equatable {
+    var ticker: String
+    var price: Double
+    var updatedAt: Date
+}
+
+struct PortfolioValuePoint: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var date: Date
+    var grossValue: Double
+    var netValue: Double
+
+    init(id: UUID = UUID(), date: Date = Date(), grossValue: Double, netValue: Double) {
+        self.id = id
+        self.date = date
+        self.grossValue = grossValue
+        self.netValue = netValue
+    }
+}
+
+struct MarginScenarioResult: Identifiable, Sendable, Equatable {
+    let id = UUID()
+    let drawdown: Double
+    let stressPortfolioValue: Double
+    let stressEquity: Double
+}
+
+enum MarginCalculator {
+    static func netEquity(portfolioValue: Double, marginUsed: Double) -> Double {
+        portfolioValue - marginUsed
+    }
+
+    static func equityPercent(portfolioValue: Double, marginUsed: Double) -> Double {
+        guard portfolioValue > 0 else { return 0 }
+        return netEquity(portfolioValue: portfolioValue, marginUsed: marginUsed) / portfolioValue
+    }
+
+    static func paidMargin(marginUsed: Double, freeMarginLimit: Double) -> Double {
+        max(0, marginUsed - freeMarginLimit)
+    }
+
+    static func monthlyInterest(marginUsed: Double, freeMarginLimit: Double, marginInterestRate: Double) -> Double {
+        paidMargin(marginUsed: marginUsed, freeMarginLimit: freeMarginLimit) * marginInterestRate / 12.0
+    }
+
+    static func monthlySpread(monthlyDividends: Double, monthlyInterest: Double, monthlyBillsPaidByMargin: Double) -> Double {
+        monthlyDividends - monthlyInterest - monthlyBillsPaidByMargin
+    }
+
+    static func stressPortfolioValue(portfolioValue: Double, drawdown: Double) -> Double {
+        portfolioValue * (1 - drawdown)
+    }
+
+    static func stressEquity(portfolioValue: Double, marginUsed: Double, drawdown: Double) -> Double {
+        stressPortfolioValue(portfolioValue: portfolioValue, drawdown: drawdown) - marginUsed
+    }
+}
+
 private struct BudgetSnapshotStore: Codable, Sendable {
     let income: Double
     let incomeByMonth: [String: Double]?
@@ -174,6 +690,19 @@ private struct BudgetSnapshotStore: Codable, Sendable {
     let incomes: [IncomeEntry]?
     let expenses: [Expense]
     let savingsEntries: [SavingsEntry]?
+    let portfolioSnapshot: PortfolioSnapshot?
+    let marginBills: [MarginBill]?
+    let dividendPayments: [DividendPayment]?
+    let holdings: [PortfolioHolding]?
+    let marketDataSettings: MarketDataSettings?
+    let cachedQuotes: [String: CachedQuote]?
+    let portfolioValueHistory: [PortfolioValuePoint]?
+    let portfolioTransactions: [PortfolioTransaction]?
+    let marginSettings: MarginSettings?
+    let recurringElectricBill: RecurringMarginBill?
+    let recurringPayments: [RecurringPayment]?
+    let creditAccounts: [CreditAccount]?
+    let bankAccounts: [BankAccount]?
 
     enum CodingKeys: String, CodingKey {
         case income
@@ -187,6 +716,19 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         case incomes
         case expenses
         case savingsEntries
+        case portfolioSnapshot
+        case marginBills
+        case dividendPayments
+        case holdings
+        case marketDataSettings
+        case cachedQuotes
+        case portfolioValueHistory
+        case portfolioTransactions
+        case marginSettings
+        case recurringElectricBill
+        case recurringPayments
+        case creditAccounts
+        case bankAccounts
     }
 
     init(
@@ -200,7 +742,20 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         savingsGoals: [SavingsGoal],
         incomes: [IncomeEntry],
         expenses: [Expense],
-        savingsEntries: [SavingsEntry]
+        savingsEntries: [SavingsEntry],
+        portfolioSnapshot: PortfolioSnapshot,
+        marginBills: [MarginBill],
+        dividendPayments: [DividendPayment],
+        holdings: [PortfolioHolding],
+        marketDataSettings: MarketDataSettings,
+        cachedQuotes: [String: CachedQuote],
+        portfolioValueHistory: [PortfolioValuePoint],
+        portfolioTransactions: [PortfolioTransaction],
+        marginSettings: MarginSettings,
+        recurringElectricBill: RecurringMarginBill,
+        recurringPayments: [RecurringPayment],
+        creditAccounts: [CreditAccount],
+        bankAccounts: [BankAccount]
     ) {
         self.income = income
         self.incomeByMonth = incomeByMonth
@@ -213,6 +768,19 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         self.incomes = incomes
         self.expenses = expenses
         self.savingsEntries = savingsEntries
+        self.portfolioSnapshot = portfolioSnapshot
+        self.marginBills = marginBills
+        self.dividendPayments = dividendPayments
+        self.holdings = holdings
+        self.marketDataSettings = marketDataSettings
+        self.cachedQuotes = cachedQuotes
+        self.portfolioValueHistory = portfolioValueHistory
+        self.portfolioTransactions = portfolioTransactions
+        self.marginSettings = marginSettings
+        self.recurringElectricBill = recurringElectricBill
+        self.recurringPayments = recurringPayments
+        self.creditAccounts = creditAccounts
+        self.bankAccounts = bankAccounts
     }
 
     init(from decoder: Decoder) throws {
@@ -228,6 +796,19 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         incomes = try container.decodeIfPresent([IncomeEntry].self, forKey: .incomes)
         expenses = try container.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
         savingsEntries = try container.decodeIfPresent([SavingsEntry].self, forKey: .savingsEntries)
+        portfolioSnapshot = try container.decodeIfPresent(PortfolioSnapshot.self, forKey: .portfolioSnapshot)
+        marginBills = try container.decodeIfPresent([MarginBill].self, forKey: .marginBills)
+        dividendPayments = try container.decodeIfPresent([DividendPayment].self, forKey: .dividendPayments)
+        holdings = try container.decodeIfPresent([PortfolioHolding].self, forKey: .holdings)
+        marketDataSettings = try container.decodeIfPresent(MarketDataSettings.self, forKey: .marketDataSettings)
+        cachedQuotes = try container.decodeIfPresent([String: CachedQuote].self, forKey: .cachedQuotes)
+        portfolioValueHistory = try container.decodeIfPresent([PortfolioValuePoint].self, forKey: .portfolioValueHistory)
+        portfolioTransactions = try container.decodeIfPresent([PortfolioTransaction].self, forKey: .portfolioTransactions)
+        marginSettings = try container.decodeIfPresent(MarginSettings.self, forKey: .marginSettings)
+        recurringElectricBill = try container.decodeIfPresent(RecurringMarginBill.self, forKey: .recurringElectricBill)
+        recurringPayments = try container.decodeIfPresent([RecurringPayment].self, forKey: .recurringPayments)
+        creditAccounts = try container.decodeIfPresent([CreditAccount].self, forKey: .creditAccounts)
+        bankAccounts = try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts)
     }
 }
 
@@ -247,6 +828,20 @@ class BudgetModel: ObservableObject {
         }
     }
     @Published var savingsEntries: [SavingsEntry] = []
+    @Published var portfolioSnapshot: PortfolioSnapshot = PortfolioSnapshot()
+    @Published var marginBills: [MarginBill] = []
+    @Published var dividendPayments: [DividendPayment] = []
+    @Published var holdings: [PortfolioHolding] = []
+    @Published var marketDataSettings: MarketDataSettings = MarketDataSettings()
+    @Published var cachedQuotes: [String: CachedQuote] = [:]
+    @Published var marketDataWarning: String?
+    @Published var portfolioValueHistory: [PortfolioValuePoint] = []
+    @Published var portfolioTransactions: [PortfolioTransaction] = []
+    @Published var marginSettings: MarginSettings = MarginSettings()
+    @Published var recurringElectricBill: RecurringMarginBill = RecurringMarginBill()
+    @Published var recurringPayments: [RecurringPayment] = []
+    @Published var creditAccounts: [CreditAccount] = []
+    @Published var bankAccounts: [BankAccount] = []
 
     private let saveURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("budget.json")
@@ -338,7 +933,20 @@ class BudgetModel: ObservableObject {
             savingsGoals: savingsGoals,
             incomes: incomes,
             expenses: expenses,
-            savingsEntries: savingsEntries
+            savingsEntries: savingsEntries,
+            portfolioSnapshot: portfolioSnapshot,
+            marginBills: marginBills,
+            dividendPayments: dividendPayments,
+            holdings: holdings,
+            marketDataSettings: marketDataSettings,
+            cachedQuotes: cachedQuotes,
+            portfolioValueHistory: portfolioValueHistory,
+            portfolioTransactions: portfolioTransactions,
+            marginSettings: marginSettings,
+            recurringElectricBill: recurringElectricBill,
+            recurringPayments: recurringPayments,
+            creditAccounts: creditAccounts,
+            bankAccounts: bankAccounts
         )
 
         let saveURL = saveURL
@@ -387,6 +995,19 @@ class BudgetModel: ObservableObject {
         incomes = snapshot.incomes ?? []
         expenses = snapshot.expenses
         savingsEntries = snapshot.savingsEntries ?? []
+        portfolioSnapshot = snapshot.portfolioSnapshot ?? PortfolioSnapshot()
+        marginBills = snapshot.marginBills ?? []
+        dividendPayments = snapshot.dividendPayments ?? []
+        holdings = snapshot.holdings ?? []
+        marketDataSettings = snapshot.marketDataSettings ?? MarketDataSettings()
+        cachedQuotes = snapshot.cachedQuotes ?? [:]
+        portfolioValueHistory = snapshot.portfolioValueHistory ?? []
+        portfolioTransactions = snapshot.portfolioTransactions ?? []
+        marginSettings = snapshot.marginSettings ?? MarginSettings()
+        recurringElectricBill = snapshot.recurringElectricBill ?? RecurringMarginBill()
+        recurringPayments = snapshot.recurringPayments ?? []
+        creditAccounts = snapshot.creditAccounts ?? []
+        bankAccounts = snapshot.bankAccounts ?? []
 
         if expenses.isEmpty {
             let importedNeeds = needsCategories.compactMap { category -> Expense? in
@@ -403,6 +1024,149 @@ class BudgetModel: ObservableObject {
         }
 
         recalculateSpent()
+        synchronizeLegacyMarginStateFromLedger()
+    }
+
+    var marginUsedFromLedger: Double {
+        portfolioTransactions.reduce(0) { partial, tx in
+            switch tx.type {
+            case .billPaidByMargin:
+                return partial + tx.amount
+            case .marginInterest:
+                return partial + tx.amount
+            case .sell:
+                return partial - tx.amount
+            case .manualAdjustment:
+                return partial + tx.amount
+            case .buy, .contribution, .dividend:
+                return partial
+            }
+        }
+    }
+
+    var holdingsFromTransactions: [PortfolioHolding] {
+        var buckets: [String: (shares: Double, cost: Double)] = [:]
+        let ordered = portfolioTransactions.sorted { $0.date < $1.date }
+        for tx in ordered {
+            let ticker = tx.ticker?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+            switch tx.type {
+            case .buy:
+                guard !ticker.isEmpty else { continue }
+                let shares = tx.shares ?? 0
+                let totalCost = tx.amount
+                var item = buckets[ticker, default: (0, 0)]
+                item.shares += shares
+                item.cost += totalCost
+                buckets[ticker] = item
+            case .sell:
+                guard !ticker.isEmpty else { continue }
+                let sharesToSell = max(tx.shares ?? 0, 0)
+                guard sharesToSell > 0, var item = buckets[ticker], item.shares > 0 else { continue }
+                let average = item.shares > 0 ? item.cost / item.shares : 0
+                let sold = min(sharesToSell, item.shares)
+                item.shares -= sold
+                item.cost = max(item.cost - average * sold, 0)
+                buckets[ticker] = item
+            default:
+                continue
+            }
+        }
+
+        return buckets.compactMap { ticker, bucket in
+            guard bucket.shares > 0 else { return nil }
+            let quote = cachedQuotes[ticker]?.price ?? 0
+            return PortfolioHolding(
+                ticker: ticker,
+                shares: bucket.shares,
+                averageCost: bucket.shares > 0 ? bucket.cost / bucket.shares : 0,
+                currentPrice: quote,
+                annualDividendPerShare: holdings.first(where: { $0.ticker.uppercased() == ticker })?.annualDividendPerShare ?? 0,
+                dividendFrequency: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendFrequency ?? .quarterly,
+                assetType: holdings.first(where: { $0.ticker.uppercased() == ticker })?.assetType ?? .dividendStock,
+                dividendReliability: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendReliability ?? .medium,
+                notes: holdings.first(where: { $0.ticker.uppercased() == ticker })?.notes ?? "",
+                nextExDividendDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextExDividendDate,
+                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate
+            )
+        }.sorted { $0.ticker < $1.ticker }
+    }
+
+    func addPortfolioTransaction(_ transaction: PortfolioTransaction) {
+        portfolioTransactions.append(transaction)
+        synchronizeLegacyMarginStateFromLedger()
+    }
+
+    func addInvestment(
+        ticker: String,
+        dollarsInvested: Double,
+        sharesBought: Double,
+        pricePerShare: Double,
+        date: Date,
+        fundingSource: InvestmentFundingSource
+    ) {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanTicker.isEmpty else { return }
+
+        if fundingSource == .newContribution {
+            addPortfolioTransaction(
+                PortfolioTransaction(
+                    date: date,
+                    type: .contribution,
+                    amount: dollarsInvested,
+                    notes: "Auto contribution for \(cleanTicker) buy"
+                )
+            )
+            portfolioSnapshot.cashBalance += dollarsInvested
+        }
+
+        addPortfolioTransaction(
+            PortfolioTransaction(
+                date: date,
+                type: .buy,
+                ticker: cleanTicker,
+                shares: sharesBought,
+                pricePerShare: pricePerShare,
+                amount: dollarsInvested,
+                notes: "Funding: \(fundingSource.rawValue)"
+            )
+        )
+
+        switch fundingSource {
+        case .cash, .newContribution:
+            portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance - dollarsInvested, 0)
+        case .margin:
+            addPortfolioTransaction(
+                PortfolioTransaction(
+                    date: date,
+                    type: .manualAdjustment,
+                    amount: dollarsInvested,
+                    notes: "Margin draw for \(cleanTicker) buy"
+                )
+            )
+        }
+        synchronizeLegacyMarginStateFromLedger()
+    }
+
+    func markElectricBillPaidByMargin(actualAmount: Double, date: Date) {
+        addPortfolioTransaction(
+            PortfolioTransaction(
+                date: date,
+                type: .billPaidByMargin,
+                amount: actualAmount,
+                notes: recurringElectricBill.name
+            )
+        )
+    }
+
+    func synchronizeLegacyMarginStateFromLedger() {
+        let derivedHoldings = holdingsFromTransactions
+        if !derivedHoldings.isEmpty || !portfolioTransactions.isEmpty {
+            holdings = derivedHoldings
+            portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
+        }
+
+        portfolioSnapshot.freeMarginLimit = marginSettings.interestFreeMarginLimit
+        portfolioSnapshot.marginInterestRate = marginSettings.marginInterestRate
     }
 
     func categoryName(for expense: Expense) -> String {
@@ -425,6 +1189,10 @@ class BudgetModel: ObservableObject {
     func applyMonthlyAllocations(for date: Date) {
         let key = Self.monthKey(for: date)
         let previousKey = Self.monthKey(for: Calendar.current.date(byAdding: .month, value: -1, to: date) ?? date)
+
+        if incomeByMonth[key] == nil {
+            incomeByMonth[key] = incomeByMonth[previousKey] ?? income
+        }
 
         var needsMonth = needsAllocationsByMonth[key] ?? [:]
         for index in needsCategories.indices {
