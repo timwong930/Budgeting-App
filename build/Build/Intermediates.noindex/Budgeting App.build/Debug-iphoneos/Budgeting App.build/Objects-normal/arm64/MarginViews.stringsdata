@@ -1,0 +1,1496 @@
+{
+  "source": "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/MarginViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "For tracking only. Not financial advice. Dividends are not guaranteed. Positive dividend spread does not imply positive total return.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 348
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin & Dividend Tracker",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 408
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio Snapshot",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 420
+        }
+      },
+      {
+        "comment": "",
+        "key": "View Details",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 423
+        }
+      },
+      {
+        "comment": "",
+        "key": "No holdings yet. Use + to add investment or manual holding.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 479
+        }
+      },
+      {
+        "comment": "",
+        "key": "Holdings View",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 465
+        }
+      },
+      {
+        "comment": "",
+        "key": "Holdings",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 441
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh Price",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 444
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refreshing %@...",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 452
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/%lld",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 454
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 484
+        }
+      },
+      {
+        "comment": "",
+        "key": "Value",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 486
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 488
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ shares",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 517
+        }
+      },
+      {
+        "comment": "",
+        "key": "Alloc %@",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 526
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 532
+        }
+      },
+      {
+        "comment": "",
+        "key": "Yield %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 534
+        }
+      },
+      {
+        "comment": "",
+        "key": "Unrealized %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 536
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add more portfolio activity over time to see your trend.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 582
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth Over Time",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 562
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated: --",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 573
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 569
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 588
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 589
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 595
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 596
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 602
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gross Portfolio",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 603
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 609
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 612
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 613
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 679
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gross %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 682
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 701
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gross Portfolio",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 703
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend Forecast",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 749
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bill Tracking",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 763
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 766
+        }
+      },
+      {
+        "comment": "",
+        "key": "Safety Dashboard",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 780
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stress Tests",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 816
+        }
+      },
+      {
+        "comment": "",
+        "key": "Status",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 784
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Used vs Free Limit",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 794
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ / %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 796
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Used vs Personal Cap",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 800
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ / %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 802
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Utilization",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 806
+        }
+      },
+      {
+        "comment": "",
+        "key": "-%lld%%",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 821
+        }
+      },
+      {
+        "comment": "",
+        "key": "• %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 833
+        }
+      },
+      {
+        "comment": "",
+        "key": "0%",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 848
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 893
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 909
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ - %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 913
+        }
+      },
+      {
+        "comment": "",
+        "key": "Point",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 925
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 926
+        }
+      },
+      {
+        "comment": "",
+        "key": "N/A",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 951
+        }
+      },
+      {
+        "comment": "",
+        "key": "Experiment Status",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1100
+        }
+      },
+      {
+        "comment": "",
+        "key": "• %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1112
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Summary",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1123
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Dividends vs Margin Interest",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1141
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add dividend and margin-interest transactions to track monthly history.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1146
+        }
+      },
+      {
+        "comment": "",
+        "key": "Month",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 1152
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividends",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 1153
+        }
+      },
+      {
+        "comment": "",
+        "key": "Type",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1155
+        }
+      },
+      {
+        "comment": "",
+        "key": "Month",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 1159
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Interest",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 1160
+        }
+      },
+      {
+        "comment": "",
+        "key": "Type",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1162
+        }
+      },
+      {
+        "comment": "",
+        "key": "Div %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1183
+        }
+      },
+      {
+        "comment": "",
+        "key": "Int %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1185
+        }
+      },
+      {
+        "comment": "",
+        "key": "Holding",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 1408
+        }
+      },
+      {
+        "comment": "",
+        "key": "Related Ledger Activity",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 1381
+        }
+      },
+      {
+        "comment": "",
+        "key": "No transactions for this ticker yet.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1383
+        }
+      },
+      {
+        "comment": "",
+        "key": "This holding is no longer available.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1409
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1420
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1424
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Value",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1444
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend Yields",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1491
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Holding",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1613
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1568
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend & Classification",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1587
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1609
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1569
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1571
+        }
+      },
+      {
+        "comment": "",
+        "key": "Average cost",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1576
+        }
+      },
+      {
+        "comment": "",
+        "key": "Current price",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1581
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1572
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1577
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1582
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annual dividend/share",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1588
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend frequency",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1593
+        }
+      },
+      {
+        "comment": "",
+        "key": "Asset type",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1598
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend reliability",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1603
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1589
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1610
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1622
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1625
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Manual Holding",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1753
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1707
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend & Classification",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1726
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes & Date",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1748
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1708
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1710
+        }
+      },
+      {
+        "comment": "",
+        "key": "Average cost",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1715
+        }
+      },
+      {
+        "comment": "",
+        "key": "Current price",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1720
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1711
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1716
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1721
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annual dividend/share",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1727
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend frequency",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1732
+        }
+      },
+      {
+        "comment": "",
+        "key": "Asset type",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1737
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend reliability",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1742
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1728
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1749
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1750
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1762
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1765
+        }
+      },
+      {
+        "comment": "",
+        "key": "Snapshot Details",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1880
+        }
+      },
+      {
+        "comment": "",
+        "key": "Core Snapshot",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1855
+        }
+      },
+      {
+        "comment": "",
+        "key": "Limits & Costs",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1864
+        }
+      },
+      {
+        "comment": "",
+        "key": "Month to Date",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1871
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1883
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Transaction",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1944
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1919
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1940
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 1920
+        }
+      },
+      {
+        "comment": "",
+        "key": "Type",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1921
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1926
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares (optional)",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1928
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price/share (optional)",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1933
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1929
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1934
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1941
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1947
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1950
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Investment",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2009
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 1985
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes & Date",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2000
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 1986
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares bought",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1989
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price per share",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 1994
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1990
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1995
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2001
+        }
+      },
+      {
+        "comment": "",
+        "key": "Funding Source",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2002
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2012
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2015
+        }
+      },
+      {
+        "comment": "",
+        "key": "Electric Bill",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2067
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bill Settings",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2043
+        }
+      },
+      {
+        "comment": "",
+        "key": "Payment Log",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2054
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bill name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2044
+        }
+      },
+      {
+        "comment": "",
+        "key": "Active",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2051
+        }
+      },
+      {
+        "comment": "",
+        "key": "Paid by margin",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2052
+        }
+      },
+      {
+        "comment": "",
+        "key": "Due day: %lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2048
+        }
+      },
+      {
+        "comment": "",
+        "key": "Due date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2056
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mark Paid Using Margin",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2058
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2070
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Settings",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Limits",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2084
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rates & Requirements",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2090
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin rate",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2091
+        }
+      },
+      {
+        "comment": "",
+        "key": "Maintenance requirement %",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2093
+        }
+      },
+      {
+        "comment": "",
+        "key": "Warning threshold %",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2095
+        }
+      },
+      {
+        "comment": "",
+        "key": "Danger threshold %",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2097
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2104
+        }
+      },
+      {
+        "comment": "",
+        "key": "Activity Ledger",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2182
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio Value by Date",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 2132
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 2139
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Equity",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 2144
+        }
+      },
+      {
+        "comment": "",
+        "key": "Contrib %@  Div %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bills %@  Interest %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2213
+        }
+      },
+      {
+        "comment": "",
+        "key": "Buys %@  Sells %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2214
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Margin Change %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2215
+        }
+      },
+      {
+        "comment": "",
+        "key": "True Monthly Spread %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2216
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Transaction",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2274
+        }
+      },
+      {
+        "comment": "",
+        "key": "Transaction Info",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2248
+        }
+      },
+      {
+        "comment": "",
+        "key": "Position Inputs",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2256
+        }
+      },
+      {
+        "comment": "",
+        "key": "Danger Zone",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2266
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2249
+        }
+      },
+      {
+        "comment": "",
+        "key": "Type",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2250
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2259
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price/share (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2261
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes (optional)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2264
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Transaction",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2267
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2293
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2296
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 2331
+        }
+      }
+    ]
+  },
+  "version": 1
+}

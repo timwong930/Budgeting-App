@@ -10,6 +10,7 @@ import UIKit
 import Charts
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var budget = BudgetModel()
     @State private var showingAddNeedsCategory = false
     @State private var showingAddWantsCategory = false
@@ -44,10 +45,11 @@ struct ContentView: View {
     @State private var selectedIncomePoint: DailySpend?
     @State private var selectedLogTrend: LogTrend = .spending
     @State private var selectedTrendRange: TrendRange = .monthToDate
-    @State private var budgetPageFocus: BudgetPageFocus = .plan
+    @State private var budgetPageFocus: BudgetPageFocus = .log
     @State private var selectedCalendarDay: CalendarDaySelection?
+    @State private var visibleCalendarWeekStart: Date?
+    @State private var selectedPortfolioTransaction: PortfolioTransaction?
     @State private var editingRecurringPayment: RecurringPayment?
-    @State private var calendarPageIndex: Int = 12
     @State private var showingCreditAccounts = false
     @State private var showingBankAccounts = false
     @State private var selectedCreditAccount: CreditAccount?
@@ -74,18 +76,46 @@ struct ContentView: View {
     @State private var scrollToIncome = false
     @State private var highlightMonthlyIncome = false
     @State private var selectedPlanHighlight: PlanHighlightSection?
-    @State private var spyComparison: SpyComparisonResult?
-    @State private var isLoadingSpyComparison = false
-    @State private var spyComparisonError: String?
+    @State private var homeMarketCards: [HomeMarketCard] = []
+    @State private var isLoadingHomeMarkets = false
+    @State private var homeMarketError: String?
+    @State private var homeWatchlistRows: [HomeWatchlistRow] = []
+    @State private var isLoadingHomeWatchlist = false
+    @State private var homeWatchlistError: String?
     @State private var selectedHomeNetWorthRange: HomeNetWorthRange = .threeMonths
     @State private var selectedHomeNetWorthPoint: PortfolioValuePoint?
+    @State private var holdingsAutoRefreshTask: Task<Void, Never>?
+    @State private var isRefreshingHoldingsQuotes = false
     @FocusState private var focusedField: FocusedField?
     private let marketDataService = MarketDataService()
 
-    private struct SpyComparisonResult {
-        let periodLabel: String
-        let portfolioReturn: Double
-        let spyReturn: Double
+    private struct HomeMarketCard: Identifiable {
+        let id = UUID()
+        let title: String
+        let subtitle: String
+        let price: Double
+        let change: Double
+        let percentChange: Double
+        let sparkline: [Double]
+        let isUnavailable: Bool
+    }
+
+    private struct HomeWatchlistRow: Identifiable {
+        let id = UUID()
+        let symbol: String
+        let companyName: String?
+        let exchange: String?
+        let price: Double
+        let change: Double
+        let percentChange: Double
+        let open: Double?
+        let dayHigh: Double?
+        let dayLow: Double?
+        let previousClose: Double?
+        let sma20: Double?
+        let sma50: Double?
+        let rsi14: Double?
+        let closes14: [Double]
     }
 
     private enum FocusedField: Hashable {
@@ -100,8 +130,8 @@ struct ContentView: View {
     }
 
     private enum TrendRange: String, CaseIterable, Identifiable {
-        case monthToDate = "Month to date"
         case last7Days = "Last 7 days"
+        case monthToDate = "Month to date"
         case last30Days = "Last 30 days"
 
         var id: String { rawValue }
@@ -116,6 +146,10 @@ struct ContentView: View {
                 return "30D"
             }
         }
+    }
+
+    private var appAccent: Color {
+        .accentColor
     }
 
     private enum BudgetPageFocus: String, CaseIterable, Identifiable {
@@ -177,9 +211,34 @@ struct ContentView: View {
         let date: Date
     }
 
+    private struct CalendarWeek: Identifiable, Hashable {
+        let startDate: Date
+        let days: [Date]
+
+        var id: Date { startDate }
+    }
+
     private struct CalendarDaySelection: Identifiable {
         let id = UUID()
         let date: Date
+    }
+
+    private struct LogTransactionItem: Identifiable {
+        let id: UUID
+        let title: String
+        let subtitle: String
+        let amount: Double
+        let date: Date
+        let isInflow: Bool
+        let iconName: String
+        let tint: Color
+        let kind: Kind
+
+        enum Kind {
+            case expense(Expense)
+            case income(IncomeEntry)
+            case savings(SavingsEntry)
+        }
     }
     
     var body: some View {
@@ -199,6 +258,7 @@ struct ContentView: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10)
                     .onChanged { value in
+                        guard selectedTab != .home else { return }
                         let verticalSwipe = abs(value.translation.height) > abs(value.translation.width)
                         guard verticalSwipe else { return }
                         if value.translation.height < -8 {
@@ -241,7 +301,7 @@ struct ContentView: View {
                         Haptics.light()
                         switch action {
                         case .addCalendarEntry:
-                            selectedCalendarDay = CalendarDaySelection(date: selectedMonth)
+                            selectedCalendarDay = CalendarDaySelection(date: visibleCalendarMonth)
                         case .creditCards:
                             showingCreditAccounts = true
                         }
@@ -272,11 +332,24 @@ struct ContentView: View {
                 budget.income = budget.income(for: selectedMonth)
                 budget.applyMonthlyAllocations(for: selectedMonth)
                 updateMonthlyData()
+                if scenePhase == .active {
+                    startHoldingsAutoRefreshLoop()
+                }
+            }
+            .onDisappear {
+                stopHoldingsAutoRefreshLoop()
             }
             .onChange(of: selectedMonth) { _, newValue in
                 budget.income = budget.income(for: newValue)
                 budget.applyMonthlyAllocations(for: newValue)
                 updateMonthlyData()
+            }
+            .onChange(of: scenePhase) { _, newValue in
+                if newValue == .active {
+                    startHoldingsAutoRefreshLoop()
+                } else {
+                    stopHoldingsAutoRefreshLoop()
+                }
             }
             .onChange(of: budget.income) { _, newValue in
                 budget.setIncome(newValue, for: selectedMonth)
@@ -290,25 +363,45 @@ struct ContentView: View {
             .onChange(of: budget.savingsEntries) { _, _ in
                 updateMonthlyData()
             }
+            .onChange(of: selectedTab) { _, newValue in
+                guard newValue == .home else { return }
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0.1)) {
+                    isTabBarMinimized = false
+                }
+            }
+            .onChange(of: budget.watchlistTickers) { _, _ in
+                guard selectedTab == .home else { return }
+                Task { await refreshHomeWatchlist() }
+            }
             .task(id: selectedTab) {
                 guard selectedTab == .home else { return }
-                await refreshSpyComparison()
+                await refreshHomeDashboard()
             }
         }
         .sheet(isPresented: $showingAddNeedsCategory) {
             AddCategoryView(budget: budget, categoryType: .needs, selectedMonth: selectedMonth)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddWantsCategory) {
             AddCategoryView(budget: budget, categoryType: .wants, selectedMonth: selectedMonth)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingCategory) { category in
             EditCategoryView(budget: budget, category: category, selectedMonth: selectedMonth)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddSavingsGoal) {
             AddSavingsGoalView(budget: budget)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingSavingsGoal) { goal in
             EditSavingsGoalView(budget: budget, savingsGoal: goal)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $expenseDraft) { draft in
             AddExpenseView(
@@ -319,6 +412,8 @@ struct ContentView: View {
                 lastExpenseCategoryId = expense.categoryId
                 lastExpenseSection = expense.section
             }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $savingsEntryDraft) { draft in
             AddSavingsEntryView(
@@ -326,9 +421,13 @@ struct ContentView: View {
                 selectedMonth: selectedMonth,
                 preselectedGoalId: draft.goalId
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddIncome) {
             AddIncomeView(budget: budget, selectedMonth: selectedMonth)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingIncomeHistory) {
             IncomeHistoryView(
@@ -337,11 +436,13 @@ struct ContentView: View {
                 onEdit: { editingIncome = $0 },
                 onDelete: { income in
                     withAnimation(.easeInOut) {
-                        budget.incomes.removeAll { $0.id == income.id }
+                        budget.deleteIncomeEntry(id: income.id)
                     }
                     Haptics.warning()
                 }
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingExpenseHistory) {
             ExpenseHistoryView(
@@ -350,11 +451,13 @@ struct ContentView: View {
                 onEdit: { editingExpense = $0 },
                 onDelete: { expense in
                     withAnimation(.easeInOut) {
-                        budget.expenses.removeAll { $0.id == expense.id }
+                        budget.deleteExpense(id: expense.id)
                     }
                     Haptics.warning()
                 }
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingSavingsHistory) {
             SavingsHistoryView(
@@ -368,6 +471,8 @@ struct ContentView: View {
                     Haptics.warning()
                 }
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $categoryHistorySelection) { selection in
             ExpenseHistoryView(
@@ -376,12 +481,14 @@ struct ContentView: View {
                 onEdit: { editingExpense = $0 },
                 onDelete: { expense in
                     withAnimation(.easeInOut) {
-                        budget.expenses.removeAll { $0.id == expense.id }
+                        budget.deleteExpense(id: expense.id)
                     }
                     Haptics.warning()
                 },
                 title: "\(selection.name) History"
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $savingsHistorySelection) { selection in
             SavingsHistoryView(
@@ -396,21 +503,31 @@ struct ContentView: View {
                 },
                 title: "\(selection.name) History"
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingIncome) { income in
             EditIncomeView(budget: budget, income: income)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingExpense) { expense in
             EditExpenseView(budget: budget, expense: expense)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingSavingsEntry) { entry in
             EditSavingsEntryView(budget: budget, savingsEntry: entry)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedCalendarDay) { selection in
             CalendarEntryEditorView(
                 budget: budget,
                 selectedDate: selection.date
             )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingRecurringPayment) { payment in
             CalendarEntryEditorView(
@@ -422,18 +539,33 @@ struct ContentView: View {
                 )) ?? selectedMonth,
                 existingRecurringPayment: payment
             )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingCreditAccounts) {
             CreditAccountsView(budget: budget)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedCreditAccount) { account in
             CreditAccountDetailView(account: account, budget: budget)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedPortfolioTransaction) { transaction in
+            PortfolioTransactionDetailView(transaction: transaction)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingBankAccounts) {
             BankAccountsView(budget: budget)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAppSettings) {
             AppSettingsView(budget: budget)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -495,14 +627,17 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Settings")
                 }
-                overviewSection
                 homeRollupSection
+                homeWatchlistSection
+                homeCashFlowSection
                 homeNetWorthChartSection
-                homePortfolioVsSpySection
             }
             .padding(.horizontal)
             .padding(.top, 28)
             .padding(.bottom, contentBottomPadding)
+        }
+        .refreshable {
+            await refreshHomeDashboard()
         }
     }
 
@@ -535,7 +670,11 @@ struct ContentView: View {
                     title: "Budget Hub",
                     subtitle: "Plan targets and log activity.",
                     systemImage: "square.grid.2x2"
-                )
+                ) {
+                    if budgetPageFocus == .log {
+                        logMonthHeaderSelector
+                    }
+                }
                 Picker("Budget Focus", selection: $budgetPageFocus) {
                     ForEach(BudgetPageFocus.allCases) { focus in
                         Text(focus.rawValue).tag(focus)
@@ -544,30 +683,25 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
 
                 if budgetPageFocus == .log {
-                    logMonthSwitcher
                     logTrendsSection
                     accountBalancesSection
+                    logTransactionsSection
                 } else {
                     planHighlightsSection
+                    if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
+                        firstTimeTipsSection
+                    }
+                    overviewSection
+                    incomeSection
+                    if budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
+                        nextStepSection
+                    }
+                    budgetBreakdownSection
+                    needsSection
+                    wantsSection
+                    savingsSection
+                    summarySection
                 }
-
-                if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
-                    firstTimeTipsSection
-                }
-
-                overviewSection
-                incomeSection
-                if budgetPageFocus == .plan && budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
-                    nextStepSection
-                }
-                budgetBreakdownSection
-                needsSection
-                wantsSection
-                savingsSection
-                if budgetPageFocus == .log {
-                    categorySummarySection
-                }
-                summarySection
             }
             .padding(.horizontal, 16)
             .padding(.top, 28)
@@ -576,18 +710,107 @@ struct ContentView: View {
     }
 
     private var calendarTab: some View {
-        VStack(spacing: 14) {
-            pageHeader(
-                title: "Calendar",
-                subtitle: "Upcoming recurring and one-time cash flow.",
-                systemImage: "calendar"
-            )
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
+                pageHeader(
+                    title: "Calendar",
+                    subtitle: "Recurring and one-time cash flow.",
+                    systemImage: "calendar"
+                ) {
+                    Button {
+                        showingCreditAccounts = true
+                    } label: {
+                        Image(systemName: "creditcard")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Credit Cards")
+                }
+                calendarSummarySection
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
             recurringCalendarSection
                 .frame(maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 18)
-        .padding(.bottom, contentBottomPadding)
+        .padding(.top, 22)
+        .padding(.bottom, 0)
+    }
+
+    private var calendarNetWorth: Double {
+        let totalBank = budget.bankAccounts.reduce(0) { $0 + $1.balance }
+        let totalCredit = budget.creditAccounts
+            .filter(\.isActive)
+            .reduce(0) { $0 + creditAccountActualBalance($1) }
+        return totalBank + homePortfolioNetValue - totalCredit
+    }
+
+    private var calendarSummarySection: some View {
+        GlassCard(padding: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                calendarSummaryHeader
+
+                Spacer(minLength: 8)
+
+                calendarMetricPill(
+                    title: "Net Worth",
+                    value: calendarNetWorth,
+                    tint: .mint
+                )
+            }
+        }
+    }
+
+    private var calendarSummaryHeader: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "calendar")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appAccent)
+                .frame(width: 30, height: 30)
+                .background(appAccent.opacity(0.14), in: Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Monthly Snapshot")
+                    .font(.subheadline.weight(.bold))
+                Text(visibleCalendarMonth, format: .dateTime.month(.wide).year())
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private func calendarMetricPill(title: String, value: Double, tint: Color) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.12), in: Circle())
+
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(title)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(value, format: .currency(code: "USD"))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(value < 0 ? Color.red : Color.primary)
+                    .minimumScaleFactor(0.68)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: 112, alignment: .trailing)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tint.opacity(0.20), lineWidth: 1)
+        )
     }
 
     private var marginTab: some View {
@@ -608,39 +831,62 @@ struct ContentView: View {
     }
 
     private var recurringCalendarSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text((calendarMonths.indices.contains(calendarPageIndex) ? calendarMonths[calendarPageIndex] : selectedMonth), format: .dateTime.month(.wide).year())
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Spacer()
-            }
-
-            GeometryReader { proxy in
-                TabView(selection: $calendarPageIndex) {
-                    ForEach(Array(calendarMonths.enumerated()), id: \.offset) { index, month in
-                        monthCalendarGrid(
-                            for: month,
-                            dayCellHeight: dayCellHeight(for: month, availableHeight: proxy.size.height)
-                        )
-                        .tag(index)
+        GeometryReader { proxy in
+            ScrollViewReader { scrollProxy in
+                ZStack(alignment: .top) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(calendarWeeks) { week in
+                                calendarWeekRow(
+                                    week,
+                                    dayCellHeight: dayCellHeight(availableWidth: proxy.size.width),
+                                    availableWidth: proxy.size.width
+                                )
+                                .id(week.startDate)
+                            }
+                        }
+                        .padding(.top, 74)
+                        .scrollTargetLayout()
                     }
-                }
-                .id(calendarRefreshKey)
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .onChange(of: calendarPageIndex) { _, newValue in
-                    guard calendarMonths.indices.contains(newValue) else { return }
-                    selectedMonth = calendarMonths[newValue]
-                }
-                .onAppear {
-                    alignCalendarPageToSelectedMonth()
-                }
-                .onChange(of: selectedMonth) { _, _ in
-                    alignCalendarPageToSelectedMonth()
+                    .scrollPosition(id: $visibleCalendarWeekStart, anchor: .top)
+                    .onAppear {
+                        visibleCalendarWeekStart = currentCalendarWeekStart
+                        DispatchQueue.main.async {
+                            scrollProxy.scrollTo(currentCalendarWeekStart, anchor: .top)
+                        }
+                    }
+
+                    VStack(spacing: 0) {
+                        calendarWeekdayHeader
+
+                        Button {
+                            visibleCalendarWeekStart = currentCalendarWeekStart
+                            withAnimation(.snappy) {
+                                scrollProxy.scrollTo(currentCalendarWeekStart, anchor: .top)
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(visibleCalendarMonth, format: .dateTime.month(.wide).year())
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 9)
+                            .background(.thinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 28)
+                    }
                 }
             }
         }
-        .background(Color.clear)
     }
 
     private var backgroundView: some View {
@@ -677,9 +923,18 @@ struct ContentView: View {
         return holdingsValue + budget.portfolioSnapshot.cashBalance - budget.portfolioSnapshot.marginUsed
     }
 
+    private var homeLatestHoldingsUpdate: Date? {
+        budget.cachedQuotes.values.map(\.updatedAt).max()
+    }
+
     private var homeMonthlySavingsTargetProgress: Double {
         guard budget.totalSavingsAllocated > 0 else { return 0 }
-        return min(max(monthlySavingsLogged / budget.totalSavingsAllocated, 0), 1)
+        return min(max(autoSavedThisMonth / budget.totalSavingsAllocated, 0), 1)
+    }
+
+    private var autoSavedThisMonth: Double {
+        let monthIncome = totalMonthlyIncomeLogged > 0 ? totalMonthlyIncomeLogged : budget.income(for: selectedMonth)
+        return monthIncome - totalMonthlySpent
     }
 
     private var homeNetWorthHistoryPoints: [PortfolioValuePoint] {
@@ -800,6 +1055,46 @@ struct ContentView: View {
         guard let start = trendRangeStart, let end = trendRangeEnd else { return 0 }
         let days = max(dayCount(from: start, to: end), 1)
         return trendTotal / Double(days)
+    }
+
+    private var trendEntriesInRange: Int {
+        guard let start = trendRangeStart, let end = trendRangeEnd else { return 0 }
+        switch selectedLogTrend {
+        case .spending:
+            return monthlyExpenses.filter { $0.date >= start && $0.date <= end }.count
+        case .income:
+            return monthlyIncomes.filter { $0.date >= start && $0.date <= end }.count
+        }
+    }
+
+    private var trendActiveDaysInRange: Int {
+        guard let start = trendRangeStart, let end = trendRangeEnd else { return 0 }
+        let calendar = Calendar.current
+        switch selectedLogTrend {
+        case .spending:
+            return Set(monthlyExpenses.filter { $0.date >= start && $0.date <= end }.map { calendar.startOfDay(for: $0.date) }).count
+        case .income:
+            return Set(monthlyIncomes.filter { $0.date >= start && $0.date <= end }.map { calendar.startOfDay(for: $0.date) }).count
+        }
+    }
+
+    private var trendPeakDailyAmountInRange: Double {
+        guard let start = trendRangeStart, let end = trendRangeEnd else { return 0 }
+        let calendar = Calendar.current
+        var totals: [Date: Double] = [:]
+        switch selectedLogTrend {
+        case .spending:
+            for entry in monthlyExpenses where entry.date >= start && entry.date <= end {
+                let day = calendar.startOfDay(for: entry.date)
+                totals[day, default: 0] += entry.amount
+            }
+        case .income:
+            for entry in monthlyIncomes where entry.date >= start && entry.date <= end {
+                let day = calendar.startOfDay(for: entry.date)
+                totals[day, default: 0] += entry.amount
+            }
+        }
+        return totals.values.max() ?? 0
     }
 
     private var isCurrentMonth: Bool {
@@ -1093,6 +1388,33 @@ struct ContentView: View {
         }
     }
 
+    private var logMonthHeaderSelector: some View {
+        HStack(spacing: 4) {
+            Button(action: { shiftMonth(by: -1) }) {
+                Image(systemName: "chevron.left")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+
+            Text(selectedMonth, format: .dateTime.month(.abbreviated).year())
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Button(action: { shiftMonth(by: 1) }) {
+                Image(systemName: "chevron.right")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCurrentMonth)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+    }
+
     private var calendarWeekdaySymbols: [String] {
         let symbols = Calendar.current.shortWeekdaySymbols
         let firstWeekdayIndex = Calendar.current.firstWeekday - 1
@@ -1101,10 +1423,59 @@ struct ContentView: View {
         return head + tail
     }
 
-    private var calendarMonths: [Date] {
-        let base = Self.startOfMonth(for: Date())
+    private var calendarWeekdayHeader: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 0) {
+            ForEach(calendarWeekdaySymbols, id: \.self) { symbol in
+                Text(symbol)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+        }
+        .padding(.horizontal, 6)
+        .background(.ultraThinMaterial)
+    }
+
+    private var calendarWeeks: [CalendarWeek] {
         let calendar = Calendar.current
-        return (-12...12).compactMap { calendar.date(byAdding: .month, value: $0, to: base) }
+        guard let firstMonth = calendar.date(byAdding: .month, value: -36, to: currentCalendarMonth),
+              let lastMonth = calendar.date(byAdding: .month, value: 36, to: currentCalendarMonth),
+              let firstWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: firstMonth),
+              let lastMonthInterval = calendar.dateInterval(of: .month, for: lastMonth),
+              let lastDay = calendar.date(byAdding: .day, value: -1, to: lastMonthInterval.end),
+              let lastWeekInterval = calendar.dateInterval(of: .weekOfMonth, for: lastDay) else {
+            return []
+        }
+
+        var weeks: [CalendarWeek] = []
+        var weekStart = firstWeekInterval.start
+        while weekStart <= lastWeekInterval.start {
+            let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+            weeks.append(CalendarWeek(startDate: weekStart, days: days))
+            guard let nextWeek = calendar.date(byAdding: .weekOfYear, value: 1, to: weekStart) else { break }
+            weekStart = nextWeek
+        }
+        return weeks
+    }
+
+    private var currentCalendarMonth: Date {
+        Self.startOfMonth(for: Date())
+    }
+
+    private var currentCalendarWeekStart: Date {
+        Calendar.current.dateInterval(of: .weekOfMonth, for: currentCalendarMonth)?.start ?? currentCalendarMonth
+    }
+
+    private var visibleCalendarMonth: Date {
+        guard let visibleCalendarWeekStart else { return currentCalendarMonth }
+        return monthForCalendarWeek(startingAt: visibleCalendarWeekStart)
+    }
+
+    private func monthForCalendarWeek(startingAt weekStart: Date) -> Date {
+        let calendar = Calendar.current
+        let midpoint = calendar.date(byAdding: .day, value: 3, to: weekStart) ?? weekStart
+        return Self.startOfMonth(for: midpoint)
     }
 
     private func calendarGridDates(for month: Date) -> [Date?] {
@@ -1162,11 +1533,6 @@ struct ContentView: View {
         return min(max(paymentDay, 1), maxDay)
     }
 
-    private var calendarRefreshKey: String {
-        let paid = budget.recurringPayments.reduce(0) { $0 + $1.paidOccurrenceKeys.count }
-        return "\(budget.expenses.count)-\(budget.incomes.count)-\(budget.recurringPayments.count)-\(budget.creditAccounts.count)-\(paid)-\(selectedMonth.timeIntervalSinceReferenceDate)"
-    }
-
     private func recurringOccurrenceKey(paymentId: UUID, date: Date) -> String {
         let calendar = Calendar.current
         let comps = calendar.dateComponents([.year, .month, .day], from: date)
@@ -1187,13 +1553,18 @@ struct ContentView: View {
         budget.recurringPayments[index].paidOccurrenceKeys.append(key)
 
         if payment.kind == .income {
-            budget.incomes.append(
-                IncomeEntry(name: payment.name, amount: payment.amount, date: date)
+            budget.addIncomeEntry(
+                IncomeEntry(
+                    name: payment.name,
+                    amount: payment.amount,
+                    date: date,
+                    bankName: payment.paymentAccount
+                )
             )
             return
         }
 
-        var section = payment.section
+        let section = payment.section
         var categoryId = payment.categoryId
         let categories = section == .needs ? budget.needsCategories : budget.wantsCategories
         if categoryId == nil || !categories.contains(where: { $0.id == categoryId }) {
@@ -1211,7 +1582,7 @@ struct ContentView: View {
         }
 
         guard let categoryId else { return }
-        budget.expenses.append(
+        budget.addExpense(
             Expense(
                 name: payment.name,
                 amount: payment.amount,
@@ -1239,6 +1610,7 @@ struct ContentView: View {
         let paymentAccount: String
         let iconName: String
         let creditAccount: CreditAccount?
+        let portfolioTransaction: PortfolioTransaction?
     }
 
     private func calendarEvents(for date: Date) -> [CalendarEventItem] {
@@ -1260,7 +1632,8 @@ struct ContentView: View {
                 isCreditDue: false,
                 paymentAccount: $0.payment.paymentAccount,
                 iconName: iconName(for: $0.payment.name, isCreditDue: false, paymentAccount: $0.payment.paymentAccount),
-                creditAccount: nil
+                creditAccount: nil,
+                portfolioTransaction: nil
             )
         }
         let oneTimeExpenses = budget.expenses
@@ -1280,7 +1653,8 @@ struct ContentView: View {
                     isCreditDue: false,
                     paymentAccount: $0.paymentAccount,
                     iconName: iconName(for: $0.name, isCreditDue: false, paymentAccount: $0.paymentAccount),
-                    creditAccount: nil
+                    creditAccount: nil,
+                    portfolioTransaction: nil
                 )
             }
         let oneTimeIncome = budget.incomes
@@ -1300,7 +1674,29 @@ struct ContentView: View {
                     isCreditDue: false,
                     paymentAccount: "",
                     iconName: "dollarsign.circle",
-                    creditAccount: nil
+                    creditAccount: nil,
+                    portfolioTransaction: nil
+                )
+            }
+        let portfolioItems = budget.portfolioTransactions
+            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .map { transaction in
+                CalendarEventItem(
+                    id: transaction.id,
+                    name: portfolioEventName(transaction),
+                    amount: transaction.amount,
+                    isIncome: transaction.type == .sell || transaction.type == .dividend,
+                    date: transaction.date,
+                    recurringPayment: nil,
+                    expense: nil,
+                    income: nil,
+                    isPaid: true,
+                    tint: portfolioEventColor(transaction),
+                    isCreditDue: false,
+                    paymentAccount: "Investment Account",
+                    iconName: portfolioEventIcon(transaction),
+                    creditAccount: nil,
+                    portfolioTransaction: transaction
                 )
             }
         let dueItems = budget.creditAccounts.compactMap { account -> CalendarEventItem? in
@@ -1321,13 +1717,45 @@ struct ContentView: View {
                 isCreditDue: true,
                 paymentAccount: account.name,
                 iconName: "creditcard",
-                creditAccount: account
+                creditAccount: account,
+                portfolioTransaction: nil
             )
         }
 
-        return (recurring + oneTimeIncome + oneTimeExpenses + dueItems).sorted { lhs, rhs in
+        return (recurring + oneTimeIncome + oneTimeExpenses + portfolioItems + dueItems).sorted { lhs, rhs in
             if lhs.isIncome == rhs.isIncome { return lhs.amount > rhs.amount }
             return lhs.isIncome && !rhs.isIncome
+        }
+    }
+
+    private func portfolioEventName(_ transaction: PortfolioTransaction) -> String {
+        let ticker = transaction.ticker?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let base = transaction.type.title
+        return ticker.isEmpty ? base : "\(base) \(ticker.uppercased())"
+    }
+
+    private func portfolioEventIcon(_ transaction: PortfolioTransaction) -> String {
+        switch transaction.type {
+        case .buy: return "arrow.down.circle"
+        case .sell: return "arrow.up.circle"
+        case .dividend: return "dollarsign.circle"
+        case .contribution: return "plus.circle"
+        case .billPaidByMargin: return "creditcard"
+        case .marginInterest: return "percent"
+        case .manualAdjustment: return "slider.horizontal.3"
+        }
+    }
+
+    private func portfolioEventColor(_ transaction: PortfolioTransaction) -> Color {
+        switch transaction.type {
+        case .sell, .dividend:
+            return .green
+        case .buy, .billPaidByMargin, .marginInterest:
+            return .orange
+        case .contribution:
+            return .mint
+        case .manualAdjustment:
+            return .indigo
         }
     }
 
@@ -1340,7 +1768,7 @@ struct ContentView: View {
     private func creditAccountActualBalance(_ account: CreditAccount) -> Double {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(0) { partial, expense in
+        return budget.expenses.reduce(account.startingBalance) { partial, expense in
             if let paidCard = creditCardPaymentTarget(from: expense.note),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1383,19 +1811,164 @@ struct ContentView: View {
     private func iconName(for name: String, isCreditDue: Bool, paymentAccount: String) -> String {
         let lowered = name.lowercased()
         if isCreditDue { return "creditcard" }
+        if lowered.contains("coffee") || lowered.contains("latte") || lowered.contains("espresso") || lowered.contains("cafe") {
+            return "cup.and.saucer.fill"
+        }
+        if lowered.contains("grocery") || lowered.contains("market") || lowered.contains("supermarket") {
+            return "cart.fill"
+        }
+        if lowered.contains("restaurant") || lowered.contains("dinner") || lowered.contains("lunch") || lowered.contains("breakfast") || lowered.contains("food") {
+            return "fork.knife"
+        }
+        if lowered.contains("gas") || lowered.contains("fuel") {
+            return "fuelpump.fill"
+        }
+        if lowered.contains("uber") || lowered.contains("lyft") || lowered.contains("taxi") || lowered.contains("ride") {
+            return "car.fill"
+        }
+        if lowered.contains("flight") || lowered.contains("airline") || lowered.contains("trip") || lowered.contains("travel") || lowered.contains("hotel") {
+            return "airplane"
+        }
+        if lowered.contains("movie") || lowered.contains("theater") || lowered.contains("concert") || lowered.contains("show") {
+            return "ticket.fill"
+        }
+        if lowered.contains("gym") || lowered.contains("fitness") {
+            return "dumbbell.fill"
+        }
         if lowered.contains("rent") || lowered.contains("mortgage") || lowered.contains("lease") {
             return "house.fill"
-        }
-        if !paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "creditcard"
         }
         if lowered.contains("utility") || lowered.contains("electric") || lowered.contains("water") || lowered.contains("gas") {
             return "bolt.fill"
         }
-        if lowered.contains("subscription") || lowered.contains("stream") || lowered.contains("apple") || lowered.contains("amazon") {
-            return "shippingbox.fill"
+        if lowered.contains("subscription") || lowered.contains("stream") || lowered.contains("netflix") || lowered.contains("spotify") || lowered.contains("hulu") || lowered.contains("icloud") {
+            return "repeat.circle.fill"
+        }
+        if lowered.contains("amazon") || lowered.contains("order") || lowered.contains("shopping") || lowered.contains("purchase") {
+            return "bag.fill"
+        }
+        if !paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "wallet.pass.fill"
         }
         return "tag.fill"
+    }
+
+    private var logTransactionItems: [LogTransactionItem] {
+        let expenses = monthlyExpenses.map { expense in
+            LogTransactionItem(
+                id: expense.id,
+                title: expense.name,
+                subtitle: budget.categoryName(for: expense),
+                amount: expense.amount,
+                date: expense.date,
+                isInflow: false,
+                iconName: iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount),
+                tint: colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
+                kind: .expense(expense)
+            )
+        }
+        let incomes = monthlyIncomes.map { income in
+            LogTransactionItem(
+                id: income.id,
+                title: income.name,
+                subtitle: income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName,
+                amount: income.amount,
+                date: income.date,
+                isInflow: true,
+                iconName: "dollarsign.circle.fill",
+                tint: .green,
+                kind: .income(income)
+            )
+        }
+        let savings = monthlySavingsEntries.map { entry in
+            LogTransactionItem(
+                id: entry.id,
+                title: entry.name.isEmpty ? "Savings" : entry.name,
+                subtitle: budget.savingsGoalName(for: entry),
+                amount: entry.amount,
+                date: entry.date,
+                isInflow: false,
+                iconName: "banknote.fill",
+                tint: .mint,
+                kind: .savings(entry)
+            )
+        }
+        return (expenses + incomes + savings).sorted { $0.date > $1.date }
+    }
+
+    private var logTransactionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Transactions")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Expense History") {
+                    showingExpenseHistory = true
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if logTransactionItems.isEmpty {
+                GlassCard {
+                    EmptyStateView(
+                        title: "No transactions yet",
+                        message: "Log income or expenses to see activity here.",
+                        systemImage: "list.bullet.rectangle",
+                        tips: [],
+                        actionLabel: "Log Expense",
+                        action: startAddExpense
+                    )
+                }
+            } else {
+                GlassCard {
+                    VStack(spacing: 10) {
+                        ForEach(Array(logTransactionItems.prefix(20).enumerated()), id: \.element.id) { _, item in
+                            HStack(spacing: 10) {
+                                Image(systemName: item.iconName)
+                                    .font(.subheadline)
+                                    .foregroundStyle(item.tint)
+                                    .frame(width: 28, height: 28)
+                                    .background(item.tint.opacity(0.12), in: Circle())
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.subheadline)
+                                    Text(item.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("\(item.isInflow ? "+" : "-")\(item.amount, format: .currency(code: "USD"))")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(item.isInflow ? .green : .primary)
+                                    Text(item.date, style: .date)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                switch item.kind {
+                                case .expense(let expense):
+                                    editingExpense = expense
+                                case .income(let income):
+                                    editingIncome = income
+                                case .savings(let entry):
+                                    editingSavingsEntry = entry
+                                }
+                            }
+                            if item.id != logTransactionItems.prefix(20).last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var accountBalancesSection: some View {
@@ -1405,13 +1978,13 @@ struct ContentView: View {
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
-                Button("Manage Banks") {
-                    showingBankAccounts = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                Button("Manage Cards") {
-                    showingCreditAccounts = true
+                Menu("Manage") {
+                    Button("Banks") {
+                        showingBankAccounts = true
+                    }
+                    Button("Cards") {
+                        showingCreditAccounts = true
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1486,87 +2059,50 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func recurringCalendarDayCell(for date: Date?) -> some View {
+    private func recurringCalendarDayCell(for date: Date?, maxVisibleEvents: Int) -> some View {
         if let date {
             let events = calendarEvents(for: date)
-            VStack(alignment: .leading, spacing: 6) {
+            let visibleEvents = Array(events.prefix(maxVisibleEvents))
+            let hiddenEventCount = max(events.count - visibleEvents.count, 0)
+            let calendar = Calendar.current
+            let isToday = calendar.isDateInToday(date)
+            let isVisibleMonth = calendar.isDate(date, equalTo: visibleCalendarMonth, toGranularity: .month)
+
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: calendarCellContentSpacing) {
+                    ForEach(visibleEvents) { event in
+                        calendarEventChip(event)
+                    }
+
+                    if hiddenEventCount > 0 {
+                        calendarOverflowMenu(events: events, hiddenEventCount: hiddenEventCount)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, calendarTransactionsTopInset)
+                .padding(.horizontal, 2)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
                 HStack {
-                    Text("\(Calendar.current.component(.day, from: date))")
-                        .font(.subheadline)
-                        .fontWeight(Calendar.current.isDateInToday(date) ? .bold : .regular)
+                    Text("\(calendar.component(.day, from: date))")
+                        .font(.title3.weight(isToday ? .bold : .regular))
+                        .foregroundStyle(isVisibleMonth ? Color.primary : Color.secondary.opacity(0.55))
+                        .lineLimit(1)
                     Spacer()
                 }
-
-                ForEach(events.prefix(4)) { event in
-                    HStack(spacing: 4) {
-                        Button {
-                            if let account = event.creditAccount {
-                                selectedCreditAccount = account
-                            } else if let recurring = event.recurringPayment {
-                                editingRecurringPayment = recurring
-                            } else if let expense = event.expense {
-                                editingExpense = expense
-                            } else if let income = event.income {
-                                editingIncome = income
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: event.iconName)
-                                        .font(.caption2)
-                                    Text(event.name)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
-                                        .allowsTightening(true)
-                                }
-                                if event.amount > 0 {
-                                    Text(event.amount.formatted(.currency(code: "USD")))
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
-                                }
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(event.tint)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(event.tint.opacity(0.16))
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if let recurring = event.recurringPayment {
-                            Button {
-                                markRecurringOccurrencePaid(recurring, on: event.date)
-                            } label: {
-                                Image(systemName: event.isPaid ? "checkmark.circle.fill" : "checkmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(event.isPaid ? Color.green : Color.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(event.isPaid ? "Marked paid" : "Mark paid")
-                        }
-                    }
-                }
-
-                if events.count > 4 {
-                    Text("+\(events.count - 4) more")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
+                .frame(height: calendarDayNumberHeight, alignment: .topLeading)
+                .padding(.top, calendarCellTopInset)
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 3)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
             .background(
                 Rectangle()
-                    .fill(Color(.secondarySystemGroupedBackground))
+                    .fill(isToday ? appAccent.opacity(0.08) : Color.black)
                     .overlay(
                         Rectangle()
-                            .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                            .stroke(isToday ? appAccent.opacity(0.35) : Color.white.opacity(0.16), lineWidth: isToday ? 1.2 : 0.6)
                     )
             )
             .contentShape(Rectangle())
@@ -1578,47 +2114,161 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     Rectangle()
-                        .fill(Color(.secondarySystemGroupedBackground))
+                        .fill(Color.black)
                         .overlay(
                             Rectangle()
-                                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                                .stroke(Color.white.opacity(0.16), lineWidth: 0.6)
                         )
                 )
         }
     }
 
-    private func monthCalendarGrid(for month: Date, dayCellHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 0) {
-                ForEach(calendarWeekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
+    private func calendarEventChip(_ event: CalendarEventItem) -> some View {
+        Button {
+            openCalendarEvent(event)
+        } label: {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: event.iconName)
+                            .font(.caption2)
+                        Text(event.name)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .allowsTightening(true)
+                    }
+                    if event.amount > 0 {
+                        Text("\(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if event.recurringPayment != nil {
+                    Image(systemName: event.isPaid ? "checkmark.circle.fill" : "checkmark.circle")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .foregroundStyle(event.isPaid ? Color.green : Color.secondary)
                 }
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 0) {
-                ForEach(calendarGridDates(for: month), id: \.self) { cellDate in
-                    recurringCalendarDayCell(for: cellDate)
-                        .frame(height: dayCellHeight)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: calendarEventChipHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(calendarEventBackground(for: event))
+        )
+        .clipped()
+    }
+
+    private func calendarOverflowMenu(events: [CalendarEventItem], hiddenEventCount: Int) -> some View {
+        Menu {
+            ForEach(events) { event in
+                Button {
+                    openCalendarEvent(event)
+                } label: {
+                    Label(calendarMenuTitle(for: event), systemImage: event.iconName)
                 }
             }
+        } label: {
+            Text("+\(hiddenEventCount)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(.thinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(hiddenEventCount) more calendar events")
+    }
+
+    private func calendarWeekRow(_ week: CalendarWeek, dayCellHeight: CGFloat, availableWidth: CGFloat) -> some View {
+        let maxVisibleEvents = maxVisibleCalendarEvents(for: dayCellHeight)
+        let gridWidth = max(availableWidth, 1)
+        let dayCellWidth = max(floor(gridWidth / 7), 1)
+
+        return HStack(spacing: 0) {
+            ForEach(week.days, id: \.self) { day in
+                recurringCalendarDayCell(for: day, maxVisibleEvents: maxVisibleEvents)
+                    .frame(width: dayCellWidth, height: dayCellHeight)
+                    .clipped()
+            }
+        }
+        .frame(width: gridWidth, height: dayCellHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func openCalendarEvent(_ event: CalendarEventItem) {
+        if let account = event.creditAccount {
+            selectedCreditAccount = account
+        } else if let portfolioTransaction = event.portfolioTransaction {
+            selectedPortfolioTransaction = portfolioTransaction
+        } else if let recurring = event.recurringPayment {
+            editingRecurringPayment = recurring
+        } else if let expense = event.expense {
+            editingExpense = expense
+        } else if let income = event.income {
+            editingIncome = income
         }
     }
 
-    private func dayCellHeight(for month: Date, availableHeight: CGFloat) -> CGFloat {
-        let rows = max(calendarGridDates(for: month).count / 7, 1)
-        let weekdayHeaderHeight: CGFloat = 30
-        let usableHeight = max(availableHeight - weekdayHeaderHeight, 240)
-        return floor(usableHeight / CGFloat(rows))
+    private func calendarMenuTitle(for event: CalendarEventItem) -> String {
+        let amount = event.amount > 0 ? " \(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))" : ""
+        return "\(event.name)\(amount)"
     }
 
-    private func alignCalendarPageToSelectedMonth() {
-        let current = Self.startOfMonth(for: selectedMonth)
-        if let index = calendarMonths.firstIndex(where: { Calendar.current.isDate($0, equalTo: current, toGranularity: .month) }) {
-            calendarPageIndex = index
+    private func calendarEventBackground(for event: CalendarEventItem) -> Color {
+        if event.isIncome {
+            return Color.green.opacity(0.68)
         }
+        if event.isCreditDue {
+            return Color(red: 0.56, green: 0.28, blue: 0.17).opacity(0.88)
+        }
+        return event.tint.opacity(0.68)
+    }
+
+    private func maxVisibleCalendarEvents(for dayCellHeight: CGFloat) -> Int {
+        2
+    }
+
+    private var calendarCellTopInset: CGFloat {
+        10
+    }
+
+    private var calendarDayNumberHeight: CGFloat {
+        38
+    }
+
+    private var calendarTransactionsTopInset: CGFloat {
+        calendarCellTopInset + calendarDayNumberHeight + 4
+    }
+
+    private var calendarCellContentSpacing: CGFloat {
+        6
+    }
+
+    private var calendarEventChipHeight: CGFloat {
+        48
+    }
+
+    private var calendarOverflowMenuHeight: CGFloat {
+        31
+    }
+
+    private func dayCellHeight(availableWidth: CGFloat) -> CGFloat {
+        let cellWidth = max(availableWidth / 7, 1)
+        let baseHeight = max(floor(cellWidth * 1.65), 108)
+        let twoEventHeight = calendarTransactionsTopInset
+            + (2 * calendarEventChipHeight)
+            + calendarCellContentSpacing
+            + calendarOverflowMenuHeight
+            + 8
+        return max(baseHeight, twoEventHeight)
     }
 
     private static func startOfMonth(for date: Date) -> Date {
@@ -1753,7 +2403,7 @@ struct ContentView: View {
                     Haptics.warning()
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
     }
@@ -1899,32 +2549,15 @@ struct ContentView: View {
                 isExpanded: $logTrendsExpanded,
                 allowCollapse: false,
                 showIndicator: false,
-                onAdd: selectedLogTrend == .income ? startAddIncome : startAddExpense,
+                onAdd: nil,
                 valueLabel: selectedLogTrend == .income ? "Logged this month" : "Month to date",
                 value: selectedLogTrend == .income ? totalMonthlyIncomeLogged : totalMonthlySpent
-            ) {
-                Button("View History") {
-                    if selectedLogTrend == .income {
-                        showingIncomeHistory = true
-                    } else {
-                        showingExpenseHistory = true
-                    }
-                }
-                .font(.caption)
-                .buttonStyle(.bordered)
-            }
+            )
 
             if logTrendsExpanded {
                 Picker("Trend", selection: $selectedLogTrend) {
                     ForEach(LogTrend.allCases) { trend in
                         Text(trend.rawValue).tag(trend)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Picker("Range", selection: $selectedTrendRange) {
-                    ForEach(TrendRange.allCases) { range in
-                        Text(range.title).tag(range)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -1949,6 +2582,17 @@ struct ContentView: View {
                     }
                 }
 
+                GlassCard {
+                    HStack(spacing: 14) {
+                        compactTrendMetric(title: "Entries", value: "\(trendEntriesInRange)")
+                        compactTrendMetric(title: "Active Days", value: "\(trendActiveDaysInRange)")
+                        compactTrendMetric(
+                            title: selectedLogTrend == .income ? "Best Day" : "Peak Spend",
+                            value: trendPeakDailyAmountInRange.formatted(.currency(code: "USD"))
+                        )
+                    }
+                }
+
                 Group {
                     if selectedLogTrend == .income {
                         incomeTrendContent
@@ -1956,12 +2600,96 @@ struct ContentView: View {
                         spendingTrendContent
                     }
                 }
+
+                trendRangeSelector
             }
         }
         .onChange(of: selectedTrendRange) { _, _ in
             selectedIncomePoint = nil
             selectedSpendingPoint = nil
         }
+    }
+
+    private var trendRangeSelector: some View {
+        HStack(spacing: 8) {
+            ForEach(TrendRange.allCases) { range in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedTrendRange = range
+                    }
+                } label: {
+                    Text(range.title)
+                        .font(.caption.weight(.bold))
+                        .kerning(0.4)
+                        .textCase(.uppercase)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(selectedTrendRange == range ? .white : .primary)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(selectedTrendRange == range ? appAccent : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appAccent.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private var homeNetWorthRangeSelector: some View {
+        HStack(spacing: 8) {
+            ForEach(HomeNetWorthRange.allCases) { range in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedHomeNetWorthRange = range
+                    }
+                } label: {
+                    Text(range.rawValue)
+                        .font(.caption.weight(.bold))
+                        .kerning(0.4)
+                        .textCase(.uppercase)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(selectedHomeNetWorthRange == range ? .white : .primary)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(selectedHomeNetWorthRange == range ? appAccent : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(appAccent.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func compactTrendMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -2024,9 +2752,10 @@ struct ContentView: View {
                             Rectangle()
                                 .fill(Color.clear)
                                 .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 8)
                                         .onChanged { value in
+                                            guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                                             if let plotFrameAnchor = proxy.plotFrame {
                                                 let plotFrame = geometry[plotFrameAnchor]
                                                 let xPosition = value.location.x - plotFrame.origin.x
@@ -2128,9 +2857,10 @@ struct ContentView: View {
                             Rectangle()
                                 .fill(Color.clear)
                                 .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0)
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 8)
                                         .onChanged { value in
+                                            guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                                             if let plotFrameAnchor = proxy.plotFrame {
                                                 let plotFrame = geometry[plotFrameAnchor]
                                                 let xPosition = value.location.x - plotFrame.origin.x
@@ -2339,7 +3069,7 @@ struct ContentView: View {
                         Text("Saved this month")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("\(monthlySavingsLogged, format: .currency(code: "USD")) of \(budget.savingsBudget, format: .currency(code: "USD"))")
+                        Text("\(autoSavedThisMonth, format: .currency(code: "USD")) of \(budget.savingsBudget, format: .currency(code: "USD"))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2433,8 +3163,8 @@ struct ContentView: View {
                                 )
 
                                 SummaryMetricCard(
-                                    title: isLogFocus ? "Savings Logged" : "Savings Planned",
-                                    amount: isLogFocus ? monthlySavingsLogged : budget.totalSavingsAllocated,
+                                    title: isLogFocus ? "Saved" : "Savings Planned",
+                                    amount: isLogFocus ? autoSavedThisMonth : budget.totalSavingsAllocated,
                                     budget: budget.savingsBudget,
                                     color: .green
                                 )
@@ -2668,74 +3398,142 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Everything at a Glance")
                     .font(.headline)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    homeMetricTile("Monthly Income", value: budget.monthlyIncome, tint: .blue)
+                    homeMetricTile("Spent MTD", value: totalMonthlySpent, tint: .red)
+                    homeMetricTile("Saved MTD", value: autoSavedThisMonth, tint: .green)
+                    homeMetricTile("Remaining Budget", value: remainingBudgetForMonth, tint: .orange)
+                    homeMetricTile("Portfolio Net", value: homePortfolioNetValue, tint: .mint)
+                    homeMetricTile("Margin Used", value: budget.portfolioSnapshot.marginUsed, tint: .purple)
+                }
 
-                metricRow("Monthly Income", budget.monthlyIncome)
-                metricRow("Spent This Month", totalMonthlySpent)
-                metricRow("Saved This Month", monthlySavingsLogged)
-                metricRow("Remaining Budget", remainingBudgetForMonth)
-                metricRow("Portfolio Net Value", homePortfolioNetValue)
-                metricRow("Margin Used", budget.portfolioSnapshot.marginUsed)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Savings Goal Progress (MTD)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(Int(homeMonthlySavingsTargetProgress * 100))%")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    ProgressView(value: homeMonthlySavingsTargetProgress)
+                        .tint(.green)
+                }
+            }
+        }
+    }
 
-                if budget.totalSavingsAllocated > 0 {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Savings Goal Progress (MTD)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text("\(Int(homeMonthlySavingsTargetProgress * 100))%")
-                                .font(.caption)
-                                .fontWeight(.semibold)
+    private var homeMarketSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Top Assets")
+                        .font(.headline)
+                    Spacer()
+                    if isLoadingHomeMarkets {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Refresh") {
+                            Task { await refreshHomeMarkets() }
                         }
-                        ProgressView(value: homeMonthlySavingsTargetProgress)
-                            .tint(.green)
+                        .buttonStyle(.bordered)
+                    }
+                }
+                if let homeMarketError {
+                    Text(homeMarketError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if homeMarketCards.isEmpty {
+                    Text("Add a Finnhub API key in Settings to load market cards.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(homeMarketCards) { card in
+                            homeMarketCardView(card)
+                        }
                     }
                 }
             }
         }
     }
 
-    private var homePortfolioVsSpySection: some View {
+    private var homeCashFlowSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Cash Flow")
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Spending")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(totalMonthlySpent, format: .currency(code: "USD"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    homeMiniTrendChart(points: dailySpending, color: .red)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Income")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(totalMonthlyIncomeLogged, format: .currency(code: "USD"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    homeMiniTrendChart(points: dailyIncome, color: .green)
+                }
+            }
+        }
+    }
+
+    private var homeWatchlistSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Portfolio vs SPY")
+                    Text("Watchlist")
                         .font(.headline)
                     Spacer()
-                    if isLoadingSpyComparison {
+                    if isLoadingHomeWatchlist {
                         ProgressView()
                             .controlSize(.small)
                     } else {
                         Button("Refresh") {
-                            Task { await refreshSpyComparison() }
+                            Task { await refreshHomeWatchlist() }
                         }
                         .buttonStyle(.bordered)
                     }
                 }
 
-                if let spyComparison {
-                    Text(spyComparison.periodLabel)
+                if let homeWatchlistError {
+                    Text(homeWatchlistError)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    HStack(spacing: 12) {
-                        performancePill(title: "Portfolio", value: spyComparison.portfolioReturn, tint: .blue)
-                        performancePill(title: "SPY", value: spyComparison.spyReturn, tint: .orange)
-                    }
-
-                    let delta = spyComparison.portfolioReturn - spyComparison.spyReturn
-                    Text(delta >= 0 ? "Outperforming SPY by \(delta, format: .percent.precision(.fractionLength(2)))." : "Underperforming SPY by \((-delta), format: .percent.precision(.fractionLength(2))).")
-                        .font(.caption)
-                        .foregroundStyle(delta >= 0 ? .green : .red)
-                } else if let spyComparisonError {
-                    Text(spyComparisonError)
+                } else if homeWatchlistRows.isEmpty {
+                    Text("Add tickers in Settings to build your watchlist.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Add portfolio history and market data settings to compare against SPY.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    homeWatchlistSummary
+
+                    VStack(spacing: 10) {
+                        ForEach(homeWatchlistRows) { row in
+                            homeWatchlistRowCard(row)
+                            if row.id != homeWatchlistRows.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2744,15 +3542,24 @@ struct ContentView: View {
     private var homeNetWorthChartSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Net Worth Over Time")
-                    .font(.headline)
-
-                Picker("Range", selection: $selectedHomeNetWorthRange) {
-                    ForEach(HomeNetWorthRange.allCases) { range in
-                        Text(range.rawValue).tag(range)
+                HStack(alignment: .top) {
+                    Text("Net Worth Over Time")
+                        .font(.headline)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(homePortfolioNetValue, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.semibold))
+                        if let homeLatestHoldingsUpdate {
+                            Text("Updated \(homeLatestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Updated: --")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
 
                 let points = homeNetWorthHistoryPoints
                 if points.count < 2 {
@@ -2803,15 +3610,37 @@ struct ContentView: View {
                             }
                         }
                     }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    switch selectedHomeNetWorthRange {
+                                    case .oneDay:
+                                        Text(date, format: .dateTime.hour().minute())
+                                    case .oneWeek, .oneMonth:
+                                        Text(date, format: .dateTime.month(.abbreviated).day())
+                                    case .threeMonths, .oneYear:
+                                        Text(date, format: .dateTime.month(.abbreviated))
+                                    case .all:
+                                        Text(date, format: .dateTime.month(.abbreviated).year(.twoDigits))
+                                    }
+                                }
+                            }
+                            .font(.caption2)
+                        }
+                    }
                     .chartOverlay { proxy in
                         GeometryReader { geometry in
                             ZStack(alignment: .topLeading) {
                                 Rectangle()
                                     .fill(Color.clear)
                                     .contentShape(Rectangle())
-                                    .gesture(
-                                        DragGesture(minimumDistance: 0)
+                                    .simultaneousGesture(
+                                        DragGesture(minimumDistance: 8)
                                             .onChanged { value in
+                                                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                                                 guard let plotFrame = proxy.plotFrame.map({ geometry[$0] }) else { return }
                                                 let xPosition = value.location.x - plotFrame.origin.x
                                                 if let date: Date = proxy.value(atX: xPosition) {
@@ -2850,6 +3679,8 @@ struct ContentView: View {
                     }
                     .frame(height: 220)
 
+                    homeNetWorthRangeSelector
+
                     HStack(spacing: 14) {
                         Label("Net Worth", systemImage: "line.diagonal")
                             .foregroundStyle(.green)
@@ -2866,19 +3697,173 @@ struct ContentView: View {
         points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
     }
 
-    private func performancePill(title: String, value: Double, tint: Color) -> some View {
+    private func startHoldingsAutoRefreshLoop() {
+        guard holdingsAutoRefreshTask == nil else { return }
+        holdingsAutoRefreshTask = Task {
+            await refreshHoldingsQuotes()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000_000)
+                if Task.isCancelled { break }
+                await refreshHoldingsQuotes()
+            }
+        }
+    }
+
+    private func stopHoldingsAutoRefreshLoop() {
+        holdingsAutoRefreshTask?.cancel()
+        holdingsAutoRefreshTask = nil
+    }
+
+    @MainActor
+    private func refreshHoldingsQuotes() async {
+        guard !isRefreshingHoldingsQuotes else { return }
+        guard budget.marketDataSettings.canFetchMarketData else { return }
+        let tickers = Array(Set(budget.holdings.map { $0.ticker.uppercased() })).filter { !$0.isEmpty }
+        guard !tickers.isEmpty else { return }
+
+        isRefreshingHoldingsQuotes = true
+        defer { isRefreshingHoldingsQuotes = false }
+
+        let isAlphaVantage = budget.marketDataSettings.provider == .alphaVantage
+        let isFinnhub = budget.marketDataSettings.provider == .finnhub
+        for (index, ticker) in tickers.enumerated() {
+            do {
+                if isAlphaVantage && index > 0 {
+                    try? await Task.sleep(nanoseconds: 26_000_000_000)
+                }
+                if isFinnhub && index > 0 {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                }
+                let details = try await marketDataService.fetchQuoteDetails(
+                    ticker: ticker,
+                    settings: budget.marketDataSettings
+                )
+                budget.cachedQuotes[ticker] = CachedQuote(ticker: ticker, price: details.price, updatedAt: Date())
+                for holdingIndex in budget.holdings.indices where budget.holdings[holdingIndex].ticker.uppercased() == ticker {
+                    budget.holdings[holdingIndex].currentPrice = details.price
+                    if let annualDividend = details.annualDividendPerShare, annualDividend >= 0 {
+                        budget.holdings[holdingIndex].annualDividendPerShare = annualDividend
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+
+    private func homeMetricTile(_ title: String, value: Double, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value, format: .percent.precision(.fractionLength(2)))
-                .font(.title3)
+            Text(value, format: .currency(code: "USD"))
+                .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundStyle(value >= 0 ? .green : .red)
+                .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+        .padding(12)
         .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func homeMarketCardView(_ card: HomeMarketCard) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    Text(card.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    if card.isUnavailable {
+                        Text("N/A")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(card.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(card.percentChange >= 0 ? .green : .red)
+                        Text(card.change, format: .currency(code: "USD"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if card.isUnavailable {
+                Text("Unavailable")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.1))
+                    .frame(height: 58)
+                    .overlay(
+                        Text("No data")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    )
+            } else {
+                Text(card.price, format: .currency(code: "USD"))
+                    .font(.headline)
+
+                Chart(Array(card.sparkline.enumerated()), id: \.offset) { item in
+                    let index = item.offset
+                    let value = item.element
+                    LineMark(
+                        x: .value("Index", index),
+                        y: .value("Price", value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(card.percentChange >= 0 ? .green : .red)
+                    AreaMark(
+                        x: .value("Index", index),
+                        y: .value("Price", value)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle((card.percentChange >= 0 ? Color.green : Color.red).opacity(0.18))
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 58)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func homeMiniTrendChart(points: [DailySpend], color: Color) -> some View {
+        let recent = Array(points.suffix(14))
+        return Group {
+            if recent.count < 2 {
+                Text("Not enough data yet.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Chart(recent) { point in
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        y: .value("Amount", point.amount)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(color.opacity(0.14))
+
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Amount", point.amount)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(color)
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 90)
+            }
+        }
     }
 
     private func metricRow(_ title: String, _ value: Double) -> some View {
@@ -2894,56 +3879,394 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func refreshSpyComparison() async {
-        guard let firstPoint = budget.portfolioValueHistory.sorted(by: { $0.date < $1.date }).first,
-              let lastPoint = budget.portfolioValueHistory.sorted(by: { $0.date < $1.date }).last else {
-            spyComparison = nil
-            spyComparisonError = "No portfolio history yet. Log portfolio activity first."
+    private func refreshHomeMarkets() async {
+        guard budget.marketDataSettings.canFetchMarketData else {
+            homeMarketCards = []
+            homeMarketError = "Missing market data credentials in Settings."
             return
         }
 
-        let apiKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
-            spyComparison = nil
-            spyComparisonError = "Missing market data API key in Margin settings."
-            return
-        }
+        let symbols = ["SPY", "QQQ", "DIA", "VIX"]
+        let titles: [String: String] = ["SPY": "S&P 500", "QQQ": "NASDAQ 100", "DIA": "Dow Jones", "VIX": "VIX"]
+        let subtitles: [String: String] = ["SPY": "ETF", "QQQ": "ETF", "DIA": "ETF", "VIX": "Index"]
 
-        isLoadingSpyComparison = true
-        defer { isLoadingSpyComparison = false }
+        isLoadingHomeMarkets = true
+        defer { isLoadingHomeMarkets = false }
 
-        do {
-            let startPrice = try await marketDataService.fetchHistoricalClose(
-                ticker: "SPY",
-                onOrBefore: firstPoint.date,
-                provider: budget.marketDataSettings.provider,
-                apiKey: apiKey
+        var cards: [HomeMarketCard] = []
+        for symbol in symbols {
+            let quote = try? await marketDataService.fetchQuoteSnapshot(
+                ticker: symbol,
+                settings: budget.marketDataSettings
             )
-            let endPrice = try await marketDataService.fetchPrice(
-                ticker: "SPY",
-                provider: budget.marketDataSettings.provider,
-                apiKey: apiKey
-            )
-
-            guard firstPoint.netValue > 0, startPrice > 0 else {
-                spyComparison = nil
-                spyComparisonError = "Not enough baseline data to calculate returns."
-                return
+            var latestPrice = quote?.price
+            if latestPrice == nil {
+                latestPrice = try? await marketDataService.fetchPrice(
+                    ticker: symbol,
+                    settings: budget.marketDataSettings
+                )
+            }
+            if latestPrice == nil {
+                latestPrice = try? await marketDataService.fetchHistoricalClose(
+                    ticker: symbol,
+                    onOrBefore: Date(),
+                    settings: budget.marketDataSettings
+                )
             }
 
-            let portfolioReturn = (lastPoint.netValue / firstPoint.netValue) - 1
-            let spyReturn = (endPrice / startPrice) - 1
+            guard let finalPrice = latestPrice, finalPrice > 0 else {
+                cards.append(
+                    HomeMarketCard(
+                        title: titles[symbol] ?? symbol,
+                        subtitle: "\(subtitles[symbol] ?? "") • Unavailable",
+                        price: 0,
+                        change: 0,
+                        percentChange: 0,
+                        sparkline: [0, 0],
+                        isUnavailable: true
+                    )
+                )
+                continue
+            }
 
-            spyComparison = SpyComparisonResult(
-                periodLabel: "\(firstPoint.date.formatted(date: .abbreviated, time: .omitted)) to \(lastPoint.date.formatted(date: .abbreviated, time: .omitted))",
-                portfolioReturn: portfolioReturn,
-                spyReturn: spyReturn
+            var sparkline = try? await marketDataService.fetchRecentCloses(
+                ticker: symbol,
+                settings: budget.marketDataSettings,
+                days: 14
             )
-            spyComparisonError = nil
-        } catch {
-            spyComparison = nil
-            spyComparisonError = error.localizedDescription
+            if sparkline == nil {
+                sparkline = await fetchHistoricalFallbackSeries(
+                    ticker: symbol,
+                    settings: budget.marketDataSettings,
+                    targetPoints: 14,
+                    anchorPrice: finalPrice
+                )
+            }
+
+            cards.append(
+                HomeMarketCard(
+                    title: titles[symbol] ?? symbol,
+                    subtitle: subtitles[symbol] ?? "",
+                    price: finalPrice,
+                    change: quote?.change ?? 0,
+                    percentChange: quote?.percentChange ?? 0,
+                    sparkline: sparkline ?? [finalPrice, finalPrice],
+                    isUnavailable: false
+                )
+            )
         }
+
+        if cards.isEmpty {
+            homeMarketCards = []
+            homeMarketError = "No market cards loaded. Check API key/provider or try again."
+            return
+        }
+
+        homeMarketCards = cards
+        homeMarketError = nil
+    }
+
+    private func fetchHistoricalFallbackSeries(
+        ticker: String,
+        settings: MarketDataSettings,
+        targetPoints: Int,
+        anchorPrice: Double
+    ) async -> [Double] {
+        var values: [Double] = []
+        let calendar = Calendar.current
+        let today = Date()
+
+        for dayOffset in 0..<28 {
+            guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { continue }
+            if let close = try? await marketDataService.fetchHistoricalClose(
+                ticker: ticker,
+                onOrBefore: date,
+                settings: settings
+            ), close > 0 {
+                if values.last != close {
+                    values.append(close)
+                }
+            }
+            if values.count >= targetPoints { break }
+        }
+
+        let ordered = Array(values.reversed())
+        if ordered.count >= 2 {
+            return ordered
+        }
+        return [anchorPrice, anchorPrice]
+    }
+
+    @MainActor
+    private func refreshHomeDashboard() async {
+        await refreshHoldingsQuotes()
+        await refreshHomeMarkets()
+        await refreshHomeWatchlist()
+    }
+
+    @MainActor
+    private func refreshHomeWatchlist() async {
+        let apiKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard budget.marketDataSettings.canFetchMarketData else {
+            homeWatchlistRows = []
+            homeWatchlistError = "Missing market data credentials in Settings."
+            return
+        }
+
+        guard budget.marketDataSettings.provider == .finnhub else {
+            homeWatchlistRows = []
+            homeWatchlistError = "Watchlist indicators require provider = Finnhub in Settings."
+            return
+        }
+
+        let symbols = budget.watchlistTickers
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+        guard !symbols.isEmpty else {
+            homeWatchlistRows = []
+            homeWatchlistError = "No watchlist tickers set. Add symbols in Settings."
+            return
+        }
+
+        isLoadingHomeWatchlist = true
+        defer { isLoadingHomeWatchlist = false }
+
+        var rows: [HomeWatchlistRow] = []
+        var failedSymbols: [String] = []
+        var lastError: Error?
+
+        for symbol in symbols {
+            do {
+                let quote = try await marketDataService.fetchQuoteSnapshot(
+                    ticker: symbol,
+                    settings: budget.marketDataSettings
+                )
+                let profile = apiKey.isEmpty ? nil : try? await marketDataService.fetchCompanyProfile(
+                    ticker: symbol,
+                    provider: .finnhub,
+                    apiKey: apiKey
+                )
+                let historicalCloses = (try? await marketDataService.fetchRecentCloses(
+                    ticker: symbol,
+                    settings: budget.marketDataSettings,
+                    days: 90
+                )) ?? [quote.price, quote.price]
+                rows.append(
+                    HomeWatchlistRow(
+                        symbol: symbol,
+                        companyName: profile?.name,
+                        exchange: profile?.exchange,
+                        price: quote.price,
+                        change: quote.change,
+                        percentChange: quote.percentChange,
+                        open: quote.open,
+                        dayHigh: quote.high,
+                        dayLow: quote.low,
+                        previousClose: quote.previousClose,
+                        sma20: simpleMovingAverage(historicalCloses, period: 20),
+                        sma50: simpleMovingAverage(historicalCloses, period: 50),
+                        rsi14: relativeStrengthIndex(historicalCloses, period: 14),
+                        closes14: Array(historicalCloses.suffix(30))
+                    )
+                )
+            } catch {
+                lastError = error
+                failedSymbols.append(symbol)
+                if let fallbackPrice = budget.cachedQuotes[symbol]?.price, fallbackPrice > 0 {
+                    let cachedCloses = (try? await marketDataService.fetchRecentCloses(
+                        ticker: symbol,
+                        settings: budget.marketDataSettings,
+                        days: 90
+                    )) ?? [fallbackPrice, fallbackPrice]
+                    rows.append(
+                        HomeWatchlistRow(
+                            symbol: symbol,
+                            companyName: nil,
+                            exchange: nil,
+                            price: fallbackPrice,
+                            change: 0,
+                            percentChange: 0,
+                            open: nil,
+                            dayHigh: nil,
+                            dayLow: nil,
+                            previousClose: nil,
+                            sma20: simpleMovingAverage(cachedCloses, period: 20),
+                            sma50: simpleMovingAverage(cachedCloses, period: 50),
+                            rsi14: relativeStrengthIndex(cachedCloses, period: 14),
+                            closes14: Array(cachedCloses.suffix(30))
+                        )
+                    )
+                }
+            }
+        }
+
+        homeWatchlistRows = rows
+        if failedSymbols.isEmpty {
+            homeWatchlistError = nil
+        } else if rows.isEmpty {
+            if let serviceError = lastError as? MarketDataServiceError, serviceError == .invalidResponse {
+                homeWatchlistError = "Finnhub rejected the request. Confirm provider is Finnhub and API key is valid."
+            } else {
+                homeWatchlistError = lastError?.localizedDescription ?? "Failed to load watchlist data."
+            }
+        } else {
+            homeWatchlistError = "Loaded \(rows.count) of \(symbols.count). Failed: \(failedSymbols.joined(separator: ", "))."
+        }
+    }
+
+    private var homeWatchlistSummary: some View {
+        let winners = homeWatchlistRows.filter { $0.percentChange > 0 }.count
+        let losers = homeWatchlistRows.filter { $0.percentChange < 0 }.count
+        let averageChange = homeWatchlistRows.isEmpty ? 0 : homeWatchlistRows.reduce(0) { $0 + $1.percentChange } / Double(homeWatchlistRows.count)
+        let strongest = homeWatchlistRows.max(by: { $0.percentChange < $1.percentChange })
+        let weakest = homeWatchlistRows.min(by: { $0.percentChange < $1.percentChange })
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Label("\(winners) up", systemImage: "arrow.up")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                Label("\(losers) down", systemImage: "arrow.down")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Spacer()
+                Text("Avg \(averageChange / 100, format: .percent.precision(.fractionLength(2)))")
+                    .font(.caption)
+                    .foregroundStyle(averageChange >= 0 ? .green : .red)
+            }
+            if let strongest, let weakest {
+                Text("Strongest: \(strongest.symbol) (\((strongest.percentChange / 100), format: .percent.precision(.fractionLength(2)))) • Weakest: \(weakest.symbol) (\((weakest.percentChange / 100), format: .percent.precision(.fractionLength(2))))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func homeWatchlistRowCard(_ row: HomeWatchlistRow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.symbol)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    if let companyName = row.companyName, !companyName.isEmpty {
+                        Text(companyName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else if let exchange = row.exchange, !exchange.isEmpty {
+                        Text(exchange)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(row.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(row.percentChange >= 0 ? .green : .red)
+                    Text(row.change, format: .currency(code: "USD"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Text(row.price, format: .currency(code: "USD"))
+                    .font(.headline)
+                Spacer()
+                if let rsi = row.rsi14 {
+                    Text("RSI14 \(rsi, format: .number.precision(.fractionLength(1)))")
+                        .font(.caption)
+                        .foregroundStyle(rsi > 70 ? .red : (rsi < 30 ? .green : .secondary))
+                }
+            }
+
+            HStack(spacing: 10) {
+                watchlistIndicatorPill("SMA20", value: row.sma20)
+                watchlistIndicatorPill("SMA50", value: row.sma50)
+                watchlistIndicatorPill("Open", value: row.open)
+                watchlistIndicatorPill("Prev", value: row.previousClose)
+            }
+
+            if let dayLow = row.dayLow, let dayHigh = row.dayHigh, dayHigh > dayLow {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Day range")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(dayLow, format: .currency(code: "USD")) - \(dayHigh, format: .currency(code: "USD"))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: min(max((row.price - dayLow) / (dayHigh - dayLow), 0), 1))
+                        .tint(.blue)
+                }
+            }
+
+            if row.closes14.count >= 2 {
+                Chart(Array(row.closes14.enumerated()), id: \.offset) { item in
+                    LineMark(
+                        x: .value("Index", item.offset),
+                        y: .value("Price", item.element)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(row.percentChange >= 0 ? .green : .red)
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 40)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func watchlistIndicatorPill(_ label: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let value {
+                Text(value, format: .currency(code: "USD"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+            } else {
+                Text("N/A")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func simpleMovingAverage(_ values: [Double], period: Int) -> Double? {
+        guard period > 0, values.count >= period else { return nil }
+        let slice = values.suffix(period)
+        let sum = slice.reduce(0, +)
+        return sum / Double(period)
+    }
+
+    private func relativeStrengthIndex(_ values: [Double], period: Int) -> Double? {
+        guard period > 0, values.count > period else { return nil }
+        let recent = Array(values.suffix(period + 1))
+        var gains: Double = 0
+        var losses: Double = 0
+        for index in 1..<recent.count {
+            let delta = recent[index] - recent[index - 1]
+            if delta >= 0 {
+                gains += delta
+            } else {
+                losses += abs(delta)
+            }
+        }
+        if losses == 0 { return 100 }
+        let relativeStrength = gains / losses
+        return 100 - (100 / (1 + relativeStrength))
     }
 }
 
@@ -2996,7 +4319,28 @@ struct AppSettingsView: View {
                     SecureField("API key", text: $budget.marketDataSettings.apiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    NavigationLink("Watchlist Tickers") {
+                        WatchlistSettingsView(budget: budget)
+                    }
                     Text("Used for SPY comparison and quote refresh.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Alpaca Fallback") {
+                    Toggle("Use Alpaca when primary provider fails", isOn: $budget.marketDataSettings.useAlpacaFallback)
+                    SecureField("Alpaca API key ID", text: $budget.marketDataSettings.alpacaAPIKeyId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Alpaca secret key", text: $budget.marketDataSettings.alpacaSecretKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Picker("Data feed", selection: $budget.marketDataSettings.alpacaFeed) {
+                        ForEach(AlpacaMarketDataFeed.allCases) { feed in
+                            Text(feed.rawValue).tag(feed)
+                        }
+                    }
+                    Text("IEX works for free stock market data; SIP requires an Alpaca market data subscription.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -3017,6 +4361,74 @@ struct AppSettingsView: View {
                 }
             }
         }
+    }
+}
+
+struct WatchlistSettingsView: View {
+    @ObservedObject var budget: BudgetModel
+    @State private var newTicker: String = ""
+
+    var body: some View {
+        Form {
+            Section("Add Ticker") {
+                HStack(spacing: 8) {
+                    TextField("e.g. AAPL", text: $newTicker)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    Button("Add") {
+                        addTicker()
+                    }
+                    .disabled(sanitizedNewTicker.isEmpty)
+                }
+                Text("Use stock symbols only (for example AAPL, MSFT, NVDA).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Current Watchlist") {
+                if budget.watchlistTickers.isEmpty {
+                    Text("No tickers yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(budget.watchlistTickers, id: \.self) { ticker in
+                        Text(ticker)
+                    }
+                    .onDelete(perform: deleteTicker)
+                    .onMove(perform: moveTicker)
+                }
+            }
+        }
+        .navigationTitle("Watchlist")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                EditButton()
+            }
+        }
+    }
+
+    private var sanitizedNewTicker: String {
+        newTicker
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+
+    private func addTicker() {
+        let ticker = sanitizedNewTicker
+        guard !ticker.isEmpty else { return }
+        guard !budget.watchlistTickers.contains(ticker) else {
+            newTicker = ""
+            return
+        }
+        budget.watchlistTickers.append(ticker)
+        newTicker = ""
+    }
+
+    private func deleteTicker(at offsets: IndexSet) {
+        budget.watchlistTickers.remove(atOffsets: offsets)
+    }
+
+    private func moveTicker(from source: IndexSet, to destination: Int) {
+        budget.watchlistTickers.move(fromOffsets: source, toOffset: destination)
     }
 }
 
@@ -4014,6 +5426,11 @@ struct IncomeRowView: View {
                 Text(income.date, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(income.bankName)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             Spacer()
             Text(income.amount, format: .currency(code: "USD"))
@@ -4703,7 +6120,7 @@ struct AddExpenseView: View {
                             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
                         )
                         withAnimation(.easeInOut) {
-                            budget.expenses.append(expense)
+                            budget.addExpense(expense)
                         }
                         onSave?(expense)
                         Haptics.success()
@@ -4818,6 +6235,14 @@ struct AddIncomeView: View {
     @State private var name: String = ""
     @State private var amount: Double = 0
     @State private var date: Date = Date()
+    @State private var bankName: String = ""
+
+    private var bankAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [bankName])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
 
     private var monthInterval: DateInterval? {
         Calendar.current.dateInterval(of: .month, for: selectedMonth)
@@ -4839,6 +6264,15 @@ struct AddIncomeView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Bank Account", text: $bankName)
+                    if !bankAccountOptions.isEmpty {
+                        Picker("Saved Accounts", selection: $bankName) {
+                            Text("None").tag("")
+                            ForEach(bankAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
+                    }
                 } header: {
                     Text("Income Details")
                 }
@@ -4855,9 +6289,14 @@ struct AddIncomeView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let entry = IncomeEntry(name: name.isEmpty ? "Income" : name, amount: amount, date: date)
+                        let entry = IncomeEntry(
+                            name: name.isEmpty ? "Income" : name,
+                            amount: amount,
+                            date: date,
+                            bankName: bankName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
                         withAnimation(.easeInOut) {
-                            budget.incomes.append(entry)
+                            budget.addIncomeEntry(entry)
                         }
                         Haptics.success()
                         dismiss()
@@ -4877,6 +6316,14 @@ struct EditIncomeView: View {
     @State private var name: String
     @State private var amount: Double
     @State private var date: Date
+    @State private var bankName: String
+
+    private var bankAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [bankName])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
 
     init(budget: BudgetModel, income: IncomeEntry) {
         self.budget = budget
@@ -4884,6 +6331,12 @@ struct EditIncomeView: View {
         _name = State(initialValue: income.name)
         _amount = State(initialValue: income.amount)
         _date = State(initialValue: income.date)
+        _bankName = State(initialValue: income.bankName)
+    }
+
+    private var entryTitle: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Edit Income" : trimmed
     }
 
     var body: some View {
@@ -4894,12 +6347,21 @@ struct EditIncomeView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Bank Account", text: $bankName)
+                    if !bankAccountOptions.isEmpty {
+                        Picker("Saved Accounts", selection: $bankName) {
+                            Text("None").tag("")
+                            ForEach(bankAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
+                    }
                 } header: {
                     Text("Income Details")
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Edit Income")
+            .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -4907,11 +6369,15 @@ struct EditIncomeView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if let index = budget.incomes.firstIndex(where: { $0.id == income.id }) {
-                            budget.incomes[index].name = name
-                            budget.incomes[index].amount = amount
-                            budget.incomes[index].date = date
-                        }
+                        budget.updateIncomeEntry(
+                            IncomeEntry(
+                                id: income.id,
+                                name: name.isEmpty ? "Income" : name,
+                                amount: amount,
+                                date: date,
+                                bankName: bankName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
                         Haptics.success()
                         dismiss()
                     }
@@ -4960,6 +6426,11 @@ struct EditExpenseView: View {
         _note = State(initialValue: expense.note)
     }
 
+    private var entryTitle: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Edit Expense" : trimmed
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -5000,7 +6471,7 @@ struct EditExpenseView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Edit Expense")
+            .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: section) { _, _ in
                 categoryId = categories.first?.id
@@ -5029,15 +6500,18 @@ struct EditExpenseView: View {
                         }
 
                         guard let categoryId = resolvedCategoryId else { return }
-                        if let index = budget.expenses.firstIndex(where: { $0.id == expense.id }) {
-                            budget.expenses[index].name = name
-                            budget.expenses[index].amount = amount
-                            budget.expenses[index].date = date
-                            budget.expenses[index].section = section
-                            budget.expenses[index].categoryId = categoryId
-                            budget.expenses[index].paymentAccount = paymentAccount
-                            budget.expenses[index].note = note
-                        }
+                        budget.updateExpense(
+                            Expense(
+                                id: expense.id,
+                                name: name,
+                                amount: amount,
+                                date: date,
+                                section: section,
+                                categoryId: categoryId,
+                                paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
                         Haptics.success()
                         dismiss()
                     }
@@ -5067,6 +6541,11 @@ struct EditSavingsEntryView: View {
         _goalId = State(initialValue: savingsEntry.goalId)
     }
 
+    private var entryTitle: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Edit Savings" : trimmed
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -5085,7 +6564,7 @@ struct EditSavingsEntryView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Edit Savings")
+            .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -5254,6 +6733,13 @@ struct CalendarEntryEditorView: View {
                                 Text(accountName).tag(accountName)
                             }
                         }
+                    } else {
+                        Picker("Deposit to", selection: $paymentAccount) {
+                            Text("None").tag("")
+                            ForEach(paymentAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
                     }
                     TextField("Note", text: $note, axis: .vertical)
 
@@ -5351,8 +6837,13 @@ struct CalendarEntryEditorView: View {
                                 budget.recurringPayments.append(payment)
                             }
                         } else if kind == .income {
-                            budget.incomes.append(
-                                IncomeEntry(name: trimmedName, amount: amount, date: date)
+                            budget.addIncomeEntry(
+                                IncomeEntry(
+                                    name: trimmedName,
+                                    amount: amount,
+                                    date: date,
+                                    bankName: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+                                )
                             )
                         } else {
                             let resolvedCategoryId: UUID?
@@ -5389,7 +6880,7 @@ struct CalendarEntryEditorView: View {
                             } else {
                                 markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
                             }
-                            budget.expenses.append(
+                            budget.addExpense(
                                 Expense(
                                     name: trimmedName,
                                     amount: amount,
@@ -5427,7 +6918,7 @@ struct CreditAccountsView: View {
     private func actualBalance(for account: CreditAccount) -> Double {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(0) { partial, expense in
+        return budget.expenses.reduce(account.startingBalance) { partial, expense in
             if let paidCard = creditCardPaymentTarget(from: expense.note),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -5436,6 +6927,11 @@ struct CreditAccountsView: View {
             guard paymentAccount == normalizedAccountName else { return partial }
             return partial + expense.amount
         }
+    }
+
+    private func utilization(for account: CreditAccount) -> Double {
+        guard account.creditLimit > 0 else { return 0 }
+        return max(0, actualBalance(for: account) / account.creditLimit)
     }
 
     private func creditCardPaymentTarget(from note: String) -> String? {
@@ -5477,6 +6973,9 @@ struct CreditAccountsView: View {
                                     Text("Actual: \(actualBalance(for: account), format: .currency(code: "USD"))")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
+                                    Text("Utilization: \(utilization(for: account) * 100, specifier: "%.1f")%")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -5495,6 +6994,8 @@ struct CreditAccountsView: View {
             }
             .sheet(isPresented: $showingAddAccount) {
                 AddCreditAccountView(budget: budget)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -5507,6 +7008,7 @@ struct AddCreditAccountView: View {
     @State private var name: String = ""
     @State private var closingDay: Int = 1
     @State private var dueDay: Int = 1
+    @State private var startingBalance: Double = 0
     @State private var creditLimit: Double = 0
     @State private var note: String = ""
 
@@ -5531,6 +7033,11 @@ struct AddCreditAccountView: View {
                 }
 
                 Section("Balances") {
+                    LabeledContent("Starting Balance") {
+                        TextField("0.00", value: $startingBalance, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                     LabeledContent("Total Credit Limit") {
                         TextField("0.00", value: $creditLimit, format: .currency(code: "USD"))
                             .keyboardType(.decimalPad)
@@ -5557,6 +7064,7 @@ struct AddCreditAccountView: View {
                                 name: trimmed,
                                 closingDay: min(max(closingDay, 1), 31),
                                 dueDay: min(max(dueDay, 1), 31),
+                                startingBalance: startingBalance,
                                 creditLimit: max(creditLimit, 0),
                                 isActive: true,
                                 note: note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5610,6 +7118,15 @@ struct EditCreditAccountView: View {
             }
 
             Section("Balances") {
+                LabeledContent("Starting Balance") {
+                    TextField(
+                        "0.00",
+                        value: $account.startingBalance,
+                        format: .currency(code: "USD")
+                    )
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                }
                 LabeledContent("Total Credit Limit") {
                     TextField(
                         "0.00",
@@ -5641,7 +7158,7 @@ struct CreditAccountDetailView: View {
     private var actualBalance: Double {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(0) { partial, expense in
+        return budget.expenses.reduce(account.startingBalance) { partial, expense in
             if let paidCard = creditCardPaymentTarget(from: expense.note),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -5660,6 +7177,32 @@ struct CreditAccountDetailView: View {
         guard startIndex < endIndex else { return nil }
         let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
         return accountName.isEmpty ? nil : accountName
+    }
+
+    private var utilization: Double {
+        guard account.creditLimit > 0 else { return 0 }
+        return max(0, actualBalance / account.creditLimit)
+    }
+
+    private var transactionHistory: [(date: Date, name: String, amount: Double)] {
+        let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedAccountName.isEmpty else { return [] }
+
+        var entries: [(Date, String, Double)] = budget.expenses.compactMap { expense in
+            let expenseAccount = expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard expenseAccount == normalizedAccountName else { return nil }
+            return (expense.date, expense.name, expense.amount)
+        }
+
+        entries.append(contentsOf: budget.expenses.compactMap { expense in
+            guard let paidCard = creditCardPaymentTarget(from: expense.note),
+                  paidCard.caseInsensitiveCompare(account.name) == .orderedSame else {
+                return nil
+            }
+            return (expense.date, "Payment: \(expense.name)", -expense.amount)
+        })
+
+        return entries.sorted(by: { $0.0 > $1.0 })
     }
 
     var body: some View {
@@ -5695,6 +7238,35 @@ struct CreditAccountDetailView: View {
                     Text(account.creditLimit, format: .currency(code: "USD"))
                         .foregroundStyle(.secondary)
                 }
+                HStack {
+                    Text("Utilization")
+                    Spacer()
+                    Text("\(utilization * 100, specifier: "%.1f")%")
+                        .foregroundStyle(utilization >= 0.8 ? .red : .secondary)
+                }
+
+                Section("Transaction History") {
+                    if transactionHistory.isEmpty {
+                        Text("No transactions found for this card yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(transactionHistory.prefix(40).enumerated()), id: \.offset) { _, item in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name)
+                                        .font(.subheadline)
+                                    Text(item.date, style: .date)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(item.amount, format: .currency(code: "USD"))
+                                    .font(.subheadline)
+                                    .foregroundStyle(item.amount < 0 ? .green : .primary)
+                            }
+                        }
+                    }
+                }
                 if !account.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Note")
@@ -5715,37 +7287,104 @@ struct CreditAccountDetailView: View {
     }
 }
 
+struct PortfolioTransactionDetailView: View {
+    let transaction: PortfolioTransaction
+    @Environment(\.dismiss) private var dismiss
+
+    private var signedAmount: Double {
+        switch transaction.type {
+        case .sell, .dividend:
+            return transaction.amount
+        default:
+            return -transaction.amount
+        }
+    }
+
+    private var entryTitle: String {
+        let ticker = transaction.ticker?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let base = transaction.type.title
+        return ticker.isEmpty ? base : "\(base) \(ticker.uppercased())"
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                HStack {
+                    Text("Type")
+                    Spacer()
+                    Text(transaction.type.title)
+                        .foregroundStyle(.secondary)
+                }
+                if let ticker = transaction.ticker, !ticker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack {
+                        Text("Ticker")
+                        Spacer()
+                        Text(ticker.uppercased())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Text("Date")
+                    Spacer()
+                    Text(transaction.date, style: .date)
+                        .foregroundStyle(.secondary)
+                }
+                if let shares = transaction.shares {
+                    HStack {
+                        Text("Shares")
+                        Spacer()
+                        Text(shares, format: .number.precision(.fractionLength(0...4)))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let price = transaction.pricePerShare {
+                    HStack {
+                        Text("Price/Share")
+                        Spacer()
+                        Text(price, format: .currency(code: "USD"))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Text("Amount")
+                    Spacer()
+                    Text(signedAmount, format: .currency(code: "USD"))
+                        .foregroundStyle(signedAmount >= 0 ? .green : .primary)
+                }
+                if let notes = transaction.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section("Notes") {
+                        Text(notes)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(entryTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 struct BankAccountsView: View {
     @ObservedObject var budget: BudgetModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name: String = ""
-    @State private var balance: Double = 0
-    @State private var note: String = ""
+    @State private var showingAddAccount = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Add Bank Account") {
-                    TextField("Account name", text: $name)
-                    TextField("Balance", value: $balance, format: .currency(code: "USD"))
-                        .keyboardType(.decimalPad)
-                    TextField("Note", text: $note)
-                    Button("Add Account") {
-                        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        budget.bankAccounts.append(
-                            BankAccount(
-                                name: trimmed,
-                                balance: balance,
-                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
-                            )
-                        )
-                        name = ""
-                        balance = 0
-                        note = ""
+                Section("Add") {
+                    Button {
+                        showingAddAccount = true
+                    } label: {
+                        Label("Add Bank Account", systemImage: "plus.circle")
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 Section("Accounts") {
@@ -5754,13 +7393,23 @@ struct BankAccountsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach($budget.bankAccounts) { $account in
-                            VStack(alignment: .leading, spacing: 8) {
-                                TextField("Name", text: $account.name)
-                                TextField("Balance", value: $account.balance, format: .currency(code: "USD"))
-                                    .keyboardType(.decimalPad)
-                                TextField("Note", text: $account.note)
+                            NavigationLink {
+                                EditBankAccountView(account: $account)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(account.name)
+                                        .font(.headline)
+                                    Text(account.balance, format: .currency(code: "USD"))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    if !account.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text(account.note)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
                             }
-                            .padding(.vertical, 4)
                         }
                         .onDelete { offsets in
                             budget.bankAccounts.remove(atOffsets: offsets)
@@ -5775,7 +7424,92 @@ struct BankAccountsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(isPresented: $showingAddAccount) {
+                AddBankAccountView(budget: budget)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
         }
+    }
+}
+
+struct AddBankAccountView: View {
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String = ""
+    @State private var balance: Double = 0
+    @State private var note: String = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account Details") {
+                    LabeledContent("Account Name") {
+                        TextField("Account name", text: $name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Balance") {
+                        TextField("0.00", value: $balance, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section("Notes") {
+                    TextField("Optional note", text: $note, axis: .vertical)
+                }
+            }
+            .navigationTitle("Add Bank Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        budget.bankAccounts.append(
+                            BankAccount(
+                                name: trimmed,
+                                balance: balance,
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
+                        )
+                        Haptics.success()
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+struct EditBankAccountView: View {
+    @Binding var account: BankAccount
+
+    var body: some View {
+        Form {
+            Section("Account Details") {
+                LabeledContent("Account Name") {
+                    TextField("Account name", text: $account.name)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Balance") {
+                    TextField("0.00", value: $account.balance, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
+            Section("Notes") {
+                TextField("Optional note", text: $account.note, axis: .vertical)
+            }
+        }
+        .navigationTitle("Edit Account")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

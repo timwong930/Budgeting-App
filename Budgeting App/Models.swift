@@ -8,6 +8,9 @@
 import Foundation
 import Combine
 import OSLog
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 enum PayFrequency: String, CaseIterable, Identifiable, Codable, Sendable {
     case weekly = "Weekly"
@@ -120,6 +123,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
     var name: String
     var closingDay: Int
     var dueDay: Int
+    var startingBalance: Double
     var expectedAmount: Double
     var creditLimit: Double
     var isActive: Bool
@@ -130,6 +134,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         name: String,
         closingDay: Int = 1,
         dueDay: Int,
+        startingBalance: Double = 0,
         expectedAmount: Double = 0,
         creditLimit: Double = 0,
         isActive: Bool = true,
@@ -139,6 +144,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         self.name = name
         self.closingDay = min(max(closingDay, 1), 31)
         self.dueDay = min(max(dueDay, 1), 31)
+        self.startingBalance = startingBalance
         self.expectedAmount = expectedAmount
         self.creditLimit = max(creditLimit, 0)
         self.isActive = isActive
@@ -150,6 +156,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         case name
         case closingDay
         case dueDay
+        case startingBalance
         case expectedAmount
         case creditLimit
         case isActive
@@ -162,6 +169,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         name = try container.decode(String.self, forKey: .name)
         closingDay = min(max(try container.decodeIfPresent(Int.self, forKey: .closingDay) ?? 1, 1), 31)
         dueDay = min(max(try container.decodeIfPresent(Int.self, forKey: .dueDay) ?? 1, 1), 31)
+        startingBalance = try container.decodeIfPresent(Double.self, forKey: .startingBalance) ?? 0
         expectedAmount = try container.decodeIfPresent(Double.self, forKey: .expectedAmount) ?? 0
         creditLimit = max(try container.decodeIfPresent(Double.self, forKey: .creditLimit) ?? 0, 0)
         isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
@@ -204,12 +212,40 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
     var name: String
     var amount: Double
     var date: Date
+    var bankName: String
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date()) {
+    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "") {
         self.id = id
         self.name = name
         self.amount = amount
         self.date = date
+        self.bankName = bankName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case amount
+        case date
+        case bankName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        amount = try container.decode(Double.self, forKey: .amount)
+        date = try container.decode(Date.self, forKey: .date)
+        bankName = try container.decodeIfPresent(String.self, forKey: .bankName) ?? ""
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(amount, forKey: .amount)
+        try container.encode(date, forKey: .date)
+        try container.encode(bankName, forKey: .bankName)
     }
 }
 
@@ -610,13 +646,69 @@ enum MarketDataProvider: String, CaseIterable, Identifiable, Codable, Sendable {
     var id: String { rawValue }
 }
 
+enum AlpacaMarketDataFeed: String, CaseIterable, Identifiable, Codable, Sendable {
+    case iex = "IEX"
+    case sip = "SIP"
+
+    var id: String { rawValue }
+
+    var apiValue: String { rawValue.lowercased() }
+}
+
 struct MarketDataSettings: Codable, Sendable, Equatable {
     var provider: MarketDataProvider
     var apiKey: String
+    var alpacaAPIKeyId: String
+    var alpacaSecretKey: String
+    var alpacaFeed: AlpacaMarketDataFeed
+    var useAlpacaFallback: Bool
 
-    init(provider: MarketDataProvider = .alphaVantage, apiKey: String = "") {
+    init(
+        provider: MarketDataProvider = .alphaVantage,
+        apiKey: String = "",
+        alpacaAPIKeyId: String = "",
+        alpacaSecretKey: String = "",
+        alpacaFeed: AlpacaMarketDataFeed = .iex,
+        useAlpacaFallback: Bool = true
+    ) {
         self.provider = provider
         self.apiKey = apiKey
+        self.alpacaAPIKeyId = alpacaAPIKeyId
+        self.alpacaSecretKey = alpacaSecretKey
+        self.alpacaFeed = alpacaFeed
+        self.useAlpacaFallback = useAlpacaFallback
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case apiKey
+        case alpacaAPIKeyId
+        case alpacaSecretKey
+        case alpacaFeed
+        case useAlpacaFallback
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(MarketDataProvider.self, forKey: .provider) ?? .alphaVantage
+        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        alpacaAPIKeyId = try container.decodeIfPresent(String.self, forKey: .alpacaAPIKeyId) ?? ""
+        alpacaSecretKey = try container.decodeIfPresent(String.self, forKey: .alpacaSecretKey) ?? ""
+        alpacaFeed = try container.decodeIfPresent(AlpacaMarketDataFeed.self, forKey: .alpacaFeed) ?? .iex
+        useAlpacaFallback = try container.decodeIfPresent(Bool.self, forKey: .useAlpacaFallback) ?? true
+    }
+
+    var hasPrimaryAPIKey: Bool {
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasAlpacaCredentials: Bool {
+        !alpacaAPIKeyId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !alpacaSecretKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canFetchMarketData: Bool {
+        hasPrimaryAPIKey || (useAlpacaFallback && hasAlpacaCredentials)
     }
 }
 
@@ -695,6 +787,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
     let dividendPayments: [DividendPayment]?
     let holdings: [PortfolioHolding]?
     let marketDataSettings: MarketDataSettings?
+    let watchlistTickers: [String]?
     let cachedQuotes: [String: CachedQuote]?
     let portfolioValueHistory: [PortfolioValuePoint]?
     let portfolioTransactions: [PortfolioTransaction]?
@@ -721,6 +814,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         case dividendPayments
         case holdings
         case marketDataSettings
+        case watchlistTickers
         case cachedQuotes
         case portfolioValueHistory
         case portfolioTransactions
@@ -748,6 +842,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         dividendPayments: [DividendPayment],
         holdings: [PortfolioHolding],
         marketDataSettings: MarketDataSettings,
+        watchlistTickers: [String],
         cachedQuotes: [String: CachedQuote],
         portfolioValueHistory: [PortfolioValuePoint],
         portfolioTransactions: [PortfolioTransaction],
@@ -773,6 +868,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         self.dividendPayments = dividendPayments
         self.holdings = holdings
         self.marketDataSettings = marketDataSettings
+        self.watchlistTickers = watchlistTickers
         self.cachedQuotes = cachedQuotes
         self.portfolioValueHistory = portfolioValueHistory
         self.portfolioTransactions = portfolioTransactions
@@ -801,6 +897,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         dividendPayments = try container.decodeIfPresent([DividendPayment].self, forKey: .dividendPayments)
         holdings = try container.decodeIfPresent([PortfolioHolding].self, forKey: .holdings)
         marketDataSettings = try container.decodeIfPresent(MarketDataSettings.self, forKey: .marketDataSettings)
+        watchlistTickers = try container.decodeIfPresent([String].self, forKey: .watchlistTickers)
         cachedQuotes = try container.decodeIfPresent([String: CachedQuote].self, forKey: .cachedQuotes)
         portfolioValueHistory = try container.decodeIfPresent([PortfolioValuePoint].self, forKey: .portfolioValueHistory)
         portfolioTransactions = try container.decodeIfPresent([PortfolioTransaction].self, forKey: .portfolioTransactions)
@@ -813,6 +910,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
 }
 
 class BudgetModel: ObservableObject {
+    static let appGroupIdentifier = "group.Timothy-Wong.Budgeting-App"
     @Published var income: Double = 0
     @Published var incomeByMonth: [String: Double] = [:]
     @Published var needsAllocationsByMonth: [String: [UUID: Double]] = [:]
@@ -833,6 +931,7 @@ class BudgetModel: ObservableObject {
     @Published var dividendPayments: [DividendPayment] = []
     @Published var holdings: [PortfolioHolding] = []
     @Published var marketDataSettings: MarketDataSettings = MarketDataSettings()
+    @Published var watchlistTickers: [String] = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"]
     @Published var cachedQuotes: [String: CachedQuote] = [:]
     @Published var marketDataWarning: String?
     @Published var portfolioValueHistory: [PortfolioValuePoint] = []
@@ -843,8 +942,9 @@ class BudgetModel: ObservableObject {
     @Published var creditAccounts: [CreditAccount] = []
     @Published var bankAccounts: [BankAccount] = []
 
-    private let saveURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("budget.json")
+    private static let saveFileName = "budget.json"
+    private let localSaveURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(saveFileName)
     private var saveCancellable: AnyCancellable?
     private let saveQueue = DispatchQueue(label: "BudgetModel.save", qos: .utility)
     private let logger = Logger(
@@ -939,6 +1039,7 @@ class BudgetModel: ObservableObject {
             dividendPayments: dividendPayments,
             holdings: holdings,
             marketDataSettings: marketDataSettings,
+            watchlistTickers: watchlistTickers,
             cachedQuotes: cachedQuotes,
             portfolioValueHistory: portfolioValueHistory,
             portfolioTransactions: portfolioTransactions,
@@ -949,19 +1050,52 @@ class BudgetModel: ObservableObject {
             bankAccounts: bankAccounts
         )
 
-        let saveURL = saveURL
+        let localSaveURL = localSaveURL
+        let sharedSaveURL = sharedSaveURL()
+        let iCloudSaveURL = iCloudSaveURL()
         let logger = logger
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(snapshot)
+        } catch {
+            logger.error("Failed to encode budget snapshot: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
         saveQueue.async {
             do {
-                let data = try JSONEncoder().encode(snapshot)
-                try data.write(to: saveURL, options: Data.WritingOptions.atomic)
+                try data.write(to: localSaveURL, options: Data.WritingOptions.atomic)
+                if let sharedSaveURL {
+                    let sharedDirectory = sharedSaveURL.deletingLastPathComponent()
+                    if !FileManager.default.fileExists(atPath: sharedDirectory.path) {
+                        try FileManager.default.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+                    }
+                    try data.write(to: sharedSaveURL, options: Data.WritingOptions.atomic)
+                }
+
+                if let iCloudSaveURL {
+                    let iCloudDirectory = iCloudSaveURL.deletingLastPathComponent()
+                    if !FileManager.default.fileExists(atPath: iCloudDirectory.path) {
+                        try FileManager.default.createDirectory(at: iCloudDirectory, withIntermediateDirectories: true)
+                    }
+                    try data.write(to: iCloudSaveURL, options: Data.WritingOptions.atomic)
+                }
             } catch {
                 logger.error("Failed to save budget snapshot: \(error.localizedDescription, privacy: .public)")
             }
+
+            #if canImport(WidgetKit)
+            DispatchQueue.main.async {
+                WidgetCenter.shared.reloadAllTimelines()
+            }
+            #endif
         }
     }
 
     private func load() {
+        let candidateURLs = [iCloudSaveURL(), sharedSaveURL(), localSaveURL].compactMap { $0 }
+        let saveURL = mostRecentSaveURL(from: candidateURLs) ?? localSaveURL
+
         let data: Data
         do {
             data = try Data(contentsOf: saveURL)
@@ -1000,6 +1134,7 @@ class BudgetModel: ObservableObject {
         dividendPayments = snapshot.dividendPayments ?? []
         holdings = snapshot.holdings ?? []
         marketDataSettings = snapshot.marketDataSettings ?? MarketDataSettings()
+        watchlistTickers = Self.normalizedTickers(snapshot.watchlistTickers ?? ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"])
         cachedQuotes = snapshot.cachedQuotes ?? [:]
         portfolioValueHistory = snapshot.portfolioValueHistory ?? []
         portfolioTransactions = snapshot.portfolioTransactions ?? []
@@ -1025,6 +1160,47 @@ class BudgetModel: ObservableObject {
 
         recalculateSpent()
         synchronizeLegacyMarginStateFromLedger()
+    }
+
+    private func iCloudSaveURL() -> URL? {
+        guard let containerURL = FileManager.default.url(forUbiquityContainerIdentifier: nil) else {
+            return nil
+        }
+        return containerURL
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent(Self.saveFileName)
+    }
+
+    private func sharedSaveURL() -> URL? {
+        guard let sharedContainerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier
+        ) else {
+            return nil
+        }
+
+        return sharedContainerURL.appendingPathComponent(Self.saveFileName)
+    }
+
+    private func mostRecentSaveURL(from urls: [URL]) -> URL? {
+        urls
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            .max { lhs, rhs in
+                let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return lhsDate < rhsDate
+            }
+    }
+
+    private static func normalizedTickers(_ tickers: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for raw in tickers {
+            let ticker = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !ticker.isEmpty else { continue }
+            guard seen.insert(ticker).inserted else { continue }
+            normalized.append(ticker)
+        }
+        return normalized
     }
 
     var marginUsedFromLedger: Double {
@@ -1182,8 +1358,74 @@ class BudgetModel: ObservableObject {
         savingsGoals.first(where: { $0.id == entry.goalId })?.displayName ?? "Savings"
     }
 
+    func addIncomeEntry(_ entry: IncomeEntry) {
+        incomes.append(entry)
+        applyBalanceImpact(for: entry, multiplier: 1)
+    }
+
+    func updateIncomeEntry(_ updatedEntry: IncomeEntry) {
+        guard let index = incomes.firstIndex(where: { $0.id == updatedEntry.id }) else { return }
+        let previousEntry = incomes[index]
+        applyBalanceImpact(for: previousEntry, multiplier: -1)
+        incomes[index] = updatedEntry
+        applyBalanceImpact(for: updatedEntry, multiplier: 1)
+    }
+
+    func deleteIncomeEntry(id: UUID) {
+        guard let index = incomes.firstIndex(where: { $0.id == id }) else { return }
+        let removedEntry = incomes.remove(at: index)
+        applyBalanceImpact(for: removedEntry, multiplier: -1)
+    }
+
+    func addExpense(_ expense: Expense) {
+        expenses.append(expense)
+        applyBalanceImpact(for: expense, multiplier: 1)
+    }
+
+    func updateExpense(_ updatedExpense: Expense) {
+        guard let index = expenses.firstIndex(where: { $0.id == updatedExpense.id }) else { return }
+        let previousExpense = expenses[index]
+        applyBalanceImpact(for: previousExpense, multiplier: -1)
+        expenses[index] = updatedExpense
+        applyBalanceImpact(for: updatedExpense, multiplier: 1)
+    }
+
+    func deleteExpense(id: UUID) {
+        guard let index = expenses.firstIndex(where: { $0.id == id }) else { return }
+        let removedExpense = expenses.remove(at: index)
+        applyBalanceImpact(for: removedExpense, multiplier: -1)
+    }
+
     func removeExpenses(for categoryId: UUID) {
+        let removedExpenses = expenses.filter { $0.categoryId == categoryId }
         expenses.removeAll { $0.categoryId == categoryId }
+        for expense in removedExpenses {
+            applyBalanceImpact(for: expense, multiplier: -1)
+        }
+    }
+
+    func creditAccountActualBalance(_ account: CreditAccount) -> Double {
+        let normalizedName = normalizedAccountName(account.name)
+        guard !normalizedName.isEmpty else { return 0 }
+        return expenses.reduce(account.startingBalance) { partial, expense in
+            if let paidCard = creditCardPaymentTarget(from: expense.note),
+               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+                return partial - expense.amount
+            }
+            let paymentAccount = normalizedAccountName(expense.paymentAccount)
+            guard paymentAccount == normalizedName else { return partial }
+            return partial + expense.amount
+        }
+    }
+
+    func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
     }
 
     func applyMonthlyAllocations(for date: Date) {
@@ -1327,5 +1569,24 @@ class BudgetModel: ObservableObject {
         guard let index = savingsGoals.firstIndex(where: { $0.id == goalId }) else { return }
         let updatedAmount = savingsGoals[index].currentAmount + delta
         savingsGoals[index].currentAmount = max(updatedAmount, 0)
+    }
+
+    private func applyBalanceImpact(for income: IncomeEntry, multiplier: Double) {
+        applyBankAccountDelta(named: income.bankName, delta: income.amount * multiplier)
+    }
+
+    private func applyBalanceImpact(for expense: Expense, multiplier: Double) {
+        applyBankAccountDelta(named: expense.paymentAccount, delta: -expense.amount * multiplier)
+    }
+
+    private func applyBankAccountDelta(named accountName: String, delta: Double) {
+        let normalized = normalizedAccountName(accountName)
+        guard !normalized.isEmpty else { return }
+        guard let index = bankAccounts.firstIndex(where: { normalizedAccountName($0.name) == normalized }) else { return }
+        bankAccounts[index].balance += delta
+    }
+
+    private func normalizedAccountName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

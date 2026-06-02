@@ -7,6 +7,43 @@ private enum HoldingsViewMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum HoldingsSortOption: String, CaseIterable, Identifiable {
+    case ticker = "Ticker"
+    case marketValue = "Value"
+    case monthlyIncome = "Monthly"
+    case allocation = "Allocation"
+    case yield = "Yield"
+    case unrealized = "Unrealized"
+    case shares = "Shares"
+    case price = "Price"
+
+    var id: String { rawValue }
+}
+
+private enum HoldingsAssetFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case growthStock = "Growth"
+    case dividendStock = "Dividend Stock"
+    case dividendETF = "Dividend ETF"
+    case coveredCallETF = "Covered Call ETF"
+    case speculative = "Speculative"
+    case cashLike = "Cash Like"
+
+    var id: String { rawValue }
+
+    var assetType: PortfolioAssetType? {
+        switch self {
+        case .all: return nil
+        case .growthStock: return .growthStock
+        case .dividendStock: return .dividendStock
+        case .dividendETF: return .dividendETF
+        case .coveredCallETF: return .coveredCallETF
+        case .speculative: return .speculative
+        case .cashLike: return .cashLike
+        }
+    }
+}
+
 private enum NetWorthRange: String, CaseIterable, Identifiable {
     case oneDay = "1D"
     case oneWeek = "1W"
@@ -76,9 +113,43 @@ struct MarginDashboardView: View {
     @State private var refreshProgressTotal = 0
     @State private var refreshProgressCompleted = 0
     @State private var refreshCurrentTicker = ""
+    @State private var holdingQuoteSnapshots: [String: MarketQuoteSnapshot] = [:]
+    @State private var holdingQuoteCloses: [String: [Double]] = [:]
+    @State private var holdingsSortOption: HoldingsSortOption = .ticker
+    @State private var holdingsSortAscending = true
+    @State private var holdingsAssetFilter: HoldingsAssetFilter = .all
 
     private let marketDataService = MarketDataService()
     private let drawdowns: [Double] = [0.20, 0.35, 0.50]
+
+    private var displayHoldings: [PortfolioHolding] {
+        let filtered = budget.holdings.filter { holding in
+            guard let assetType = holdingsAssetFilter.assetType else { return true }
+            return holding.assetType == assetType
+        }
+
+        return filtered.sorted { lhs, rhs in
+            switch holdingsSortOption {
+            case .ticker:
+                let comparison = lhs.ticker.uppercased().localizedStandardCompare(rhs.ticker.uppercased())
+                return holdingsSortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
+            case .marketValue:
+                return sort(lhs.shares * resolvedPrice(for: lhs), rhs.shares * resolvedPrice(for: rhs))
+            case .monthlyIncome:
+                return sort((lhs.shares * lhs.annualDividendPerShare) / 12.0, (rhs.shares * rhs.annualDividendPerShare) / 12.0)
+            case .allocation:
+                return sort(allocation(for: lhs), allocation(for: rhs))
+            case .yield:
+                return sort(currentYield(for: lhs), currentYield(for: rhs))
+            case .unrealized:
+                return sort(unrealizedGain(for: lhs), unrealizedGain(for: rhs))
+            case .shares:
+                return sort(lhs.shares, rhs.shares)
+            case .price:
+                return sort(resolvedPrice(for: lhs), resolvedPrice(for: rhs))
+            }
+        }
+    }
 
     private var sortedHoldings: [PortfolioHolding] {
         budget.holdings.sorted { $0.ticker.uppercased() < $1.ticker.uppercased() }
@@ -120,6 +191,10 @@ struct MarginDashboardView: View {
 
     private var netPortfolioValue: Double {
         grossPortfolioValue - budget.portfolioSnapshot.marginUsed
+    }
+
+    private var latestHoldingsUpdate: Date? {
+        budget.cachedQuotes.values.map(\.updatedAt).max()
     }
 
     private var annualDividendsFromHoldings: Double {
@@ -350,9 +425,15 @@ struct MarginDashboardView: View {
             .padding(.top, 20)
             .padding(.bottom, max(120, bottomPadding))
         }
+        .refreshable {
+            await refreshPrices()
+        }
         .onAppear {
             budget.synchronizeLegacyMarginStateFromLedger()
             syncPortfolioSnapshotAndHistory()
+        }
+        .task {
+            await runHoldingsAutoRefreshLoop()
         }
         .onChange(of: budget.portfolioTransactions) { _, _ in
             budget.synchronizeLegacyMarginStateFromLedger()
@@ -435,7 +516,9 @@ struct MarginDashboardView: View {
                     Text("Holdings")
                         .font(.headline)
                     Spacer()
-                    Button("Refresh Price", action: refreshPrices)
+                    Button("Refresh Price") {
+                        Task { await refreshPrices() }
+                    }
                         .buttonStyle(.bordered)
                         .disabled(isRefreshingPrices)
                 }
@@ -463,14 +546,20 @@ struct MarginDashboardView: View {
                 }
                 .pickerStyle(.segmented)
 
+                holdingsFilterSortControls
+
                 if let warning = budget.marketDataWarning {
                     Text(warning)
                         .font(.caption)
                         .foregroundStyle(.yellow)
                 }
 
-                if sortedHoldings.isEmpty {
+                if budget.holdings.isEmpty {
                     Text("No holdings yet. Use + to add investment or manual holding.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if displayHoldings.isEmpty {
+                    Text("No holdings match the current filter.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -484,12 +573,12 @@ struct MarginDashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                    ForEach(sortedHoldings) { holding in
+                    ForEach(displayHoldings) { holding in
                         let marketValue = holding.shares * resolvedPrice(for: holding)
                         let totalCost = holding.shares * holding.averageCost
                         let annualIncome = holding.shares * holding.annualDividendPerShare
                         let monthlyIncome = annualIncome / 12.0
-                        let allocation = totalMarketValue > 0 ? marketValue / totalMarketValue : 0
+                        let allocation = allocation(for: holding)
                         let unrealized = marketValue - totalCost
                         Button {
                             selectedHolding = holding
@@ -531,6 +620,8 @@ struct MarginDashboardView: View {
                                             .foregroundStyle(unrealized >= 0 ? .green : .red)
                                     }
                                     .font(.caption)
+
+                                    holdingTickerSnapshot(for: holding)
                                 }
                             }
                             .padding(8)
@@ -550,15 +641,24 @@ struct MarginDashboardView: View {
     private var netWorthChartCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Net Worth Over Time")
-                    .font(.headline)
-
-                Picker("Range", selection: $selectedNetWorthRange) {
-                    ForEach(NetWorthRange.allCases) { range in
-                        Text(range.title).tag(range)
+                HStack(alignment: .top) {
+                    Text("Net Worth Over Time")
+                        .font(.headline)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(netPortfolioValue, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.semibold))
+                        if let latestHoldingsUpdate {
+                            Text("Updated \(latestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Updated: --")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
 
                 let points = netWorthHistoryPoints
                 if points.count < 2 {
@@ -609,15 +709,37 @@ struct MarginDashboardView: View {
                             }
                         }
                     }
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    switch selectedNetWorthRange {
+                                    case .oneDay:
+                                        Text(date, format: .dateTime.hour().minute())
+                                    case .oneWeek, .oneMonth:
+                                        Text(date, format: .dateTime.month(.abbreviated).day())
+                                    case .threeMonths, .oneYear:
+                                        Text(date, format: .dateTime.month(.abbreviated))
+                                    case .all:
+                                        Text(date, format: .dateTime.month(.abbreviated).year(.twoDigits))
+                                    }
+                                }
+                            }
+                            .font(.caption2)
+                        }
+                    }
                     .chartOverlay { proxy in
                         GeometryReader { geometry in
                             ZStack(alignment: .topLeading) {
                                 Rectangle()
                                     .fill(Color.clear)
                                     .contentShape(Rectangle())
-                                    .gesture(
-                                        DragGesture(minimumDistance: 0)
+                                    .simultaneousGesture(
+                                        DragGesture(minimumDistance: 8)
                                             .onChanged { value in
+                                                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
                                                 guard let plotFrame = proxy.plotFrame.map({ geometry[$0] }) else { return }
                                                 let xPosition = value.location.x - plotFrame.origin.x
                                                 if let date: Date = proxy.value(atX: xPosition) {
@@ -656,6 +778,8 @@ struct MarginDashboardView: View {
                     }
                     .frame(height: 220)
 
+                    marginNetWorthRangeSelector
+
                     HStack(spacing: 14) {
                         Label("Net Worth", systemImage: "line.diagonal")
                             .foregroundStyle(.green)
@@ -666,6 +790,40 @@ struct MarginDashboardView: View {
                 }
             }
         }
+    }
+
+    private var marginNetWorthRangeSelector: some View {
+        HStack(spacing: 8) {
+            ForEach(NetWorthRange.allCases) { range in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        selectedNetWorthRange = range
+                    }
+                } label: {
+                    Text(range.title)
+                        .font(.caption.weight(.bold))
+                        .kerning(0.4)
+                        .textCase(.uppercase)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(selectedNetWorthRange == range ? .white : .primary)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(selectedNetWorthRange == range ? Color.accentColor : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        )
     }
 
     private var dividendForecastCard: some View {
@@ -679,6 +837,49 @@ struct MarginDashboardView: View {
                 metricRow("Dividend coverage of electricity bill", dividendCoverageOfElectricBill, asPercent: true)
             }
         }
+    }
+
+    private var holdingsFilterSortControls: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Picker("Filter", selection: $holdingsAssetFilter) {
+                    ForEach(HoldingsAssetFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+            } label: {
+                Label(holdingsAssetFilter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.bordered)
+
+            Menu {
+                Picker("Sort", selection: $holdingsSortOption) {
+                    ForEach(HoldingsSortOption.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+            } label: {
+                Label(holdingsSortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                holdingsSortAscending.toggle()
+            } label: {
+                Image(systemName: holdingsSortAscending ? "arrow.up" : "arrow.down")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(holdingsSortAscending ? "Sort ascending" : "Sort descending")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var billTrackingCard: some View {
@@ -795,6 +996,95 @@ struct MarginDashboardView: View {
         .font(.subheadline)
     }
 
+    private func holdingTickerSnapshot(for holding: PortfolioHolding) -> some View {
+        let ticker = holding.ticker.uppercased()
+        let snapshot = holdingQuoteSnapshot(for: holding)
+        let changeTint: Color = snapshot.percentChange >= 0 ? .green : .red
+        let closes = holdingQuoteCloses[ticker] ?? compactSessionPrices(from: snapshot)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: snapshot.percentChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                    Text(snapshot.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                }
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(changeTint)
+                Text(snapshot.change, format: .currency(code: "USD"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let updatedAt = budget.cachedQuotes[ticker]?.updatedAt {
+                    Text("Updated \(updatedAt, format: .dateTime.month().day().hour().minute())")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                tickerSnapshotPill("Open", value: snapshot.open)
+                tickerSnapshotPill("Prev", value: snapshot.previousClose)
+                tickerSnapshotPill("Low", value: snapshot.low)
+                tickerSnapshotPill("High", value: snapshot.high)
+            }
+
+            if let dayLow = snapshot.low, let dayHigh = snapshot.high, dayHigh > dayLow {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Day range")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(dayLow, format: .currency(code: "USD")) - \(dayHigh, format: .currency(code: "USD"))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: min(max((snapshot.price - dayLow) / (dayHigh - dayLow), 0), 1))
+                        .tint(changeTint)
+                }
+            }
+
+            if closes.count >= 2 {
+                Chart(Array(closes.enumerated()), id: \.offset) { item in
+                    LineMark(
+                        x: .value("Point", item.offset),
+                        y: .value("Price", item.element)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(changeTint)
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .frame(height: 38)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func tickerSnapshotPill(_ label: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let value {
+                Text(value, format: .currency(code: "USD"))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text("N/A")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func sum(_ items: [PortfolioTransaction], type: PortfolioTransactionType) -> Double {
         items.filter { $0.type == type }.reduce(0) { $0 + $1.amount }
     }
@@ -805,12 +1095,70 @@ struct MarginDashboardView: View {
         return holding.annualDividendPerShare / price
     }
 
+    private func allocation(for holding: PortfolioHolding) -> Double {
+        guard totalMarketValue > 0 else { return 0 }
+        return (holding.shares * resolvedPrice(for: holding)) / totalMarketValue
+    }
+
+    private func unrealizedGain(for holding: PortfolioHolding) -> Double {
+        holding.shares * (resolvedPrice(for: holding) - holding.averageCost)
+    }
+
+    private func sort(_ lhs: Double, _ rhs: Double) -> Bool {
+        holdingsSortAscending ? lhs < rhs : lhs > rhs
+    }
+
     private func resolvedPrice(for holding: PortfolioHolding) -> Double {
         let ticker = holding.ticker.uppercased()
         if let quote = budget.cachedQuotes[ticker], quote.price > 0 {
             return quote.price
         }
         return holding.currentPrice
+    }
+
+    private func holdingQuoteSnapshot(for holding: PortfolioHolding) -> MarketQuoteSnapshot {
+        let ticker = holding.ticker.uppercased()
+        if let snapshot = holdingQuoteSnapshots[ticker] {
+            return snapshot
+        }
+
+        let price = resolvedPrice(for: holding)
+        return MarketQuoteSnapshot(
+            price: price,
+            change: 0,
+            percentChange: 0,
+            open: nil,
+            high: nil,
+            low: nil,
+            previousClose: nil
+        )
+    }
+
+    private func compactSessionPrices(from snapshot: MarketQuoteSnapshot) -> [Double] {
+        let candidateValues: [Double?] = [
+            snapshot.previousClose,
+            snapshot.open,
+            snapshot.low,
+            snapshot.price,
+            snapshot.high
+        ]
+        var rawValues: [Double] = []
+        for candidate in candidateValues {
+            if let value = candidate, value > 0 {
+                rawValues.append(value)
+            }
+        }
+
+        let uniqueValues = rawValues.reduce(into: [Double]()) { values, value in
+            if values.last != value {
+                values.append(value)
+            }
+        }
+
+        if uniqueValues.count >= 2 {
+            return uniqueValues
+        }
+        return [snapshot.price, snapshot.price].filter { $0 > 0 }
     }
 
     private func nearestHistoryPoint(to date: Date, in points: [PortfolioValuePoint]) -> PortfolioValuePoint? {
@@ -983,10 +1331,20 @@ struct MarginDashboardView: View {
         }
     }
 
-    private func refreshPrices() {
-        let cleanKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty else {
-            budget.marketDataWarning = "API key is missing. Using manual/cached prices."
+    private func runHoldingsAutoRefreshLoop() async {
+        await refreshPrices()
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 300_000_000_000)
+            if Task.isCancelled { break }
+            await refreshPrices()
+        }
+    }
+
+    @MainActor
+    private func refreshPrices() async {
+        guard !isRefreshingPrices else { return }
+        guard budget.marketDataSettings.canFetchMarketData else {
+            budget.marketDataWarning = "Market data credentials are missing. Using manual/cached prices."
             return
         }
         let tickers = Array(Set(budget.holdings.map { $0.ticker.uppercased() })).filter { !$0.isEmpty }
@@ -998,64 +1356,68 @@ struct MarginDashboardView: View {
         refreshProgressCompleted = 0
         refreshCurrentTicker = tickers.first ?? ""
 
-        Task {
-            var failures = 0
-            var rateLimitedHits = 0
-            let isAlphaVantage = budget.marketDataSettings.provider == .alphaVantage
-            let isFinnhub = budget.marketDataSettings.provider == .finnhub
-            for (index, ticker) in tickers.enumerated() {
-                await MainActor.run {
-                    refreshCurrentTicker = ticker
+        var failures = 0
+        var rateLimitedHits = 0
+        let isAlphaVantage = budget.marketDataSettings.provider == .alphaVantage
+        let isFinnhub = budget.marketDataSettings.provider == .finnhub
+        for (index, ticker) in tickers.enumerated() {
+            refreshCurrentTicker = ticker
+            do {
+                if isAlphaVantage && index > 0 {
+                    try? await Task.sleep(nanoseconds: 26_000_000_000)
                 }
-                do {
-                    if isAlphaVantage && index > 0 {
-                        try? await Task.sleep(nanoseconds: 26_000_000_000)
-                    }
-                    if isFinnhub && index > 0 {
-                        try? await Task.sleep(nanoseconds: 1_200_000_000)
-                    }
-                    let details = try await marketDataService.fetchQuoteDetails(
-                        ticker: ticker,
-                        provider: budget.marketDataSettings.provider,
-                        apiKey: cleanKey
-                    )
-                    await MainActor.run {
-                        budget.cachedQuotes[ticker] = CachedQuote(ticker: ticker, price: details.price, updatedAt: Date())
-                        for idx in budget.holdings.indices where budget.holdings[idx].ticker.uppercased() == ticker {
-                            budget.holdings[idx].currentPrice = details.price
-                            if let annualDividend = details.annualDividendPerShare, annualDividend >= 0 {
-                                budget.holdings[idx].annualDividendPerShare = annualDividend
-                            }
-                        }
-                    }
-                } catch {
-                    if let serviceError = error as? MarketDataServiceError, serviceError == .rateLimited {
-                        rateLimitedHits += 1
-                    }
-                    failures += 1
+                if isFinnhub && index > 0 {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
                 }
-
-                await MainActor.run {
-                    refreshProgressCompleted = index + 1
+                let details = try await marketDataService.fetchQuoteDetails(
+                    ticker: ticker,
+                    settings: budget.marketDataSettings
+                )
+                let quoteSnapshot = try? await marketDataService.fetchQuoteSnapshot(
+                    ticker: ticker,
+                    settings: budget.marketDataSettings
+                )
+                budget.cachedQuotes[ticker] = CachedQuote(ticker: ticker, price: details.price, updatedAt: Date())
+                let snapshot = quoteSnapshot ?? MarketQuoteSnapshot(
+                    price: details.price,
+                    change: 0,
+                    percentChange: 0,
+                    open: nil,
+                    high: nil,
+                    low: nil,
+                    previousClose: nil
+                )
+                holdingQuoteSnapshots[ticker] = snapshot
+                holdingQuoteCloses[ticker] = compactSessionPrices(from: snapshot)
+                for idx in budget.holdings.indices where budget.holdings[idx].ticker.uppercased() == ticker {
+                    budget.holdings[idx].currentPrice = details.price
+                    if let annualDividend = details.annualDividendPerShare, annualDividend >= 0 {
+                        budget.holdings[idx].annualDividendPerShare = annualDividend
+                    }
                 }
+            } catch {
+                if let serviceError = error as? MarketDataServiceError, serviceError == .rateLimited {
+                    rateLimitedHits += 1
+                }
+                failures += 1
             }
 
-            await MainActor.run {
-                if failures > 0 {
-                    let providerName = budget.marketDataSettings.provider.rawValue
-                    if rateLimitedHits > 0 {
-                        budget.marketDataWarning = "\(providerName) rate limit hit for \(rateLimitedHits) ticker(s). Showing last cached prices."
-                    } else {
-                        budget.marketDataWarning = "Failed to refresh \(failures) ticker(s). Showing last cached/manual prices."
-                    }
-                }
-                isRefreshingPrices = false
-                refreshCurrentTicker = ""
-                refreshProgressCompleted = 0
-                refreshProgressTotal = 0
-                syncPortfolioSnapshotAndHistory()
+            refreshProgressCompleted = index + 1
+        }
+
+        if failures > 0 {
+            let providerName = budget.marketDataSettings.useAlpacaFallback ? "\(budget.marketDataSettings.provider.rawValue)/Alpaca" : budget.marketDataSettings.provider.rawValue
+            if rateLimitedHits > 0 {
+                budget.marketDataWarning = "\(providerName) rate limit hit for \(rateLimitedHits) ticker(s). Showing last cached prices."
+            } else {
+                budget.marketDataWarning = "Failed to refresh \(failures) ticker(s). Showing last cached/manual prices."
             }
         }
+        isRefreshingPrices = false
+        refreshCurrentTicker = ""
+        refreshProgressCompleted = 0
+        refreshProgressTotal = 0
+        syncPortfolioSnapshotAndHistory()
     }
 }
 
@@ -1090,28 +1452,68 @@ private struct HoldingTickerDetailView: View {
                     let costBasis = holding.shares * holding.averageCost
                     let unrealized = marketValue - costBasis
                     let annualIncome = holding.shares * holding.annualDividendPerShare
+                    let unrealizedPct = costBasis > 0 ? unrealized / costBasis : 0
+                    let yieldOnValue = holding.currentPrice > 0 ? holding.annualDividendPerShare / holding.currentPrice : 0
+                    let yieldOnCost = holding.averageCost > 0 ? holding.annualDividendPerShare / holding.averageCost : 0
 
-                    Section("Snapshot") {
-                        row("Shares", value: holding.shares.formatted(.number.precision(.fractionLength(0...4))))
-                        row("Current Price", value: holding.currentPrice.formatted(.currency(code: "USD")))
-                        row("Avg Cost", value: holding.averageCost.formatted(.currency(code: "USD")))
-                        row("Market Value", value: marketValue.formatted(.currency(code: "USD")))
-                        row("Cost Basis", value: costBasis.formatted(.currency(code: "USD")))
-                        row("Unrealized P&L", value: unrealized.formatted(.currency(code: "USD")))
-                        row("Annual Dividend Income", value: annualIncome.formatted(.currency(code: "USD")))
-                        row("Asset Type", value: holding.assetType.rawValue)
-                        row("Dividend Reliability", value: holding.dividendReliability.rawValue)
-                        row("Yield on Current Value", value: (holding.currentPrice > 0 ? holding.annualDividendPerShare / holding.currentPrice : 0).formatted(.percent.precision(.fractionLength(2))))
-                        row("Yield on Cost", value: (holding.averageCost > 0 ? holding.annualDividendPerShare / holding.averageCost : 0).formatted(.percent.precision(.fractionLength(2))))
-                        if let lastUpdated {
-                            row("Price Updated", value: lastUpdated.formatted(date: .abbreviated, time: .shortened))
+                    Section {
+                        VStack(alignment: .leading, spacing: 14) {
+                            performanceHero(
+                                marketValue: marketValue,
+                                unrealized: unrealized,
+                                unrealizedPct: unrealizedPct
+                            )
+                            HStack(spacing: 10) {
+                                compactMetricCard(
+                                    title: "Shares",
+                                    value: holding.shares.formatted(.number.precision(.fractionLength(0...4))),
+                                    icon: "number"
+                                )
+                                compactMetricCard(
+                                    title: "Current Price",
+                                    value: holding.currentPrice.formatted(.currency(code: "USD")),
+                                    icon: "dollarsign"
+                                )
+                            }
+                            HStack(spacing: 10) {
+                                compactMetricCard(
+                                    title: "Cost Basis",
+                                    value: costBasis.formatted(.currency(code: "USD")),
+                                    icon: "banknote"
+                                )
+                                compactMetricCard(
+                                    title: "Avg Cost",
+                                    value: holding.averageCost.formatted(.currency(code: "USD")),
+                                    icon: "chart.bar.doc.horizontal"
+                                )
+                            }
+                            yieldBarRow(
+                                yieldOnValue: yieldOnValue,
+                                yieldOnCost: yieldOnCost
+                            )
+                            detailRow("Annual Dividend Income", value: annualIncome.formatted(.currency(code: "USD")))
+                            detailRow("Asset Type", value: holding.assetType.rawValue)
+                            detailRow("Dividend Reliability", value: holding.dividendReliability.rawValue)
+                            if let nextExDate = holding.nextExDividendDate {
+                                detailRow("Next Ex-Dividend", value: nextExDate.formatted(date: .abbreviated, time: .omitted))
+                            }
+                            if let nextPayDate = holding.nextPayDate {
+                                detailRow("Next Pay Date", value: nextPayDate.formatted(date: .abbreviated, time: .omitted))
+                            }
+                            if let lastUpdated {
+                                detailRow("Price Updated", value: lastUpdated.formatted(date: .abbreviated, time: .shortened))
+                            }
+                            if !holding.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(holding.notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+                            }
                         }
-                        if !holding.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(holding.notes)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        .padding(.vertical, 4)
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
 
                     Section("Related Ledger Activity") {
                         if relatedTransactions.isEmpty {
@@ -1138,13 +1540,16 @@ private struct HoldingTickerDetailView: View {
                             }
                         }
                     }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
                 } else {
                     Section("Holding") {
                         Text("This holding is no longer available.")
                             .foregroundStyle(.secondary)
                     }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
                 }
             }
+            .contentMargins(.horizontal, 8, for: .scrollContent)
             .navigationTitle(holding?.ticker ?? "Holding")
             .toolbar {
                 if holding != nil {
@@ -1170,9 +1575,92 @@ private struct HoldingTickerDetailView: View {
         }
     }
 
-    private func row(_ label: String, value: String) -> some View {
+    private func performanceHero(marketValue: Double, unrealized: Double, unrealizedPct: Double) -> some View {
+        let gain = unrealized >= 0
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Position Value")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(marketValue.formatted(.currency(code: "USD")))
+                .font(.title2.weight(.bold))
+            HStack(spacing: 6) {
+                Image(systemName: gain ? "arrow.up.right" : "arrow.down.right")
+                Text(unrealized.formatted(.currency(code: "USD")))
+                Text(unrealizedPct.formatted(.percent.precision(.fractionLength(2))))
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(gain ? Color.green : Color.red)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    gain ? Color.green.opacity(0.20) : Color.red.opacity(0.20),
+                    Color.secondary.opacity(0.08)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func compactMetricCard(title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+            Text(value)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func yieldBarRow(yieldOnValue: Double, yieldOnCost: Double) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dividend Yields")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            yieldBar(title: "Yield on Current Value", value: yieldOnValue, tint: .blue)
+            yieldBar(title: "Yield on Cost", value: yieldOnCost, tint: .green)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func yieldBar(title: String, value: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(value.formatted(.percent.precision(.fractionLength(2))))
+                    .font(.caption.weight(.semibold))
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.25))
+                    Capsule().fill(tint.opacity(0.8))
+                        .frame(width: geo.size.width * min(max(value / 0.10, 0), 1))
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+
+    private func detailRow(_ label: String, value: String) -> some View {
         HStack {
             Text(label)
+                .foregroundStyle(.secondary)
             Spacer()
             Text(value)
                 .fontWeight(.semibold)
@@ -1312,14 +1800,12 @@ private struct EditHoldingView: View {
             return
         }
 
-        let cleanKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty else { return }
+        guard budget.marketDataSettings.canFetchMarketData else { return }
 
         do {
             let details = try await marketDataService.fetchQuoteDetails(
                 ticker: symbol,
-                provider: budget.marketDataSettings.provider,
-                apiKey: cleanKey
+                settings: budget.marketDataSettings
             )
             guard !Task.isCancelled else { return }
             currentPrice = details.price
@@ -1461,14 +1947,12 @@ private struct ManualHoldingEntryView: View {
             return
         }
 
-        let cleanKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty else { return }
+        guard budget.marketDataSettings.canFetchMarketData else { return }
 
         do {
             let details = try await marketDataService.fetchQuoteDetails(
                 ticker: symbol,
-                provider: budget.marketDataSettings.provider,
-                apiKey: cleanKey
+                settings: budget.marketDataSettings
             )
             guard !Task.isCancelled else { return }
             currentPrice = details.price

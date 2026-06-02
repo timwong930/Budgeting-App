@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets-primary.dia",
+    "emit-module-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets-primary-emit-module.dia",
+    "pch" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets-primary.swiftdeps"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/BudgetingWidgets/BudgetingWidgets.swift" : {
+    "const-values" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.swiftconstvalues",
+    "dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.d",
+    "diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.dia",
+    "index-unit-output-path" : "/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.o",
+    "swift-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets.swiftdeps",
+    "swiftmodule" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgets~partial.swiftmodule"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/BudgetingWidgets/BudgetingWidgetsBundle.swift" : {
+    "const-values" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.swiftconstvalues",
+    "dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.d",
+    "diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.dia",
+    "index-unit-output-path" : "/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.o",
+    "swift-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle.swiftdeps",
+    "swiftmodule" : "/Users/timothywong/Documents/XCode/Budgeting App/build/Build/Intermediates.noindex/Budgeting App.build/Debug-iphoneos/BudgetingWidgets.build/Objects-normal/arm64/BudgetingWidgetsBundle~partial.swiftmodule"
+  }
+}

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>57C1F315-A58F-45A6-8F5C-30F930FE7AD7</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>57C1F315-A58F-45A6-8F5C-30F930FE7AD7.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>S</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Budgeting App project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Budgeting App</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Budgeting App with scheme Budgeting App</string>
+			<key>timeStartedRecording</key>
+			<real>802068342.73935699</real>
+			<key>timeStoppedRecording</key>
+			<real>802068364.18641102</real>
+			<key>title</key>
+			<string>Building project Budgeting App with scheme Budgeting App</string>
+			<key>uniqueIdentifier</key>
+			<string>57C1F315-A58F-45A6-8F5C-30F930FE7AD7</string>
+		</dict>
+	</dict>
+</dict>
+</plist>
