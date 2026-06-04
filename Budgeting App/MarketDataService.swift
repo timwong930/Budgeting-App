@@ -90,7 +90,7 @@ struct MarketDataService {
         }
     }
 
-    func fetchRecentCloses(ticker: String, provider: MarketDataProvider, apiKey: String, days: Int = 14) async throws -> [Double] {
+    func fetchRecentPriceHistory(ticker: String, provider: MarketDataProvider, apiKey: String, days: Int = 14) async throws -> [TickerPricePoint] {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else {
             throw MarketDataServiceError.missingAPIKey
@@ -99,17 +99,21 @@ struct MarketDataService {
 
         switch provider {
         case .alphaVantage:
-            return try await fetchAlphaVantageRecentCloses(ticker: ticker, apiKey: cleanKey, days: dayCount)
+            return try await fetchAlphaVantageRecentPriceHistory(ticker: ticker, apiKey: cleanKey, days: dayCount)
         case .finnhub:
-            return try await fetchFinnhubRecentCloses(ticker: ticker, apiKey: cleanKey, days: dayCount)
+            return try await fetchFinnhubRecentPriceHistory(ticker: ticker, apiKey: cleanKey, days: dayCount)
         }
     }
 
-    func fetchRecentCloses(ticker: String, settings: MarketDataSettings, days: Int = 14) async throws -> [Double] {
+    func fetchRecentCloses(ticker: String, provider: MarketDataProvider, apiKey: String, days: Int = 14) async throws -> [Double] {
+        try await fetchRecentPriceHistory(ticker: ticker, provider: provider, apiKey: apiKey, days: days).map(\.close)
+    }
+
+    func fetchRecentPriceHistory(ticker: String, settings: MarketDataSettings, days: Int = 14) async throws -> [TickerPricePoint] {
         try await fetchWithAlpacaFallback(settings: settings) {
-            try await fetchRecentCloses(ticker: ticker, provider: settings.provider, apiKey: settings.apiKey, days: days)
+            try await fetchRecentPriceHistory(ticker: ticker, provider: settings.provider, apiKey: settings.apiKey, days: days)
         } fallback: {
-            try await fetchAlpacaRecentCloses(
+            try await fetchAlpacaRecentPriceHistory(
                 ticker: ticker,
                 keyId: settings.alpacaAPIKeyId,
                 secretKey: settings.alpacaSecretKey,
@@ -117,6 +121,47 @@ struct MarketDataService {
                 days: days
             )
         }
+    }
+
+    func fetchRecentCloses(ticker: String, settings: MarketDataSettings, days: Int = 14) async throws -> [Double] {
+        try await fetchRecentPriceHistory(ticker: ticker, settings: settings, days: days).map(\.close)
+    }
+
+    func fetchCompositeRecentPriceHistory(ticker: String, settings: MarketDataSettings, days: Int = 90) async throws -> [TickerPricePoint] {
+        var candidates: [[TickerPricePoint]] = []
+
+        if settings.hasPrimaryAPIKey,
+           let primary = try? await fetchRecentPriceHistory(
+            ticker: ticker,
+            provider: settings.provider,
+            apiKey: settings.apiKey,
+            days: days
+           ),
+           primary.count >= 2 {
+            candidates.append(primary)
+        }
+
+        if settings.useAlpacaFallback,
+           settings.hasAlpacaCredentials,
+           let alpaca = try? await fetchAlpacaRecentPriceHistory(
+            ticker: ticker,
+            keyId: settings.alpacaAPIKeyId,
+            secretKey: settings.alpacaSecretKey,
+            feed: settings.alpacaFeed,
+            days: days
+           ),
+           alpaca.count >= 2 {
+            candidates.append(alpaca)
+        }
+
+        guard let best = candidates.max(by: { $0.count < $1.count }) else {
+            throw MarketDataServiceError.invalidPrice
+        }
+        return Array(best.suffix(max(5, min(days, 120))))
+    }
+
+    func fetchCompositeRecentCloses(ticker: String, settings: MarketDataSettings, days: Int = 90) async throws -> [Double] {
+        try await fetchCompositeRecentPriceHistory(ticker: ticker, settings: settings, days: days).map(\.close)
     }
 
     func fetchQuoteDetails(ticker: String, provider: MarketDataProvider, apiKey: String) async throws -> MarketQuoteDetails {
@@ -203,15 +248,22 @@ struct MarketDataService {
         )
     }
 
-    func fetchAlpacaRecentCloses(ticker: String, keyId: String, secretKey: String, feed: AlpacaMarketDataFeed, days: Int = 14) async throws -> [Double] {
+    func fetchAlpacaRecentPriceHistory(ticker: String, keyId: String, secretKey: String, feed: AlpacaMarketDataFeed, days: Int = 14) async throws -> [TickerPricePoint] {
         let dayCount = max(5, min(days, 120))
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()
         let start = calendar.date(byAdding: .day, value: -(dayCount * 2), to: now) ?? now
         let bars = try await fetchAlpacaBars(ticker: ticker, start: start, end: now, keyId: keyId, secretKey: secretKey, feed: feed)
-        let recent = bars.map(\.close).filter { $0 > 0 }.suffix(dayCount)
+        let recent = bars.compactMap { bar -> TickerPricePoint? in
+            guard bar.close > 0, let date = bar.tradingDate else { return nil }
+            return TickerPricePoint(date: date, close: bar.close)
+        }.suffix(dayCount)
         guard recent.count >= 2 else { throw MarketDataServiceError.invalidPrice }
         return Array(recent)
+    }
+
+    func fetchAlpacaRecentCloses(ticker: String, keyId: String, secretKey: String, feed: AlpacaMarketDataFeed, days: Int = 14) async throws -> [Double] {
+        try await fetchAlpacaRecentPriceHistory(ticker: ticker, keyId: keyId, secretKey: secretKey, feed: feed, days: days).map(\.close)
     }
 
     func fetchAlpacaDividendPerShare(ticker: String, keyId: String, secretKey: String) async throws -> Double? {
@@ -279,6 +331,34 @@ struct MarketDataService {
             return nil
         case .finnhub:
             return try await fetchFinnhubCompanyProfile(ticker: ticker, apiKey: cleanKey)
+        }
+    }
+
+    func fetchStockFinancials(ticker: String, settings: MarketDataSettings) async throws -> StockFinancials {
+        let cleanKey = settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else {
+            throw MarketDataServiceError.missingAPIKey
+        }
+
+        switch settings.provider {
+        case .alphaVantage:
+            throw MarketDataServiceError.invalidResponse
+        case .finnhub:
+            return try await fetchFinnhubStockFinancials(ticker: ticker, apiKey: cleanKey)
+        }
+    }
+
+    func fetchRecentNews(ticker: String, settings: MarketDataSettings, daysBack: Int = 14) async throws -> [TickerNewsArticle] {
+        let cleanKey = settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else {
+            throw MarketDataServiceError.missingAPIKey
+        }
+
+        switch settings.provider {
+        case .alphaVantage:
+            throw MarketDataServiceError.invalidResponse
+        case .finnhub:
+            return try await fetchFinnhubRecentNews(ticker: ticker, apiKey: cleanKey, daysBack: daysBack)
         }
     }
 
@@ -452,7 +532,7 @@ struct MarketDataService {
                 to: to,
                 apiKey: apiKey
             )
-            guard let close = closes.last, close > 0 else {
+            guard let close = closes.last?.close, close > 0 else {
                 throw MarketDataServiceError.invalidPrice
             }
             return close
@@ -466,14 +546,14 @@ struct MarketDataService {
                 to: to,
                 apiKey: apiKey
             )
-            guard let close = closes.last, close > 0 else {
+            guard let close = closes.last?.close, close > 0 else {
                 throw MarketDataServiceError.invalidPrice
             }
             return close
         }
     }
 
-    private func fetchFinnhubRecentCloses(ticker: String, apiKey: String, days: Int) async throws -> [Double] {
+    private func fetchFinnhubRecentPriceHistory(ticker: String, apiKey: String, days: Int) async throws -> [TickerPricePoint] {
         let calendar = Calendar.current
         let now = Date()
         let fromDate = calendar.date(byAdding: .day, value: -(days + 7), to: now) ?? now
@@ -481,29 +561,33 @@ struct MarketDataService {
         let to = Int(now.timeIntervalSince1970)
 
         do {
-            let closes = try await fetchFinnhubCandles(
+            let points = try await fetchFinnhubCandles(
                 endpoint: "stock/candle",
                 symbol: ticker,
                 from: from,
                 to: to,
                 apiKey: apiKey
             )
-            let recent = closes.filter { $0 > 0 }.suffix(days)
+            let recent = points.filter { $0.close > 0 }.suffix(days)
             guard recent.count >= 2 else { throw MarketDataServiceError.invalidPrice }
             return Array(recent)
         } catch {
             let indexSymbol = ticker.hasPrefix("^") ? ticker : "^\(ticker)"
-            let closes = try await fetchFinnhubCandles(
+            let points = try await fetchFinnhubCandles(
                 endpoint: "index/candle",
                 symbol: indexSymbol,
                 from: from,
                 to: to,
                 apiKey: apiKey
             )
-            let recent = closes.filter { $0 > 0 }.suffix(days)
+            let recent = points.filter { $0.close > 0 }.suffix(days)
             guard recent.count >= 2 else { throw MarketDataServiceError.invalidPrice }
             return Array(recent)
         }
+    }
+
+    private func fetchFinnhubRecentCloses(ticker: String, apiKey: String, days: Int) async throws -> [Double] {
+        try await fetchFinnhubRecentPriceHistory(ticker: ticker, apiKey: apiKey, days: days).map(\.close)
     }
 
     private func fetchFinnhubCandles(
@@ -512,7 +596,7 @@ struct MarketDataService {
         from: Int,
         to: Int,
         apiKey: String
-    ) async throws -> [Double] {
+    ) async throws -> [TickerPricePoint] {
         var components = URLComponents(string: "https://finnhub.io/api/v1/\(endpoint)")
         components?.queryItems = [
             URLQueryItem(name: "symbol", value: symbol),
@@ -527,17 +611,25 @@ struct MarketDataService {
         try validateFinnhubResponse(data: data, response: response)
 
         let decoded = try JSONDecoder().decode(FinnhubCandleResponse.self, from: data)
-        guard decoded.status == "ok", let closes = decoded.closes, !closes.isEmpty else {
+        guard decoded.status == "ok",
+              let closes = decoded.closes,
+              let timestamps = decoded.timestamps,
+              !closes.isEmpty else {
             throw MarketDataServiceError.invalidPrice
         }
-        let validCloses = closes.compactMap { $0 }.filter { $0 > 0 }
-        guard !validCloses.isEmpty else {
+
+        var points: [TickerPricePoint] = []
+        for (timestamp, closeValue) in zip(timestamps, closes) {
+            guard let close = closeValue, close > 0 else { continue }
+            points.append(TickerPricePoint(date: Date(timeIntervalSince1970: TimeInterval(timestamp)), close: close))
+        }
+        guard points.count >= 2 else {
             throw MarketDataServiceError.invalidPrice
         }
-        return validCloses
+        return points.sorted { $0.date < $1.date }
     }
 
-    private func fetchAlphaVantageRecentCloses(ticker: String, apiKey: String, days: Int) async throws -> [Double] {
+    private func fetchAlphaVantageRecentPriceHistory(ticker: String, apiKey: String, days: Int) async throws -> [TickerPricePoint] {
         var components = URLComponents(string: "https://www.alphavantage.co/query")
         components?.queryItems = [
             URLQueryItem(name: "function", value: "TIME_SERIES_DAILY"),
@@ -560,10 +652,26 @@ struct MarketDataService {
             throw MarketDataServiceError.rateLimited
         }
 
-        let closes = (decoded.timeSeries ?? [:]).values.compactMap { Double($0.close) }.filter { $0 > 0 }
-        let recent = closes.prefix(days)
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let points = (decoded.timeSeries ?? [:]).compactMap { dateString, point -> TickerPricePoint? in
+            guard let date = formatter.date(from: dateString),
+                  let close = Double(point.close),
+                  close > 0 else { return nil }
+            return TickerPricePoint(date: date, close: close)
+        }.sorted { $0.date < $1.date }
+
+        let recent = points.suffix(days)
         guard recent.count >= 2 else { throw MarketDataServiceError.invalidPrice }
-        return Array(recent.reversed())
+        return Array(recent)
+    }
+
+    private func fetchAlphaVantageRecentCloses(ticker: String, apiKey: String, days: Int) async throws -> [Double] {
+        try await fetchAlphaVantageRecentPriceHistory(ticker: ticker, apiKey: apiKey, days: days).map(\.close)
     }
 
     private func fetchFinnhubCompanyProfile(ticker: String, apiKey: String) async throws -> MarketCompanyProfile? {
@@ -589,7 +697,119 @@ struct MarketDataService {
         )
     }
 
+    private func fetchFinnhubStockFinancials(ticker: String, apiKey: String) async throws -> StockFinancials {
+        var components = URLComponents(string: "https://finnhub.io/api/v1/stock/metric")
+        components?.queryItems = [
+            URLQueryItem(name: "symbol", value: ticker.uppercased()),
+            URLQueryItem(name: "metric", value: "all"),
+            URLQueryItem(name: "token", value: apiKey)
+        ]
+        guard let url = components?.url else { throw MarketDataServiceError.invalidResponse }
+
+        let (data, response) = try await session.data(from: url)
+        try validateFinnhubResponse(data: data, response: response)
+
+        let decoded = try JSONDecoder().decode(FinnhubStockMetricResponse.self, from: data)
+        let metrics = decoded.metric
+
+        let dividendSummary = try? await fetchFinnhubDividendSummary(ticker: ticker, apiKey: apiKey)
+
+        return StockFinancials(
+            fiscalYearEnd: metrics.string("fiscalYearEnd") ?? metrics.string("fiscalYearEndDate"),
+            lastFiscalPeriod: metrics.string("lastFiscalPeriod"),
+            lastFiscalPeriodEndDate: metrics.string("lastFiscalPeriodEndDate"),
+            marketCapitalization: metrics.double("marketCapitalization"),
+            enterpriseValue: metrics.double("enterpriseValue"),
+            enterpriseValueToEBITDA: metrics.double("enterpriseValueOverEBITDATTM") ?? metrics.double("evToEbitdaTTM"),
+            peRatio: metrics.double("peBasicExclExtraTTM") ?? metrics.double("peTTM"),
+            psRatio: metrics.double("psTTM"),
+            pbRatio: metrics.double("pbAnnual") ?? metrics.double("pbQuarterly"),
+            pcfRatio: metrics.double("pcfShareTTM") ?? metrics.double("priceToCashFlowPerShareTTM"),
+            pfcfRatio: metrics.double("pfcfShareTTM"),
+            totalRevenue: metrics.double("revenueTTM"),
+            revenuePerShare: metrics.double("revenuePerShareTTM"),
+            grossProfit: metrics.double("grossProfitTTM"),
+            operatingIncome: metrics.double("operatingIncomeTTM"),
+            netIncome: metrics.double("netIncomeCommonTTM") ?? metrics.double("netIncomeTTM"),
+            epsDilutedTTM: metrics.double("epsInclExtraItemsTTM") ?? metrics.double("epsDilutedTTM"),
+            epsDilutedFQ: metrics.double("epsBasicExclExtraItemsQuarterly") ?? metrics.double("epsDilutedQuarterly"),
+            totalSharesOutstanding: metrics.double("totalSharesOutstanding"),
+            sharesFloat: metrics.double("floatSharesOutstanding"),
+            totalAssets: metrics.double("totalAssets"),
+            totalLiabilities: metrics.double("totalLiabilities"),
+            totalEquity: metrics.double("totalEquity"),
+            totalDebt: metrics.double("totalDebt"),
+            operatingCashFlow: metrics.double("operatingCashFlowTTM"),
+            investingCashFlow: metrics.double("investingCashFlowTTM"),
+            financingCashFlow: metrics.double("financingCashFlowTTM"),
+            freeCashFlow: metrics.double("freeCashFlowTTM"),
+            capex: metrics.double("capitalExpenditureTTM") ?? metrics.double("capexCagr5Y"),
+            grossMargin: metrics.double("grossMarginTTM"),
+            operatingMargin: metrics.double("operatingMarginTTM"),
+            pretaxMargin: metrics.double("pretaxMarginTTM"),
+            netMargin: metrics.double("netProfitMarginTTM") ?? metrics.double("netMarginTTM"),
+            returnOnAssets: metrics.double("roaTTM"),
+            returnOnEquity: metrics.double("roeTTM"),
+            returnOnInvestedCapital: metrics.double("roiTTM") ?? metrics.double("roicTTM"),
+            revenuePerEmployee: metrics.double("revenuePerEmployeeAnnual"),
+            netIncomePerEmployee: metrics.double("netIncomePerEmployeeAnnual"),
+            averageVolume10Day: metrics.double("10DayAverageTradingVolume"),
+            betaOneYear: metrics.double("beta"),
+            week52High: metrics.double("52WeekHigh"),
+            week52Low: metrics.double("52WeekLow"),
+            oneYearPriceTarget: metrics.double("targetMeanPrice") ?? metrics.double("priceTargetMean"),
+            dividendYieldIndicated: metrics.double("dividendYieldIndicatedAnnual") ?? metrics.double("currentDividendYieldTTM"),
+            dividendsPerShareFY: metrics.double("dividendPerShareAnnual") ?? dividendSummary?.annualDividendPerShare,
+            lastDividendAmount: dividendSummary?.lastAmount,
+            lastDividendExDate: dividendSummary?.lastExDate
+        )
+    }
+
+    private func fetchFinnhubRecentNews(ticker: String, apiKey: String, daysBack: Int) async throws -> [TickerNewsArticle] {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let fromDate = calendar.date(byAdding: .day, value: -max(1, min(daysBack, 60)), to: now) ?? now
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        var components = URLComponents(string: "https://finnhub.io/api/v1/company-news")
+        components?.queryItems = [
+            URLQueryItem(name: "symbol", value: ticker.uppercased()),
+            URLQueryItem(name: "from", value: formatter.string(from: fromDate)),
+            URLQueryItem(name: "to", value: formatter.string(from: now)),
+            URLQueryItem(name: "token", value: apiKey)
+        ]
+        guard let url = components?.url else { throw MarketDataServiceError.invalidResponse }
+
+        let (data, response) = try await session.data(from: url)
+        try validateFinnhubResponse(data: data, response: response)
+
+        let decoded = try JSONDecoder().decode([FinnhubNewsResponse].self, from: data)
+        let articles = decoded.compactMap { item -> TickerNewsArticle? in
+            let headline = item.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = item.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !headline.isEmpty, !url.isEmpty else { return nil }
+            return TickerNewsArticle(
+                headline: headline,
+                source: item.source.trimmingCharacters(in: .whitespacesAndNewlines),
+                summary: item.summary.trimmingCharacters(in: .whitespacesAndNewlines),
+                url: url,
+                imageURL: item.image?.trimmingCharacters(in: .whitespacesAndNewlines),
+                publishedAt: Date(timeIntervalSince1970: TimeInterval(item.datetime))
+            )
+        }
+
+        return Array(articles.sorted { $0.publishedAt > $1.publishedAt }.prefix(12))
+    }
+
     private func fetchFinnhubDividendPerShare(ticker: String, apiKey: String) async throws -> Double? {
+        try await fetchFinnhubDividendSummary(ticker: ticker, apiKey: apiKey)?.annualDividendPerShare
+    }
+
+    private func fetchFinnhubDividendSummary(ticker: String, apiKey: String) async throws -> FinnhubDividendSummary? {
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()
         guard let fromDate = calendar.date(byAdding: .year, value: -5, to: now) else { return nil }
@@ -630,14 +850,18 @@ struct MarketDataService {
             guard exDate >= calendar.date(byAdding: .year, value: -1, to: now) ?? now else { return partial }
             return partial + payout.amountValue
         }
-        if trailing12m > 0 {
-            return trailing12m
-        }
-
-        // Fallback: use the latest dividend year total if no payments in trailing 12 months.
         let sortedByDate = positivePayouts.sorted {
             ($0.exDateDate ?? .distantPast) > ($1.exDateDate ?? .distantPast)
         }
+        if trailing12m > 0 {
+            return FinnhubDividendSummary(
+                annualDividendPerShare: trailing12m,
+                lastAmount: sortedByDate.first?.amountValue,
+                lastExDate: sortedByDate.first?.exDate
+            )
+        }
+
+        // Fallback: use the latest dividend year total if no payments in trailing 12 months.
         guard let latestDate = sortedByDate.first?.exDateDate else { return nil }
         let latestYear = calendar.component(.year, from: latestDate)
         let latestYearTotal = sortedByDate.reduce(0.0) { partial, payout in
@@ -645,7 +869,13 @@ struct MarketDataService {
             return calendar.component(.year, from: date) == latestYear ? partial + payout.amountValue : partial
         }
         let annualDividendPerShare = latestYearTotal
-        return annualDividendPerShare > 0 ? annualDividendPerShare : nil
+        return annualDividendPerShare > 0
+            ? FinnhubDividendSummary(
+                annualDividendPerShare: annualDividendPerShare,
+                lastAmount: sortedByDate.first?.amountValue,
+                lastExDate: sortedByDate.first?.exDate
+            )
+            : nil
     }
 
     private func validateFinnhubResponse(data: Data, response: URLResponse) throws {
@@ -786,6 +1016,10 @@ struct MarketDataService {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    fileprivate static func alpacaTradingDate(from timestamp: String) -> Date? {
+        alpacaDateFormatter.date(from: timestamp) ?? alpacaDayFormatter.date(from: timestamp)
+    }
 }
 
 struct MarketQuoteDetails: Sendable {
@@ -806,6 +1040,56 @@ struct MarketQuoteSnapshot: Sendable {
     let high: Double?
     let low: Double?
     let previousClose: Double?
+}
+
+struct StockFinancials: Sendable {
+    let fiscalYearEnd: String?
+    let lastFiscalPeriod: String?
+    let lastFiscalPeriodEndDate: String?
+    let marketCapitalization: Double?
+    let enterpriseValue: Double?
+    let enterpriseValueToEBITDA: Double?
+    let peRatio: Double?
+    let psRatio: Double?
+    let pbRatio: Double?
+    let pcfRatio: Double?
+    let pfcfRatio: Double?
+    let totalRevenue: Double?
+    let revenuePerShare: Double?
+    let grossProfit: Double?
+    let operatingIncome: Double?
+    let netIncome: Double?
+    let epsDilutedTTM: Double?
+    let epsDilutedFQ: Double?
+    let totalSharesOutstanding: Double?
+    let sharesFloat: Double?
+    let totalAssets: Double?
+    let totalLiabilities: Double?
+    let totalEquity: Double?
+    let totalDebt: Double?
+    let operatingCashFlow: Double?
+    let investingCashFlow: Double?
+    let financingCashFlow: Double?
+    let freeCashFlow: Double?
+    let capex: Double?
+    let grossMargin: Double?
+    let operatingMargin: Double?
+    let pretaxMargin: Double?
+    let netMargin: Double?
+    let returnOnAssets: Double?
+    let returnOnEquity: Double?
+    let returnOnInvestedCapital: Double?
+    let revenuePerEmployee: Double?
+    let netIncomePerEmployee: Double?
+    let averageVolume10Day: Double?
+    let betaOneYear: Double?
+    let week52High: Double?
+    let week52Low: Double?
+    let oneYearPriceTarget: Double?
+    let dividendYieldIndicated: Double?
+    let dividendsPerShareFY: Double?
+    let lastDividendAmount: Double?
+    let lastDividendExDate: String?
 }
 
 private struct AlphaVantageResponse: Decodable {
@@ -882,10 +1166,12 @@ private struct AlphaVantageTimeSeriesResponse: Decodable {
 
 private struct FinnhubCandleResponse: Decodable {
     let closes: [Double?]?
+    let timestamps: [Int]?
     let status: String?
 
     enum CodingKeys: String, CodingKey {
         case closes = "c"
+        case timestamps = "t"
         case status = "s"
     }
 }
@@ -924,9 +1210,67 @@ private struct FinnhubDividendWrappedResponse: Decodable {
     let data: [FinnhubDividendResponse]
 }
 
+private struct FinnhubDividendSummary {
+    let annualDividendPerShare: Double
+    let lastAmount: Double?
+    let lastExDate: String?
+}
+
 private struct FinnhubCompanyProfileResponse: Decodable {
     let name: String?
     let exchange: String?
+}
+
+private struct FinnhubStockMetricResponse: Decodable {
+    let metric: [String: FinnhubMetricValue]
+}
+
+private enum FinnhubMetricValue: Decodable {
+    case number(Double)
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else {
+            self = .string("")
+        }
+    }
+}
+
+private extension Dictionary where Key == String, Value == FinnhubMetricValue {
+    func double(_ key: String) -> Double? {
+        guard let value = self[key] else { return nil }
+        switch value {
+        case let .number(number):
+            return number.isFinite ? number : nil
+        case let .string(string):
+            return Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    func string(_ key: String) -> String? {
+        guard let value = self[key] else { return nil }
+        switch value {
+        case let .number(number):
+            return number.formatted(.number.precision(.fractionLength(0...2)))
+        case let .string(string):
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+}
+
+private struct FinnhubNewsResponse: Decodable {
+    let datetime: Int
+    let headline: String
+    let image: String?
+    let source: String
+    let summary: String
+    let url: String
 }
 
 private struct AlpacaSnapshotResponse: Decodable {
@@ -949,12 +1293,19 @@ private struct AlpacaBarsResponse: Decodable {
 }
 
 private struct AlpacaBar: Decodable {
+    let timestamp: String?
     let open: Double?
     let high: Double?
     let low: Double?
     let close: Double
 
+    var tradingDate: Date? {
+        guard let timestamp else { return nil }
+        return MarketDataService.alpacaTradingDate(from: timestamp)
+    }
+
     enum CodingKeys: String, CodingKey {
+        case timestamp = "t"
         case open = "o"
         case high = "h"
         case low = "l"

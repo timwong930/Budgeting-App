@@ -276,6 +276,13 @@
     "moduleName" : "AppIntents"
   },
   {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/iPhoneOS.platform\/Developer\/SDKs\/iPhoneOS.sdk\/System\/Library\/Frameworks\/BackgroundTasks.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/timothywong\/Documents\/XCode\/Budgeting App\/build\/ModuleCache.noindex\/BackgroundTasks-11ARI32P25A4KWD4Z7EMRWKVK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "BackgroundTasks"
+  },
+  {
     "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/iPhoneOS.platform\/Developer\/SDKs\/iPhoneOS.sdk\/System\/Library\/Frameworks\/CFNetwork.framework\/Modules\/module.modulemap",
     "clangModulePath" : "\/Users\/timothywong\/Documents\/XCode\/Budgeting App\/build\/ModuleCache.noindex\/CFNetwork-7JNDTEH3A2TSOBE8M6M66KAJT.pcm",
     "isBridgingHeaderDependency" : false,

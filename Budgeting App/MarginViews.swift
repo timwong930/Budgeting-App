@@ -104,20 +104,20 @@ struct MarginDashboardView: View {
     @Binding var showHistory: Bool
     @Binding var showManualHolding: Bool
 
-    @State private var holdingsViewMode: HoldingsViewMode = .full
+    @AppStorage("margin.holdingsViewMode") private var holdingsViewMode: HoldingsViewMode = .full
     @State private var isRefreshingPrices = false
     @State private var selectedHolding: PortfolioHolding?
-    @State private var selectedNetWorthRange: NetWorthRange = .threeMonths
+    @AppStorage("margin.selectedNetWorthRange") private var selectedNetWorthRange: NetWorthRange = .threeMonths
     @State private var selectedNetWorthPoint: PortfolioValuePoint?
     @State private var showSnapshotDetails = false
     @State private var refreshProgressTotal = 0
     @State private var refreshProgressCompleted = 0
     @State private var refreshCurrentTicker = ""
     @State private var holdingQuoteSnapshots: [String: MarketQuoteSnapshot] = [:]
-    @State private var holdingQuoteCloses: [String: [Double]] = [:]
-    @State private var holdingsSortOption: HoldingsSortOption = .ticker
-    @State private var holdingsSortAscending = true
-    @State private var holdingsAssetFilter: HoldingsAssetFilter = .all
+    @State private var holdingPriceHistory: [String: [TickerPricePoint]] = [:]
+    @AppStorage("margin.holdingsSortOption") private var holdingsSortOption: HoldingsSortOption = .ticker
+    @AppStorage("margin.holdingsSortAscending") private var holdingsSortAscending = true
+    @AppStorage("margin.holdingsAssetFilter") private var holdingsAssetFilter: HoldingsAssetFilter = .all
 
     private let marketDataService = MarketDataService()
     private let drawdowns: [Double] = [0.20, 0.35, 0.50]
@@ -227,7 +227,11 @@ struct MarginDashboardView: View {
     }
 
     private var estimatedMonthlyMarginCostAtFivePercent: Double {
-        budget.portfolioSnapshot.marginUsed * 0.05 / 12.0
+        MarginCalculator.monthlyInterest(
+            marginUsed: budget.portfolioSnapshot.marginUsed,
+            freeMarginLimit: budget.marginSettings.interestFreeMarginLimit,
+            marginInterestRate: 0.05
+        )
     }
 
     private var netMarginChangeThisMonth: Double {
@@ -401,10 +405,23 @@ struct MarginDashboardView: View {
         return filtered.isEmpty ? sorted : filtered
     }
 
+    private var netWorthDelta: Double {
+        let points = netWorthHistoryPoints
+        guard let first = points.first, let last = points.last else { return 0 }
+        return last.netValue - first.netValue
+    }
+
+    private var netWorthDeltaPercent: Double {
+        let points = netWorthHistoryPoints
+        guard let first = points.first, abs(first.netValue) > 0.01 else { return 0 }
+        return netWorthDelta / abs(first.netValue)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 titleHeader
+                marginInsightSummarySection
                 experimentStatusCard
                 netWorthChartCard
                 portfolioSnapshotCard
@@ -453,9 +470,12 @@ struct MarginDashboardView: View {
         }
         .sheet(isPresented: $showManualHolding) { ManualHoldingEntryView(budget: budget) }
         .sheet(item: $selectedHolding) { holding in
+            let ticker = holding.ticker.uppercased()
             HoldingTickerDetailView(
                 budget: budget,
-                holdingID: holding.id
+                holdingID: holding.id,
+                quoteSnapshot: holdingQuoteSnapshots[ticker],
+                quotePriceHistory: holdingPriceHistory[ticker] ?? []
             )
         }
         .sheet(isPresented: $showSnapshotDetails) {
@@ -478,13 +498,106 @@ struct MarginDashboardView: View {
     }
 
     private var titleHeader: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Margin & Dividend Tracker")
-                    .font(.title2)
-                    .fontWeight(.bold)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.title3)
+                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Margin Dashboard")
+                    .font(.title2.weight(.bold))
+                Text("Portfolio, dividends, margin, and safety.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showMarginSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .frame(width: 36, height: 36)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Margin settings")
+        }
+    }
+
+    private var marginInsightSummarySection: some View {
+        let grossText = grossPortfolioValue.formatted(.currency(code: "USD"))
+        let marginText = budget.portfolioSnapshot.marginUsed.formatted(.currency(code: "USD"))
+        let personalCapText = budget.marginSettings.personalMarginCap.formatted(.currency(code: "USD"))
+        let monthsUntilFreeLimitText = monthsUntilFreeLimit.formatted(.number.precision(.fractionLength(1)))
+
+        return VStack(spacing: 14) {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Projected Portfolio", systemImage: "arrow.up.forward")
+                                .font(.headline)
+                            Text("Net value after margin")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(netWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(netWorthDelta >= 0 ? .green : .pink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background((netWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
+                    }
+
+                    Text(netPortfolioValue, format: .currency(code: "USD"))
+                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .foregroundStyle(netPortfolioValue < 0 ? Color.pink : Color.primary)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+
+                    Text("Gross \(grossText)  Margin \(marginText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    marginProgressStrip(
+                        title: "Personal cap",
+                        progress: personalCapUtilizationPercent,
+                        value: "\(marginText) / \(personalCapText)",
+                        tint: personalCapUtilizationPercent >= budget.marginSettings.dangerThresholdPercent ? .red : .pink
+                    )
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                marginInsightTile(title: "Monthly Income", value: monthlyDividends, subtitle: "portfolio dividends", tint: .green, systemImage: "banknote.fill")
+                marginInsightTile(title: "Interest", value: max(monthlyInterest, monthToDateMarginInterest), subtitle: "monthly cost", tint: .orange, systemImage: "percent")
+                marginInsightTile(title: "Free Limit Left", value: interestFreeMarginRemaining, subtitle: "\(monthsUntilFreeLimitText) months", tint: .mint, systemImage: "shield.fill")
+                marginInsightTile(title: "True Spread", value: trueMonthlySpread, subtitle: "dividends - bills - interest", tint: trueMonthlySpread >= 0 ? .green : .pink, systemImage: "arrow.left.arrow.right")
+            }
+
+            GlassCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Label("Income vs Costs", systemImage: "arrow.left.arrow.right")
+                            .font(.headline)
+                        Spacer()
+                        Text(dividendCoverageOfElectricBill, format: .percent.precision(.fractionLength(1)))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.yellow)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.yellow.opacity(0.12), in: Capsule())
+                            .overlay(Capsule().stroke(Color.yellow.opacity(0.55), lineWidth: 1))
+                    }
+
+                    marginIncomeCostRow(title: "Dividends", amount: monthlyDividends, tint: .green, systemImage: "arrow.up.forward")
+                    marginIncomeCostRow(title: "Bills", amount: monthToDateBills, tint: .pink, systemImage: "bolt.fill")
+                    marginIncomeCostRow(title: "Interest", amount: max(monthlyInterest, monthToDateMarginInterest), tint: .orange, systemImage: "percent")
+                    Divider()
+                    marginIncomeCostRow(title: "Spread", amount: trueMonthlySpread, tint: trueMonthlySpread >= 0 ? .purple : .pink, systemImage: "checkmark.circle.fill")
+                }
+            }
         }
     }
 
@@ -620,8 +733,6 @@ struct MarginDashboardView: View {
                                             .foregroundStyle(unrealized >= 0 ? .green : .red)
                                     }
                                     .font(.caption)
-
-                                    holdingTickerSnapshot(for: holding)
                                 }
                             }
                             .padding(8)
@@ -640,14 +751,30 @@ struct MarginDashboardView: View {
 
     private var netWorthChartCard: some View {
         GlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
-                    Text("Net Worth Over Time")
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "wallet.pass.fill")
                         .font(.headline)
+                        .foregroundStyle(.purple)
+                        .frame(width: 38, height: 38)
+                        .background(Color.purple.opacity(0.16), in: Circle())
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Portfolio Net Worth")
+                            .font(.headline)
+                        Text(netPortfolioValue, format: .currency(code: "USD"))
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .foregroundStyle(netPortfolioValue < 0 ? Color.pink : Color.primary)
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                    }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(netPortfolioValue, format: .currency(code: "USD"))
-                            .font(.subheadline.weight(.semibold))
+                        Text(netWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(netWorthDelta >= 0 ? .green : .pink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background((netWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
                         if let latestHoldingsUpdate {
                             Text("Updated \(latestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
                                 .font(.caption2)
@@ -669,50 +796,59 @@ struct MarginDashboardView: View {
                     Chart(points) { point in
                         AreaMark(
                             x: .value("Date", point.date),
-                            y: .value("Net Worth", point.netValue)
+                            y: .value("Portfolio Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.green.opacity(0.18))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.pink.opacity(0.24), Color.pink.opacity(0.02)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
 
                         LineMark(
                             x: .value("Date", point.date),
-                            y: .value("Net Worth", point.netValue)
+                            y: .value("Portfolio Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.pink)
+                        .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
                         LineMark(
                             x: .value("Date", point.date),
                             y: .value("Gross Portfolio", point.grossValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.blue.opacity(0.7))
+                        .foregroundStyle(.green.opacity(0.68))
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
                         if let selectedNetWorthPoint {
                             RuleMark(x: .value("Date", selectedNetWorthPoint.date))
                                 .foregroundStyle(.secondary.opacity(0.35))
                             PointMark(
                                 x: .value("Date", selectedNetWorthPoint.date),
-                                y: .value("Net Worth", selectedNetWorthPoint.netValue)
+                                y: .value("Portfolio Net Worth", selectedNetWorthPoint.netValue)
                             )
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.pink)
                         }
                     }
                     .chartYAxis {
                         AxisMarks(position: .leading) { value in
-                            AxisGridLine()
-                            AxisTick()
+                            AxisGridLine().foregroundStyle(Color.secondary.opacity(0.12))
                             AxisValueLabel {
                                 if let amount = value.as(Double.self) {
                                     Text(amount, format: .currency(code: "USD"))
                                 }
                             }
+                            .foregroundStyle(.secondary)
+                            .font(.caption2)
                         }
                     }
+                    .chartYScale(domain: netWorthChartYDomain(for: points))
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 4)) { value in
-                            AxisGridLine()
-                            AxisTick()
+                            AxisGridLine().foregroundStyle(Color.secondary.opacity(0.08))
                             AxisValueLabel {
                                 if let date = value.as(Date.self) {
                                     switch selectedNetWorthRange {
@@ -776,15 +912,17 @@ struct MarginDashboardView: View {
                             }
                         }
                     }
-                    .frame(height: 220)
+                    .frame(height: 240)
 
                     marginNetWorthRangeSelector
 
                     HStack(spacing: 14) {
-                        Label("Net Worth", systemImage: "line.diagonal")
-                            .foregroundStyle(.green)
+                        Label("Portfolio Net Worth", systemImage: "line.diagonal")
+                            .foregroundStyle(.pink)
                         Label("Gross Portfolio", systemImage: "line.diagonal")
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.green)
+                        Text("\(netWorthDelta >= 0 ? "+" : "")\(netWorthDelta, format: .currency(code: "USD")) in range")
+                            .foregroundStyle(.secondary)
                     }
                     .font(.caption)
                 }
@@ -996,48 +1134,130 @@ struct MarginDashboardView: View {
         .font(.subheadline)
     }
 
+    private func marginInsightTile(title: String, value: Double, subtitle: String, tint: Color, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 26, height: 26)
+                    .background(tint.opacity(0.12), in: Circle())
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+            }
+            Text(value, format: .currency(code: "USD").precision(.fractionLength(0)))
+                .font(.title2.weight(.bold))
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(tint.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func marginIncomeCostRow(title: String, amount: Double, tint: Color, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: Circle())
+            Text(title)
+                .font(.headline)
+            Spacer()
+            Text(amount, format: .currency(code: "USD"))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(tint)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+    }
+
+    private func marginProgressStrip(title: String, progress: Double, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(value)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            ProgressView(value: min(max(progress, 0), 1))
+                .tint(tint)
+        }
+    }
+
     private func holdingTickerSnapshot(for holding: PortfolioHolding) -> some View {
         let ticker = holding.ticker.uppercased()
         let snapshot = holdingQuoteSnapshot(for: holding)
-        let changeTint: Color = snapshot.percentChange >= 0 ? .green : .red
-        let closes = holdingQuoteCloses[ticker] ?? compactSessionPrices(from: snapshot)
+        let changeTint: Color = snapshot.percentChange >= 0 ? .green : .pink
+        let priceHistory = holdingPriceHistory[ticker] ?? TickerPricePoint.estimated(from: compactSessionPrices(from: snapshot))
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                HStack(spacing: 4) {
-                    Image(systemName: snapshot.percentChange >= 0 ? "arrow.up.right" : "arrow.down.right")
-                    Text(snapshot.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Quote Snapshot")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(snapshot.price, format: .currency(code: "USD"))
+                        .font(.title3.weight(.bold))
+                        .minimumScaleFactor(0.75)
+                        .lineLimit(1)
                 }
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(changeTint)
-                Text(snapshot.change, format: .currency(code: "USD"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 Spacer()
-                if let updatedAt = budget.cachedQuotes[ticker]?.updatedAt {
-                    Text("Updated \(updatedAt, format: .dateTime.month().day().hour().minute())")
-                        .font(.caption2)
+                VStack(alignment: .trailing, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Image(systemName: snapshot.percentChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                            .font(.caption.weight(.bold))
+                        Text(snapshot.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(changeTint)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(changeTint.opacity(0.14), in: Capsule())
+
+                    Text(snapshot.change, format: .currency(code: "USD"))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
 
-            HStack(spacing: 8) {
-                tickerSnapshotPill("Open", value: snapshot.open)
-                tickerSnapshotPill("Prev", value: snapshot.previousClose)
-                tickerSnapshotPill("Low", value: snapshot.low)
-                tickerSnapshotPill("High", value: snapshot.high)
+            if priceHistory.count >= 2 || !ticker.isEmpty {
+                TickerPriceHistoryChart(
+                    points: priceHistory,
+                    trendIsPositive: snapshot.percentChange >= 0,
+                    style: .compact,
+                    symbol: ticker
+                )
             }
 
             if let dayLow = snapshot.low, let dayHigh = snapshot.high, dayHigh > dayLow {
-                VStack(alignment: .leading, spacing: 4) {
+                let rangeText = "\(dayLow.formatted(.currency(code: "USD"))) - \(dayHigh.formatted(.currency(code: "USD")))"
+                VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Text("Day range")
-                            .font(.caption2)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(dayLow, format: .currency(code: "USD")) - \(dayHigh, format: .currency(code: "USD"))")
-                            .font(.caption2)
+                        Text(rangeText)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
                     ProgressView(value: min(max((snapshot.price - dayLow) / (dayHigh - dayLow), 0), 1))
@@ -1045,44 +1265,58 @@ struct MarginDashboardView: View {
                 }
             }
 
-            if closes.count >= 2 {
-                Chart(Array(closes.enumerated()), id: \.offset) { item in
-                    LineMark(
-                        x: .value("Point", item.offset),
-                        y: .value("Price", item.element)
-                    )
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(changeTint)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                tickerSnapshotPill("Open", value: snapshot.open, tint: .blue, systemImage: "arrow.up.right")
+                tickerSnapshotPill("Prev", value: snapshot.previousClose, tint: .purple, systemImage: "clock.fill")
+                tickerSnapshotPill("Low", value: snapshot.low, tint: .pink, systemImage: "arrow.down")
+                tickerSnapshotPill("High", value: snapshot.high, tint: .green, systemImage: "arrow.up")
+            }
+
+            if let updatedAt = budget.cachedQuotes[ticker]?.updatedAt {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                    Text("Updated \(updatedAt, format: .dateTime.month().day().hour().minute())")
                 }
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .frame(height: 38)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(changeTint.opacity(0.20), lineWidth: 1)
+        )
         .padding(.top, 4)
     }
 
-    private func tickerSnapshotPill(_ label: String, value: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            if let value {
-                Text(value, format: .currency(code: "USD"))
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            } else {
-                Text("N/A")
-                    .font(.caption)
+    private func tickerSnapshotPill(_ label: String, value: Double?, tint: Color, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if let value {
+                    Text(value, format: .currency(code: "USD"))
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                } else {
+                    Text("N/A")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(9)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func sum(_ items: [PortfolioTransaction], type: PortfolioTransactionType) -> Double {
@@ -1163,6 +1397,25 @@ struct MarginDashboardView: View {
 
     private func nearestHistoryPoint(to date: Date, in points: [PortfolioValuePoint]) -> PortfolioValuePoint? {
         points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+
+    private func netWorthChartYDomain(for points: [PortfolioValuePoint]) -> ClosedRange<Double> {
+        let values = points.flatMap { [$0.netValue, $0.grossValue] }
+        guard let minValue = values.min(), let maxValue = values.max() else { return -1...1 }
+        if minValue == maxValue {
+            let padding = max(abs(minValue) * 0.1, 100)
+            return (minValue - padding)...(maxValue + padding)
+        }
+
+        let range = maxValue - minValue
+        let padding = max(range * 0.12, 50)
+        var lower = minValue - padding
+        var upper = maxValue + padding
+        if minValue < 0, maxValue > 0 {
+            lower = min(lower, -padding)
+            upper = max(upper, padding)
+        }
+        return lower...upper
     }
 
     private func syncPortfolioSnapshotAndHistory() {
@@ -1388,7 +1641,15 @@ struct MarginDashboardView: View {
                     previousClose: nil
                 )
                 holdingQuoteSnapshots[ticker] = snapshot
-                holdingQuoteCloses[ticker] = compactSessionPrices(from: snapshot)
+                if let history = try? await marketDataService.fetchCompositeRecentPriceHistory(
+                    ticker: ticker,
+                    settings: budget.marketDataSettings,
+                    days: 90
+                ), history.count >= 2 {
+                    holdingPriceHistory[ticker] = history
+                } else {
+                    holdingPriceHistory[ticker] = TickerPricePoint.estimated(from: compactSessionPrices(from: snapshot))
+                }
                 for idx in budget.holdings.indices where budget.holdings[idx].ticker.uppercased() == ticker {
                     budget.holdings[idx].currentPrice = details.price
                     if let annualDividend = details.annualDividendPerShare, annualDividend >= 0 {
@@ -1424,17 +1685,53 @@ struct MarginDashboardView: View {
 private struct HoldingTickerDetailView: View {
     @ObservedObject var budget: BudgetModel
     let holdingID: UUID
+    let quoteSnapshot: MarketQuoteSnapshot?
+    let quotePriceHistory: [TickerPricePoint]
     @Environment(\.dismiss) private var dismiss
     @State private var showEditHolding = false
     @State private var selectedTransaction: PortfolioTransaction?
+    @State private var noteDraft = ""
+    @State private var editingNote: TickerNote?
+    @State private var editingNoteText = ""
 
     private var holding: PortfolioHolding? {
         budget.holdings.first(where: { $0.id == holdingID })
     }
 
+    private var cleanTicker: String {
+        holding?.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+    }
+
+    private var tickerNotes: [TickerNote] {
+        budget.notes(for: cleanTicker)
+    }
+
     private var lastUpdated: Date? {
         guard let holding else { return nil }
         return budget.cachedQuotes[holding.ticker.uppercased()]?.updatedAt
+    }
+
+    private var displayQuoteSnapshot: MarketQuoteSnapshot? {
+        if let quoteSnapshot {
+            return quoteSnapshot
+        }
+        guard let holding else { return nil }
+        return MarketQuoteSnapshot(
+            price: holding.currentPrice,
+            change: 0,
+            percentChange: 0,
+            open: nil,
+            high: nil,
+            low: nil,
+            previousClose: nil
+        )
+    }
+
+    private var displayQuotePriceHistory: [TickerPricePoint] {
+        guard let snapshot = displayQuoteSnapshot else { return [] }
+        return quotePriceHistory.isEmpty
+            ? TickerPricePoint.estimated(from: compactSessionPrices(from: snapshot))
+            : quotePriceHistory
     }
 
     private var relatedTransactions: [PortfolioTransaction] {
@@ -1457,12 +1754,25 @@ private struct HoldingTickerDetailView: View {
                     let yieldOnCost = holding.averageCost > 0 ? holding.annualDividendPerShare / holding.averageCost : 0
 
                     Section {
+                        TradingViewWidgetContainer(
+                            kind: .symbolInfo(symbol: holding.ticker),
+                            height: 118,
+                            fallback: { AnyView(EmptyView()) }
+                        )
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 0, trailing: 8))
+
+                    Section {
                         VStack(alignment: .leading, spacing: 14) {
                             performanceHero(
                                 marketValue: marketValue,
                                 unrealized: unrealized,
                                 unrealizedPct: unrealizedPct
                             )
+                            if let snapshot = displayQuoteSnapshot {
+                                quoteSnapshotCard(snapshot: snapshot, priceHistory: displayQuotePriceHistory)
+                            }
                             HStack(spacing: 10) {
                                 compactMetricCard(
                                     title: "Shares",
@@ -1503,14 +1813,14 @@ private struct HoldingTickerDetailView: View {
                             if let lastUpdated {
                                 detailRow("Price Updated", value: lastUpdated.formatted(date: .abbreviated, time: .shortened))
                             }
-                            if !holding.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(holding.notes)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 4)
-                            }
                         }
                         .padding(.vertical, 4)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
+
+                    Section {
+                        holdingNotesSection
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
@@ -1550,7 +1860,10 @@ private struct HoldingTickerDetailView: View {
                 }
             }
             .contentMargins(.horizontal, 8, for: .scrollContent)
-            .navigationTitle(holding?.ticker ?? "Holding")
+            .navigationTitle("Holding")
+            .onAppear {
+                migrateLegacyHoldingNoteIfNeeded()
+            }
             .toolbar {
                 if holding != nil {
                     ToolbarItem(placement: .primaryAction) {
@@ -1572,6 +1885,107 @@ private struct HoldingTickerDetailView: View {
                     transactionID: transaction.id
                 )
             }
+            .sheet(item: $editingNote) { note in
+                NavigationStack {
+                    Form {
+                        TextEditor(text: $editingNoteText)
+                            .frame(minHeight: 160)
+                    }
+                    .navigationTitle("Edit Note")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { editingNote = nil }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                budget.updateTickerNote(note, text: editingNoteText)
+                                editingNote = nil
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var holdingNotesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Notes", systemImage: "note.text")
+                    .font(.headline)
+                Spacer()
+                Text("\(tickerNotes.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.secondary.opacity(0.10), in: Capsule())
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                TextField("Add note for \(cleanTicker)", text: $noteDraft, axis: .vertical)
+                    .lineLimit(2...4)
+                    .padding(10)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Button {
+                    budget.addTickerNote(ticker: cleanTicker, text: noteDraft)
+                    noteDraft = ""
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption.weight(.bold))
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(cleanTicker.isEmpty || noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Add note")
+            }
+
+            if tickerNotes.isEmpty {
+                Text("No notes for \(cleanTicker) yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(tickerNotes) { note in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(note.text)
+                            .font(.subheadline)
+                        HStack {
+                            Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
+                            Spacer()
+                            Button("Edit") {
+                                editingNoteText = note.text
+                                editingNote = note
+                            }
+                            Button(role: .destructive) {
+                                budget.deleteTickerNote(note)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private func migrateLegacyHoldingNoteIfNeeded() {
+        guard let holding else { return }
+        let legacyNote = holding.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !legacyNote.isEmpty else { return }
+        let ticker = holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !ticker.isEmpty else { return }
+        let alreadyExists = budget.notes(for: ticker).contains {
+            $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == legacyNote
+        }
+        if !alreadyExists {
+            budget.addTickerNote(ticker: ticker, text: legacyNote)
         }
     }
 
@@ -1604,6 +2018,133 @@ private struct HoldingTickerDetailView: View {
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func quoteSnapshotCard(snapshot: MarketQuoteSnapshot, priceHistory: [TickerPricePoint]) -> some View {
+        let changeTint: Color = snapshot.percentChange >= 0 ? .green : .pink
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Quote Snapshot")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(snapshot.price, format: .currency(code: "USD"))
+                        .font(.title3.weight(.bold))
+                        .minimumScaleFactor(0.75)
+                        .lineLimit(1)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Image(systemName: snapshot.percentChange >= 0 ? "arrow.up.right" : "arrow.down.right")
+                            .font(.caption.weight(.bold))
+                        Text(snapshot.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(changeTint)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(changeTint.opacity(0.14), in: Capsule())
+
+                    Text(snapshot.change, format: .currency(code: "USD"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if priceHistory.count >= 2 || !(holding?.ticker.isEmpty ?? true) {
+                TickerPriceHistoryChart(
+                    points: priceHistory,
+                    trendIsPositive: snapshot.percentChange >= 0,
+                    style: .compact,
+                    symbol: holding?.ticker
+                )
+            }
+
+            NavigationLink {
+                if let holding {
+                    TradingViewHoldingChartDetailView(
+                        symbol: holding.ticker,
+                        fallbackPoints: priceHistory,
+                        trendIsPositive: snapshot.percentChange >= 0,
+                        marketDataSettings: budget.marketDataSettings
+                    )
+                }
+            } label: {
+                Label("Full TradingView Chart", systemImage: "chart.xyaxis.line")
+                    .font(.caption.weight(.semibold))
+            }
+            .disabled(holding == nil)
+
+            if let dayLow = snapshot.low, let dayHigh = snapshot.high, dayHigh > dayLow {
+                let rangeText = "\(dayLow.formatted(.currency(code: "USD"))) - \(dayHigh.formatted(.currency(code: "USD")))"
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("Day range")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(rangeText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: min(max((snapshot.price - dayLow) / (dayHigh - dayLow), 0), 1))
+                        .tint(changeTint)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                tickerSnapshotPill("Open", value: snapshot.open, tint: .blue, systemImage: "arrow.up.right")
+                tickerSnapshotPill("Prev", value: snapshot.previousClose, tint: .purple, systemImage: "clock.fill")
+                tickerSnapshotPill("Low", value: snapshot.low, tint: .pink, systemImage: "arrow.down")
+                tickerSnapshotPill("High", value: snapshot.high, tint: .green, systemImage: "arrow.up")
+            }
+
+            if let lastUpdated {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                    Text("Updated \(lastUpdated, format: .dateTime.month().day().hour().minute())")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(changeTint.opacity(0.20), lineWidth: 1)
+        )
+    }
+
+    private func tickerSnapshotPill(_ label: String, value: Double?, tint: Color, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if let value {
+                    Text(value, format: .currency(code: "USD"))
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                } else {
+                    Text("N/A")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func compactMetricCard(title: String, value: String, icon: String) -> some View {
@@ -1655,6 +2196,33 @@ private struct HoldingTickerDetailView: View {
             }
             .frame(height: 8)
         }
+    }
+
+    private func compactSessionPrices(from snapshot: MarketQuoteSnapshot) -> [Double] {
+        let candidateValues: [Double?] = [
+            snapshot.previousClose,
+            snapshot.open,
+            snapshot.low,
+            snapshot.price,
+            snapshot.high
+        ]
+        var rawValues: [Double] = []
+        for candidate in candidateValues {
+            if let value = candidate, value > 0 {
+                rawValues.append(value)
+            }
+        }
+
+        let uniqueValues = rawValues.reduce(into: [Double]()) { values, value in
+            if values.last != value {
+                values.append(value)
+            }
+        }
+
+        if uniqueValues.count >= 2 {
+            return uniqueValues
+        }
+        return [snapshot.price, snapshot.price].filter { $0 > 0 }
     }
 
     private func detailRow(_ label: String, value: String) -> some View {
@@ -1909,7 +2477,8 @@ private struct ManualHoldingEntryView: View {
                                 pricePerShare: averageCost,
                                 amount: shares * averageCost,
                                 notes: "Manual holding entry"
-                            )
+                            ),
+                            affectsBalances: false
                         )
                         if let idx = budget.holdings.firstIndex(where: { $0.ticker.uppercased() == cleanTicker }) {
                             budget.holdings[idx].currentPrice = max(currentPrice, budget.holdings[idx].currentPrice)
@@ -2045,6 +2614,51 @@ private struct AddTransactionView: View {
     @State private var pricePerShare = 0.0
     @State private var amount = 0.0
     @State private var notes = ""
+    @State private var fundingBankAccount = ""
+
+    private var bankAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [fundingBankAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
+    private var cleanTicker: String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var transactionAmount: Double {
+        amount != 0 ? amount : shares * pricePerShare
+    }
+
+    private var amountFieldTitle: String {
+        switch type {
+        case .marginInterest:
+            return "Interest accrued"
+        case .billPaidByMargin:
+            return "Bill amount"
+        case .dividend:
+            return "Dividend received"
+        case .contribution:
+            return "Cash added"
+        default:
+            return "Amount"
+        }
+    }
+
+    private var canSave: Bool {
+        switch type {
+        case .buy, .sell:
+            return !cleanTicker.isEmpty && shares > 0 && transactionAmount > 0
+        case .contribution:
+            let hasFundingAccount = !fundingBankAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return transactionAmount > 0 && hasFundingAccount
+        case .manualAdjustment:
+            return transactionAmount != 0
+        case .dividend, .billPaidByMargin, .marginInterest:
+            return transactionAmount > 0
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -2054,6 +2668,20 @@ private struct AddTransactionView: View {
                     Picker("Type", selection: $type) {
                         ForEach(PortfolioTransactionType.allCases) { txType in
                             Text(txType.title).tag(txType)
+                        }
+                    }
+                    if type == .contribution {
+                        Picker("From Account", selection: $fundingBankAccount) {
+                            ForEach(bankAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
+                        if budget.bankAccounts.isEmpty {
+                            Text("Add a bank account before recording a portfolio contribution.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if let selectedAccount {
+                            LabeledContent("Available", value: selectedAccount.balance.formatted(.currency(code: "USD")))
                         }
                     }
                     TextField("Ticker (optional)", text: $ticker)
@@ -2068,7 +2696,14 @@ private struct AddTransactionView: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                     }
-                    DelayedCurrencyField(title: "Amount", value: $amount)
+                    DelayedCurrencyField(title: amountFieldTitle, value: $amount)
+                }
+                if type == .marginInterest {
+                    Section("Margin Interest") {
+                        Text("This logs interest accrued and adds it to the margin balance.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Notes") {
                     TextField("Notes (optional)", text: $notes)
@@ -2085,32 +2720,66 @@ private struct AddTransactionView: View {
                             PortfolioTransaction(
                                 date: date,
                                 type: type,
-                                ticker: ticker.nilIfBlank,
+                                ticker: cleanTicker.nilIfBlank,
                                 shares: shares > 0 ? shares : nil,
                                 pricePerShare: pricePerShare > 0 ? pricePerShare : nil,
-                                amount: amount,
-                                notes: notes.nilIfBlank
-                            )
+                                amount: transactionAmount,
+                                notes: notes.nilIfBlank,
+                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil
+                            ),
+                            fundingBankAccount: type == .contribution ? fundingBankAccount : nil
                         )
                         dismiss()
                     }
-                    .disabled(amount == 0)
+                    .disabled(!canSave)
                 }
             }
+            .onAppear {
+                if fundingBankAccount.isEmpty {
+                    fundingBankAccount = budget.bankAccounts.first?.name ?? ""
+                }
+            }
+            .onChange(of: type) { _, newValue in
+                guard newValue == .contribution, fundingBankAccount.isEmpty else { return }
+                fundingBankAccount = budget.bankAccounts.first?.name ?? ""
+            }
         }
+    }
+
+    private var selectedAccount: BankAccount? {
+        let selected = fundingBankAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty else { return nil }
+        return budget.bankAccounts.first { $0.name.caseInsensitiveCompare(selected) == .orderedSame }
     }
 }
 
 private struct AddInvestmentView: View {
     @ObservedObject var budget: BudgetModel
     @Environment(\.dismiss) private var dismiss
+    private let marketDataService = MarketDataService()
 
     @State private var ticker = ""
     @State private var dollarsInvested = 0.0
     @State private var sharesBought = 0.0
     @State private var pricePerShare = 0.0
+    @State private var annualDividendPerShare = 0.0
+    @State private var dividendFrequency: DividendFrequency = .quarterly
+    @State private var assetType: PortfolioAssetType = .dividendStock
+    @State private var reliability: DividendReliability = .medium
     @State private var date = Date()
-    @State private var fundingSource: InvestmentFundingSource = .cash
+    @State private var quoteFetchTask: Task<Void, Never>?
+
+    private var cleanTicker: String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var investmentAmount: Double {
+        dollarsInvested > 0 ? dollarsInvested : sharesBought * pricePerShare
+    }
+
+    private var canSave: Bool {
+        !cleanTicker.isEmpty && sharesBought > 0 && investmentAmount > 0
+    }
 
     var body: some View {
         NavigationStack {
@@ -2130,35 +2799,124 @@ private struct AddInvestmentView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
-                Section("Notes & Date") {
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Picker("Funding Source", selection: $fundingSource) {
-                        ForEach(InvestmentFundingSource.allCases) { source in
-                            Text(source.rawValue).tag(source)
+                Section("Dividend & Classification") {
+                    LabeledContent("Annual dividend/share") {
+                        TextField("0.00", value: $annualDividendPerShare, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Picker("Dividend frequency", selection: $dividendFrequency) {
+                        ForEach(DividendFrequency.allCases) { item in
+                            Text(item.rawValue).tag(item)
+                        }
+                    }
+                    Picker("Asset type", selection: $assetType) {
+                        ForEach(PortfolioAssetType.allCases) { item in
+                            Text(item.rawValue).tag(item)
+                        }
+                    }
+                    Picker("Dividend reliability", selection: $reliability) {
+                        ForEach(DividendReliability.allCases) { item in
+                            Text(item.rawValue).tag(item)
                         }
                     }
                 }
+                Section("Notes & Date") {
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    LabeledContent("Funding", value: "Cash/Margin")
+                }
             }
             .navigationTitle("Add Investment")
+            .onChange(of: ticker) { _, _ in
+                applyExistingHoldingDefaults()
+                queueQuoteFetchIfNeeded()
+            }
+            .onDisappear {
+                quoteFetchTask?.cancel()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        let existingHolding = budget.holdings.first { $0.ticker.uppercased() == cleanTicker }
+                        let dividendToSave = annualDividendPerShare > 0
+                            ? annualDividendPerShare
+                            : (existingHolding?.annualDividendPerShare ?? 0)
+                        let frequencyToSave = annualDividendPerShare > 0 || existingHolding == nil
+                            ? dividendFrequency
+                            : (existingHolding?.dividendFrequency ?? dividendFrequency)
                         budget.addInvestment(
-                            ticker: ticker,
-                            dollarsInvested: dollarsInvested,
+                            ticker: cleanTicker,
+                            dollarsInvested: investmentAmount,
                             sharesBought: sharesBought,
                             pricePerShare: pricePerShare,
                             date: date,
-                            fundingSource: fundingSource
+                            fundingSource: .cash
                         )
+                        if let idx = budget.holdings.firstIndex(where: { $0.ticker.uppercased() == cleanTicker }) {
+                            budget.holdings[idx].annualDividendPerShare = dividendToSave
+                            budget.holdings[idx].dividendFrequency = frequencyToSave
+                            budget.holdings[idx].assetType = assetType
+                            budget.holdings[idx].dividendReliability = reliability
+                        }
                         dismiss()
                     }
-                    .disabled(ticker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || dollarsInvested <= 0 || sharesBought <= 0)
+                    .disabled(!canSave)
                 }
             }
+        }
+    }
+
+    private func applyExistingHoldingDefaults() {
+        guard let holding = budget.holdings.first(where: { $0.ticker.uppercased() == cleanTicker }) else { return }
+        if annualDividendPerShare <= 0 {
+            annualDividendPerShare = holding.annualDividendPerShare
+        }
+        dividendFrequency = holding.dividendFrequency
+        assetType = holding.assetType
+        reliability = holding.dividendReliability
+        if pricePerShare <= 0 {
+            pricePerShare = holding.currentPrice
+        }
+    }
+
+    private func queueQuoteFetchIfNeeded() {
+        quoteFetchTask?.cancel()
+        quoteFetchTask = Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            await fetchQuoteForTicker()
+        }
+    }
+
+    @MainActor
+    private func fetchQuoteForTicker() async {
+        let symbol = cleanTicker
+        guard !symbol.isEmpty else { return }
+        ticker = symbol
+
+        if let cached = budget.cachedQuotes[symbol], cached.price > 0, pricePerShare <= 0 {
+            pricePerShare = cached.price
+        }
+
+        guard budget.marketDataSettings.canFetchMarketData else { return }
+        do {
+            let details = try await marketDataService.fetchQuoteDetails(
+                ticker: symbol,
+                settings: budget.marketDataSettings
+            )
+            guard !Task.isCancelled else { return }
+            if pricePerShare <= 0 {
+                pricePerShare = details.price
+            }
+            budget.cachedQuotes[symbol] = CachedQuote(ticker: symbol, price: details.price, updatedAt: Date())
+            if let annualDividend = details.annualDividendPerShare, annualDividend > 0, annualDividendPerShare <= 0 {
+                annualDividendPerShare = annualDividend
+            }
+        } catch {
+            // Keep manually entered or existing holding values if lookup fails.
         }
     }
 }
@@ -2301,6 +3059,9 @@ private struct LedgerHistoryView: View {
                                         if let ticker = tx.ticker, !ticker.isEmpty {
                                             Text(ticker)
                                         }
+                                        if tx.type == .contribution, let account = tx.fundingBankAccount, !account.isEmpty {
+                                            Text("From \(account)")
+                                        }
                                         Text(tx.date.formatted(date: .abbreviated, time: .omitted))
                                     }
                                     .font(.caption)
@@ -2398,8 +3159,8 @@ private struct EditPortfolioTransactionView: View {
                 }
                 Section("Danger Zone") {
                     Button("Delete Transaction", role: .destructive) {
-                        guard let transactionIndex else { return }
-                        budget.portfolioTransactions.remove(at: transactionIndex)
+                        guard transactionIndex != nil else { return }
+                        budget.deletePortfolioTransaction(id: transactionID)
                         dismiss()
                     }
                 }
@@ -2428,13 +3189,20 @@ private struct EditPortfolioTransactionView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         guard let transactionIndex else { return }
-                        budget.portfolioTransactions[transactionIndex].date = date
-                        budget.portfolioTransactions[transactionIndex].type = type
-                        budget.portfolioTransactions[transactionIndex].ticker = ticker.nilIfBlank?.uppercased()
-                        budget.portfolioTransactions[transactionIndex].shares = shares > 0 ? shares : nil
-                        budget.portfolioTransactions[transactionIndex].pricePerShare = pricePerShare > 0 ? pricePerShare : nil
-                        budget.portfolioTransactions[transactionIndex].amount = amount
-                        budget.portfolioTransactions[transactionIndex].notes = notes.nilIfBlank
+                        let existing = budget.portfolioTransactions[transactionIndex]
+                        budget.updatePortfolioTransaction(
+                            PortfolioTransaction(
+                                id: existing.id,
+                                date: date,
+                                type: type,
+                                ticker: ticker.nilIfBlank?.uppercased(),
+                                shares: shares > 0 ? shares : nil,
+                                pricePerShare: pricePerShare > 0 ? pricePerShare : nil,
+                                amount: amount,
+                                notes: notes.nilIfBlank,
+                                fundingBankAccount: existing.fundingBankAccount
+                            )
+                        )
                         dismiss()
                     }
                     .disabled(amount == 0)

@@ -1,0 +1,46 @@
+{
+  "" : {
+    "const-values" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary.swiftconstvalues",
+    "dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary.d",
+    "diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary.dia",
+    "emit-module-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary-emit-module.dia",
+    "pch" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting App-primary.swiftdeps"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/BudgetNotificationService.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/BudgetNotificationService.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/BudgetNotificationService.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/BudgetNotificationService.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/Budgeting_AppApp.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting_AppApp.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting_AppApp.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Budgeting_AppApp.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/ContentView.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/ContentView.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/MarginViews.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarginViews.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarginViews.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarginViews.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/MarketDataService.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarketDataService.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarketDataService.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/MarketDataService.o"
+  },
+  "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/Models.swift" : {
+    "index-unit-output-path" : "/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Models.o",
+    "llvm-bc" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Models.bc",
+    "object" : "/Users/timothywong/Documents/XCode/Budgeting App/.DerivedData/Intermediates/Budgeting App.build/Release-iphonesimulator/Budgeting App.build/Objects-normal/arm64/Models.o"
+  }
+}

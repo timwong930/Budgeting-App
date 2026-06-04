@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct Budgeting_AppApp: App {
+    @UIApplicationDelegateAdaptor(BudgetAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    BudgetBackgroundRefreshCoordinator.shared.scheduleAppRefresh()
+                }
         }
     }
 }

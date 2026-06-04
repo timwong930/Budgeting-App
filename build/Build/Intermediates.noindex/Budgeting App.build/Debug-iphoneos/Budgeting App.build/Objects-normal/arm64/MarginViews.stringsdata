@@ -7,15 +7,63 @@
         "key": "For tracking only. Not financial advice. Dividends are not guaranteed. Positive dividend spread does not imply positive total return.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 348
+          "startingLine": 434
         }
       },
       {
         "comment": "",
-        "key": "Margin & Dividend Tracker",
+        "key": "Margin settings",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 523
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Dashboard",
         "location": {
           "startingColumn": 22,
-          "startingLine": 408
+          "startingLine": 506
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio, dividends, margin, and safety.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 508
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gross %@  Margin %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 559
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net value after margin",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 540
+        }
+      },
+      {
+        "comment": "",
+        "key": "Projected Portfolio",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 538
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income vs Costs",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 582
         }
       },
       {
@@ -23,7 +71,7 @@
         "key": "Portfolio Snapshot",
         "location": {
           "startingColumn": 26,
-          "startingLine": 420
+          "startingLine": 608
         }
       },
       {
@@ -31,7 +79,7 @@
         "key": "View Details",
         "location": {
           "startingColumn": 28,
-          "startingLine": 423
+          "startingLine": 611
         }
       },
       {
@@ -39,7 +87,15 @@
         "key": "No holdings yet. Use + to add investment or manual holding.",
         "location": {
           "startingColumn": 26,
-          "startingLine": 479
+          "startingLine": 671
+        }
+      },
+      {
+        "comment": "",
+        "key": "No holdings match the current filter.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 675
         }
       },
       {
@@ -47,7 +103,7 @@
         "key": "Holdings View",
         "location": {
           "startingColumn": 24,
-          "startingLine": 465
+          "startingLine": 655
         }
       },
       {
@@ -55,7 +111,7 @@
         "key": "Holdings",
         "location": {
           "startingColumn": 26,
-          "startingLine": 441
+          "startingLine": 629
         }
       },
       {
@@ -63,7 +119,7 @@
         "key": "Refresh Price",
         "location": {
           "startingColumn": 28,
-          "startingLine": 444
+          "startingLine": 632
         }
       },
       {
@@ -71,7 +127,7 @@
         "key": "Refreshing %@...",
         "location": {
           "startingColumn": 34,
-          "startingLine": 452
+          "startingLine": 642
         }
       },
       {
@@ -79,7 +135,7 @@
         "key": "%lld/%lld",
         "location": {
           "startingColumn": 34,
-          "startingLine": 454
+          "startingLine": 644
         }
       },
       {
@@ -87,7 +143,7 @@
         "key": "Ticker",
         "location": {
           "startingColumn": 30,
-          "startingLine": 484
+          "startingLine": 680
         }
       },
       {
@@ -95,7 +151,7 @@
         "key": "Value",
         "location": {
           "startingColumn": 30,
-          "startingLine": 486
+          "startingLine": 682
         }
       },
       {
@@ -103,7 +159,7 @@
         "key": "Monthly",
         "location": {
           "startingColumn": 30,
-          "startingLine": 488
+          "startingLine": 684
         }
       },
       {
@@ -111,7 +167,7 @@
         "key": "%@ shares",
         "location": {
           "startingColumn": 42,
-          "startingLine": 517
+          "startingLine": 713
         }
       },
       {
@@ -119,7 +175,7 @@
         "key": "Alloc %@",
         "location": {
           "startingColumn": 42,
-          "startingLine": 526
+          "startingLine": 722
         }
       },
       {
@@ -127,7 +183,7 @@
         "key": "Monthly %@",
         "location": {
           "startingColumn": 46,
-          "startingLine": 532
+          "startingLine": 728
         }
       },
       {
@@ -135,7 +191,7 @@
         "key": "Yield %@",
         "location": {
           "startingColumn": 46,
-          "startingLine": 534
+          "startingLine": 730
         }
       },
       {
@@ -143,7 +199,7 @@
         "key": "Unrealized %@",
         "location": {
           "startingColumn": 46,
-          "startingLine": 536
+          "startingLine": 732
         }
       },
       {
@@ -151,15 +207,15 @@
         "key": "Add more portfolio activity over time to see your trend.",
         "location": {
           "startingColumn": 26,
-          "startingLine": 582
+          "startingLine": 792
         }
       },
       {
         "comment": "",
         "key": "Net Worth Over Time",
         "location": {
-          "startingColumn": 26,
-          "startingLine": 562
+          "startingColumn": 30,
+          "startingLine": 762
         }
       },
       {
@@ -167,7 +223,7 @@
         "key": "Updated: --",
         "location": {
           "startingColumn": 34,
-          "startingLine": 573
+          "startingLine": 783
         }
       },
       {
@@ -175,7 +231,7 @@
         "key": "Updated %@",
         "location": {
           "startingColumn": 34,
-          "startingLine": 569
+          "startingLine": 779
         }
       },
       {
@@ -183,7 +239,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 39,
-          "startingLine": 588
+          "startingLine": 798
         }
       },
       {
@@ -191,7 +247,7 @@
         "key": "Net Worth",
         "location": {
           "startingColumn": 39,
-          "startingLine": 589
+          "startingLine": 799
         }
       },
       {
@@ -199,7 +255,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 39,
-          "startingLine": 595
+          "startingLine": 811
         }
       },
       {
@@ -207,7 +263,7 @@
         "key": "Net Worth",
         "location": {
           "startingColumn": 39,
-          "startingLine": 596
+          "startingLine": 812
         }
       },
       {
@@ -215,7 +271,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 39,
-          "startingLine": 602
+          "startingLine": 819
         }
       },
       {
@@ -223,7 +279,7 @@
         "key": "Gross Portfolio",
         "location": {
           "startingColumn": 39,
-          "startingLine": 603
+          "startingLine": 820
         }
       },
       {
@@ -231,7 +287,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 48,
-          "startingLine": 609
+          "startingLine": 827
         }
       },
       {
@@ -239,7 +295,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 43,
-          "startingLine": 612
+          "startingLine": 830
         }
       },
       {
@@ -247,7 +303,7 @@
         "key": "Net Worth",
         "location": {
           "startingColumn": 43,
-          "startingLine": 613
+          "startingLine": 831
         }
       },
       {
@@ -255,7 +311,7 @@
         "key": "Net %@",
         "location": {
           "startingColumn": 46,
-          "startingLine": 679
+          "startingLine": 897
         }
       },
       {
@@ -263,7 +319,15 @@
         "key": "Gross %@",
         "location": {
           "startingColumn": 46,
-          "startingLine": 682
+          "startingLine": 900
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@%@ in range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 923
         }
       },
       {
@@ -271,7 +335,7 @@
         "key": "Net Worth",
         "location": {
           "startingColumn": 31,
-          "startingLine": 701
+          "startingLine": 919
         }
       },
       {
@@ -279,7 +343,7 @@
         "key": "Gross Portfolio",
         "location": {
           "startingColumn": 31,
-          "startingLine": 703
+          "startingLine": 921
         }
       },
       {
@@ -287,7 +351,39 @@
         "key": "Dividend Forecast",
         "location": {
           "startingColumn": 22,
-          "startingLine": 749
+          "startingLine": 969
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sort ascending",
+        "location": {
+          "startingColumn": 57,
+          "startingLine": 1017
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sort descending",
+        "location": {
+          "startingColumn": 76,
+          "startingLine": 1017
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 982
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sort",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 996
         }
       },
       {
@@ -295,7 +391,7 @@
         "key": "Bill Tracking",
         "location": {
           "startingColumn": 26,
-          "startingLine": 763
+          "startingLine": 1026
         }
       },
       {
@@ -303,7 +399,7 @@
         "key": "Edit",
         "location": {
           "startingColumn": 28,
-          "startingLine": 766
+          "startingLine": 1029
         }
       },
       {
@@ -311,7 +407,7 @@
         "key": "Safety Dashboard",
         "location": {
           "startingColumn": 22,
-          "startingLine": 780
+          "startingLine": 1043
         }
       },
       {
@@ -319,7 +415,7 @@
         "key": "Stress Tests",
         "location": {
           "startingColumn": 22,
-          "startingLine": 816
+          "startingLine": 1079
         }
       },
       {
@@ -327,7 +423,7 @@
         "key": "Status",
         "location": {
           "startingColumn": 27,
-          "startingLine": 784
+          "startingLine": 1047
         }
       },
       {
@@ -335,7 +431,7 @@
         "key": "Margin Used vs Free Limit",
         "location": {
           "startingColumn": 26,
-          "startingLine": 794
+          "startingLine": 1057
         }
       },
       {
@@ -343,7 +439,7 @@
         "key": "%@ / %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 796
+          "startingLine": 1059
         }
       },
       {
@@ -351,7 +447,7 @@
         "key": "Margin Used vs Personal Cap",
         "location": {
           "startingColumn": 26,
-          "startingLine": 800
+          "startingLine": 1063
         }
       },
       {
@@ -359,7 +455,7 @@
         "key": "%@ / %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 802
+          "startingLine": 1065
         }
       },
       {
@@ -367,7 +463,7 @@
         "key": "Margin Utilization",
         "location": {
           "startingColumn": 26,
-          "startingLine": 806
+          "startingLine": 1069
         }
       },
       {
@@ -375,7 +471,7 @@
         "key": "-%lld%%",
         "location": {
           "startingColumn": 30,
-          "startingLine": 821
+          "startingLine": 1084
         }
       },
       {
@@ -383,7 +479,7 @@
         "key": "• %@",
         "location": {
           "startingColumn": 30,
-          "startingLine": 833
+          "startingLine": 1096
         }
       },
       {
@@ -391,31 +487,15 @@
         "key": "0%",
         "location": {
           "startingColumn": 23,
-          "startingLine": 848
+          "startingLine": 1111
         }
       },
       {
         "comment": "",
-        "key": "Updated %@",
+        "key": "Quote Snapshot",
         "location": {
           "startingColumn": 26,
-          "startingLine": 893
-        }
-      },
-      {
-        "comment": "",
-        "key": "Day range",
-        "location": {
-          "startingColumn": 30,
-          "startingLine": 909
-        }
-      },
-      {
-        "comment": "",
-        "key": "%@ - %@",
-        "location": {
-          "startingColumn": 30,
-          "startingLine": 913
+          "startingLine": 1214
         }
       },
       {
@@ -423,7 +503,7 @@
         "key": "Point",
         "location": {
           "startingColumn": 35,
-          "startingLine": 925
+          "startingLine": 1244
         }
       },
       {
@@ -431,15 +511,47 @@
         "key": "Price",
         "location": {
           "startingColumn": 35,
-          "startingLine": 926
+          "startingLine": 1245
+        }
+      },
+      {
+        "comment": "",
+        "key": "Point",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1258
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1273
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1296
         }
       },
       {
         "comment": "",
         "key": "N/A",
         "location": {
-          "startingColumn": 22,
-          "startingLine": 951
+          "startingColumn": 26,
+          "startingLine": 1329
         }
       },
       {
@@ -447,7 +559,7 @@
         "key": "Experiment Status",
         "location": {
           "startingColumn": 26,
-          "startingLine": 1100
+          "startingLine": 1491
         }
       },
       {
@@ -455,7 +567,7 @@
         "key": "• %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 1112
+          "startingLine": 1503
         }
       },
       {
@@ -463,7 +575,7 @@
         "key": "Monthly Summary",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1123
+          "startingLine": 1514
         }
       },
       {
@@ -471,7 +583,7 @@
         "key": "Monthly Dividends vs Margin Interest",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1141
+          "startingLine": 1532
         }
       },
       {
@@ -479,7 +591,7 @@
         "key": "Add dividend and margin-interest transactions to track monthly history.",
         "location": {
           "startingColumn": 26,
-          "startingLine": 1146
+          "startingLine": 1537
         }
       },
       {
@@ -487,7 +599,7 @@
         "key": "Month",
         "location": {
           "startingColumn": 39,
-          "startingLine": 1152
+          "startingLine": 1543
         }
       },
       {
@@ -495,7 +607,7 @@
         "key": "Dividends",
         "location": {
           "startingColumn": 39,
-          "startingLine": 1153
+          "startingLine": 1544
         }
       },
       {
@@ -503,7 +615,7 @@
         "key": "Type",
         "location": {
           "startingColumn": 46,
-          "startingLine": 1155
+          "startingLine": 1546
         }
       },
       {
@@ -511,7 +623,7 @@
         "key": "Month",
         "location": {
           "startingColumn": 39,
-          "startingLine": 1159
+          "startingLine": 1550
         }
       },
       {
@@ -519,7 +631,7 @@
         "key": "Margin Interest",
         "location": {
           "startingColumn": 39,
-          "startingLine": 1160
+          "startingLine": 1551
         }
       },
       {
@@ -527,7 +639,7 @@
         "key": "Type",
         "location": {
           "startingColumn": 46,
-          "startingLine": 1162
+          "startingLine": 1553
         }
       },
       {
@@ -535,7 +647,7 @@
         "key": "Div %@",
         "location": {
           "startingColumn": 34,
-          "startingLine": 1183
+          "startingLine": 1574
         }
       },
       {
@@ -543,7 +655,7 @@
         "key": "Int %@",
         "location": {
           "startingColumn": 34,
-          "startingLine": 1185
+          "startingLine": 1576
         }
       },
       {
@@ -551,7 +663,7 @@
         "key": "Holding",
         "location": {
           "startingColumn": 29,
-          "startingLine": 1408
+          "startingLine": 1823
         }
       },
       {
@@ -559,7 +671,7 @@
         "key": "Related Ledger Activity",
         "location": {
           "startingColumn": 29,
-          "startingLine": 1381
+          "startingLine": 1796
         }
       },
       {
@@ -567,7 +679,7 @@
         "key": "No transactions for this ticker yet.",
         "location": {
           "startingColumn": 34,
-          "startingLine": 1383
+          "startingLine": 1798
         }
       },
       {
@@ -575,7 +687,7 @@
         "key": "This holding is no longer available.",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1409
+          "startingLine": 1824
         }
       },
       {
@@ -583,7 +695,7 @@
         "key": "Edit",
         "location": {
           "startingColumn": 32,
-          "startingLine": 1420
+          "startingLine": 1835
         }
       },
       {
@@ -591,7 +703,7 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1424
+          "startingLine": 1839
         }
       },
       {
@@ -599,7 +711,71 @@
         "key": "Position Value",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1444
+          "startingLine": 1859
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quote Snapshot",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1892
+        }
+      },
+      {
+        "comment": "",
+        "key": "Point",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1922
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1923
+        }
+      },
+      {
+        "comment": "",
+        "key": "Point",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1935
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1936
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1951
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1974
+        }
+      },
+      {
+        "comment": "",
+        "key": "N/A",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 2007
         }
       },
       {
@@ -607,7 +783,7 @@
         "key": "Dividend Yields",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1491
+          "startingLine": 2037
         }
       },
       {
@@ -615,7 +791,7 @@
         "key": "Edit Holding",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1613
+          "startingLine": 2186
         }
       },
       {
@@ -623,7 +799,7 @@
         "key": "Position Details",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1568
+          "startingLine": 2141
         }
       },
       {
@@ -631,7 +807,7 @@
         "key": "Dividend & Classification",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1587
+          "startingLine": 2160
         }
       },
       {
@@ -639,7 +815,7 @@
         "key": "Notes",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1609
+          "startingLine": 2182
         }
       },
       {
@@ -647,7 +823,7 @@
         "key": "Ticker",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1569
+          "startingLine": 2142
         }
       },
       {
@@ -655,7 +831,7 @@
         "key": "Shares",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1571
+          "startingLine": 2144
         }
       },
       {
@@ -663,7 +839,7 @@
         "key": "Average cost",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1576
+          "startingLine": 2149
         }
       },
       {
@@ -671,7 +847,7 @@
         "key": "Current price",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1581
+          "startingLine": 2154
         }
       },
       {
@@ -679,7 +855,7 @@
         "key": "0",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1572
+          "startingLine": 2145
         }
       },
       {
@@ -687,7 +863,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1577
+          "startingLine": 2150
         }
       },
       {
@@ -695,7 +871,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1582
+          "startingLine": 2155
         }
       },
       {
@@ -703,7 +879,7 @@
         "key": "Annual dividend/share",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1588
+          "startingLine": 2161
         }
       },
       {
@@ -711,7 +887,7 @@
         "key": "Dividend frequency",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1593
+          "startingLine": 2166
         }
       },
       {
@@ -719,7 +895,7 @@
         "key": "Asset type",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1598
+          "startingLine": 2171
         }
       },
       {
@@ -727,7 +903,7 @@
         "key": "Dividend reliability",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1603
+          "startingLine": 2176
         }
       },
       {
@@ -735,7 +911,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1589
+          "startingLine": 2162
         }
       },
       {
@@ -743,7 +919,7 @@
         "key": "Notes",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1610
+          "startingLine": 2183
         }
       },
       {
@@ -751,7 +927,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1622
+          "startingLine": 2195
         }
       },
       {
@@ -759,7 +935,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1625
+          "startingLine": 2198
         }
       },
       {
@@ -767,7 +943,7 @@
         "key": "Add Manual Holding",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1753
+          "startingLine": 2324
         }
       },
       {
@@ -775,7 +951,7 @@
         "key": "Position Details",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1707
+          "startingLine": 2278
         }
       },
       {
@@ -783,7 +959,7 @@
         "key": "Dividend & Classification",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1726
+          "startingLine": 2297
         }
       },
       {
@@ -791,7 +967,7 @@
         "key": "Notes & Date",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1748
+          "startingLine": 2319
         }
       },
       {
@@ -799,7 +975,7 @@
         "key": "Ticker",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1708
+          "startingLine": 2279
         }
       },
       {
@@ -807,7 +983,7 @@
         "key": "Shares",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1710
+          "startingLine": 2281
         }
       },
       {
@@ -815,7 +991,7 @@
         "key": "Average cost",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1715
+          "startingLine": 2286
         }
       },
       {
@@ -823,7 +999,7 @@
         "key": "Current price",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1720
+          "startingLine": 2291
         }
       },
       {
@@ -831,7 +1007,7 @@
         "key": "0",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1711
+          "startingLine": 2282
         }
       },
       {
@@ -839,7 +1015,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1716
+          "startingLine": 2287
         }
       },
       {
@@ -847,7 +1023,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1721
+          "startingLine": 2292
         }
       },
       {
@@ -855,7 +1031,7 @@
         "key": "Annual dividend/share",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1727
+          "startingLine": 2298
         }
       },
       {
@@ -863,7 +1039,7 @@
         "key": "Dividend frequency",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1732
+          "startingLine": 2303
         }
       },
       {
@@ -871,7 +1047,7 @@
         "key": "Asset type",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1737
+          "startingLine": 2308
         }
       },
       {
@@ -879,7 +1055,7 @@
         "key": "Dividend reliability",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1742
+          "startingLine": 2313
         }
       },
       {
@@ -887,7 +1063,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1728
+          "startingLine": 2299
         }
       },
       {
@@ -895,7 +1071,7 @@
         "key": "Notes",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1749
+          "startingLine": 2320
         }
       },
       {
@@ -903,7 +1079,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 32,
-          "startingLine": 1750
+          "startingLine": 2321
         }
       },
       {
@@ -911,7 +1087,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1762
+          "startingLine": 2333
         }
       },
       {
@@ -919,7 +1095,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1765
+          "startingLine": 2336
         }
       },
       {
@@ -927,7 +1103,7 @@
         "key": "Snapshot Details",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1880
+          "startingLine": 2450
         }
       },
       {
@@ -935,7 +1111,7 @@
         "key": "Core Snapshot",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1855
+          "startingLine": 2425
         }
       },
       {
@@ -943,7 +1119,7 @@
         "key": "Limits & Costs",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1864
+          "startingLine": 2434
         }
       },
       {
@@ -951,7 +1127,7 @@
         "key": "Month to Date",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1871
+          "startingLine": 2441
         }
       },
       {
@@ -959,7 +1135,7 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1883
+          "startingLine": 2453
         }
       },
       {
@@ -967,7 +1143,7 @@
         "key": "Add Transaction",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1944
+          "startingLine": 2552
         }
       },
       {
@@ -975,7 +1151,7 @@
         "key": "Position Details",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1919
+          "startingLine": 2519
         }
       },
       {
@@ -983,7 +1159,7 @@
         "key": "Notes",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1940
+          "startingLine": 2548
         }
       },
       {
@@ -991,7 +1167,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 32,
-          "startingLine": 1920
+          "startingLine": 2520
         }
       },
       {
@@ -999,7 +1175,15 @@
         "key": "Type",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1921
+          "startingLine": 2521
+        }
+      },
+      {
+        "comment": "",
+        "key": "From Account",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2527
         }
       },
       {
@@ -1007,7 +1191,7 @@
         "key": "Ticker (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1926
+          "startingLine": 2534
         }
       },
       {
@@ -1015,7 +1199,7 @@
         "key": "Shares (optional)",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1928
+          "startingLine": 2536
         }
       },
       {
@@ -1023,7 +1207,15 @@
         "key": "Price/share (optional)",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1933
+          "startingLine": 2541
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2528
         }
       },
       {
@@ -1031,7 +1223,7 @@
         "key": "0",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1929
+          "startingLine": 2537
         }
       },
       {
@@ -1039,7 +1231,7 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1934
+          "startingLine": 2542
         }
       },
       {
@@ -1047,7 +1239,7 @@
         "key": "Notes (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1941
+          "startingLine": 2549
         }
       },
       {
@@ -1055,7 +1247,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1947
+          "startingLine": 2555
         }
       },
       {
@@ -1063,7 +1255,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1950
+          "startingLine": 2558
         }
       },
       {
@@ -1071,7 +1263,7 @@
         "key": "Add Investment",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2009
+          "startingLine": 2660
         }
       },
       {
@@ -1079,7 +1271,15 @@
         "key": "Position Details",
         "location": {
           "startingColumn": 25,
-          "startingLine": 1985
+          "startingLine": 2618
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend & Classification",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 2633
         }
       },
       {
@@ -1087,7 +1287,7 @@
         "key": "Notes & Date",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2000
+          "startingLine": 2655
         }
       },
       {
@@ -1095,7 +1295,7 @@
         "key": "Ticker",
         "location": {
           "startingColumn": 31,
-          "startingLine": 1986
+          "startingLine": 2619
         }
       },
       {
@@ -1103,7 +1303,7 @@
         "key": "Shares bought",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1989
+          "startingLine": 2622
         }
       },
       {
@@ -1111,7 +1311,7 @@
         "key": "Price per share",
         "location": {
           "startingColumn": 36,
-          "startingLine": 1994
+          "startingLine": 2627
         }
       },
       {
@@ -1119,7 +1319,7 @@
         "key": "0",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1990
+          "startingLine": 2623
         }
       },
       {
@@ -1127,7 +1327,47 @@
         "key": "0.00",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1995
+          "startingLine": 2628
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annual dividend/share",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 2634
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend frequency",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2639
+        }
+      },
+      {
+        "comment": "",
+        "key": "Asset type",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2644
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dividend reliability",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2649
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 2635
         }
       },
       {
@@ -1135,15 +1375,15 @@
         "key": "Date",
         "location": {
           "startingColumn": 32,
-          "startingLine": 2001
+          "startingLine": 2656
         }
       },
       {
         "comment": "",
-        "key": "Funding Source",
+        "key": "Funding",
         "location": {
-          "startingColumn": 28,
-          "startingLine": 2002
+          "startingColumn": 36,
+          "startingLine": 2657
         }
       },
       {
@@ -1151,7 +1391,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2012
+          "startingLine": 2663
         }
       },
       {
@@ -1159,7 +1399,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2015
+          "startingLine": 2666
         }
       },
       {
@@ -1167,7 +1407,7 @@
         "key": "Electric Bill",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2067
+          "startingLine": 2724
         }
       },
       {
@@ -1175,7 +1415,7 @@
         "key": "Bill Settings",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2043
+          "startingLine": 2700
         }
       },
       {
@@ -1183,7 +1423,7 @@
         "key": "Payment Log",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2054
+          "startingLine": 2711
         }
       },
       {
@@ -1191,7 +1431,7 @@
         "key": "Bill name",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2044
+          "startingLine": 2701
         }
       },
       {
@@ -1199,7 +1439,7 @@
         "key": "Active",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2051
+          "startingLine": 2708
         }
       },
       {
@@ -1207,7 +1447,7 @@
         "key": "Paid by margin",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2052
+          "startingLine": 2709
         }
       },
       {
@@ -1215,7 +1455,7 @@
         "key": "Due day: %lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2048
+          "startingLine": 2705
         }
       },
       {
@@ -1223,7 +1463,7 @@
         "key": "Due date",
         "location": {
           "startingColumn": 32,
-          "startingLine": 2056
+          "startingLine": 2713
         }
       },
       {
@@ -1231,7 +1471,7 @@
         "key": "Mark Paid Using Margin",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2058
+          "startingLine": 2715
         }
       },
       {
@@ -1239,7 +1479,7 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2070
+          "startingLine": 2727
         }
       },
       {
@@ -1247,7 +1487,7 @@
         "key": "Margin Settings",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2101
+          "startingLine": 2758
         }
       },
       {
@@ -1255,7 +1495,7 @@
         "key": "Account Limits",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2084
+          "startingLine": 2741
         }
       },
       {
@@ -1263,7 +1503,7 @@
         "key": "Rates & Requirements",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2090
+          "startingLine": 2747
         }
       },
       {
@@ -1271,7 +1511,7 @@
         "key": "Margin rate",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2091
+          "startingLine": 2748
         }
       },
       {
@@ -1279,7 +1519,7 @@
         "key": "Maintenance requirement %",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2093
+          "startingLine": 2750
         }
       },
       {
@@ -1287,7 +1527,7 @@
         "key": "Warning threshold %",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2095
+          "startingLine": 2752
         }
       },
       {
@@ -1295,7 +1535,7 @@
         "key": "Danger threshold %",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2097
+          "startingLine": 2754
         }
       },
       {
@@ -1303,7 +1543,7 @@
         "key": "Done",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2104
+          "startingLine": 2761
         }
       },
       {
@@ -1311,7 +1551,7 @@
         "key": "Activity Ledger",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2182
+          "startingLine": 2839
         }
       },
       {
@@ -1319,7 +1559,7 @@
         "key": "Portfolio Value by Date",
         "location": {
           "startingColumn": 29,
-          "startingLine": 2132
+          "startingLine": 2789
         }
       },
       {
@@ -1327,7 +1567,7 @@
         "key": "Portfolio",
         "location": {
           "startingColumn": 42,
-          "startingLine": 2139
+          "startingLine": 2796
         }
       },
       {
@@ -1335,7 +1575,7 @@
         "key": "Net Equity",
         "location": {
           "startingColumn": 42,
-          "startingLine": 2144
+          "startingLine": 2801
         }
       },
       {
@@ -1343,7 +1583,7 @@
         "key": "Contrib %@  Div %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2212
+          "startingLine": 2869
         }
       },
       {
@@ -1351,7 +1591,7 @@
         "key": "Bills %@  Interest %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2213
+          "startingLine": 2870
         }
       },
       {
@@ -1359,7 +1599,7 @@
         "key": "Buys %@  Sells %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2214
+          "startingLine": 2871
         }
       },
       {
@@ -1367,7 +1607,7 @@
         "key": "Net Margin Change %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2215
+          "startingLine": 2872
         }
       },
       {
@@ -1375,7 +1615,7 @@
         "key": "True Monthly Spread %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2216
+          "startingLine": 2873
         }
       },
       {
@@ -1383,7 +1623,7 @@
         "key": "Edit Transaction",
         "location": {
           "startingColumn": 30,
-          "startingLine": 2274
+          "startingLine": 2931
         }
       },
       {
@@ -1391,7 +1631,7 @@
         "key": "Transaction Info",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2248
+          "startingLine": 2905
         }
       },
       {
@@ -1399,7 +1639,7 @@
         "key": "Position Inputs",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2256
+          "startingLine": 2913
         }
       },
       {
@@ -1407,7 +1647,7 @@
         "key": "Danger Zone",
         "location": {
           "startingColumn": 25,
-          "startingLine": 2266
+          "startingLine": 2923
         }
       },
       {
@@ -1415,7 +1655,7 @@
         "key": "Date",
         "location": {
           "startingColumn": 32,
-          "startingLine": 2249
+          "startingLine": 2906
         }
       },
       {
@@ -1423,7 +1663,7 @@
         "key": "Type",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2250
+          "startingLine": 2907
         }
       },
       {
@@ -1431,7 +1671,7 @@
         "key": "Ticker (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2257
+          "startingLine": 2914
         }
       },
       {
@@ -1439,7 +1679,7 @@
         "key": "Shares (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2259
+          "startingLine": 2916
         }
       },
       {
@@ -1447,7 +1687,7 @@
         "key": "Price/share (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2261
+          "startingLine": 2918
         }
       },
       {
@@ -1455,7 +1695,7 @@
         "key": "Notes (optional)",
         "location": {
           "startingColumn": 31,
-          "startingLine": 2264
+          "startingLine": 2921
         }
       },
       {
@@ -1463,7 +1703,7 @@
         "key": "Delete Transaction",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2267
+          "startingLine": 2924
         }
       },
       {
@@ -1471,7 +1711,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2293
+          "startingLine": 2950
         }
       },
       {
@@ -1479,7 +1719,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 28,
-          "startingLine": 2296
+          "startingLine": 2953
         }
       },
       {
@@ -1487,7 +1727,7 @@
         "key": "0",
         "location": {
           "startingColumn": 23,
-          "startingLine": 2331
+          "startingLine": 2988
         }
       }
     ]

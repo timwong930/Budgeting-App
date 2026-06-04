@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>57C1F315-A58F-45A6-8F5C-30F930FE7AD7</key>
+		<key>4AD01146-AAC5-43EA-B9A7-C553A8AD7058</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>57C1F315-A58F-45A6-8F5C-30F930FE7AD7.xcactivitylog</string>
+			<string>4AD01146-AAC5-43EA-B9A7-C553A8AD7058.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -38,15 +38,57 @@
 			<key>schemeIdentifier-sharedScheme</key>
 			<integer>1</integer>
 			<key>signature</key>
-			<string>Building project Budgeting App with scheme Budgeting App</string>
+			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>802068342.73935699</real>
+			<real>802223976.076159</real>
 			<key>timeStoppedRecording</key>
-			<real>802068364.18641102</real>
+			<real>802224010.04160297</real>
 			<key>title</key>
-			<string>Building project Budgeting App with scheme Budgeting App</string>
+			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>57C1F315-A58F-45A6-8F5C-30F930FE7AD7</string>
+			<string>4AD01146-AAC5-43EA-B9A7-C553A8AD7058</string>
+		</dict>
+		<key>4EA05C3E-6628-4D11-9665-F79ACDD29344</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>4EA05C3E-6628-4D11-9665-F79ACDD29344.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Budgeting App project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Budgeting App</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>802164793.35646498</real>
+			<key>timeStoppedRecording</key>
+			<real>802164816.46470404</real>
+			<key>title</key>
+			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>4EA05C3E-6628-4D11-9665-F79ACDD29344</string>
 		</dict>
 	</dict>
 </dict>

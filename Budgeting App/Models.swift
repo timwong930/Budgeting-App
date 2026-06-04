@@ -191,6 +191,25 @@ struct BankAccount: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+struct WatchlistAlertSettings: Codable, Sendable, Equatable {
+    var isEnabled: Bool
+    var percentMoveThreshold: Double
+    var priceAbove: Double?
+    var priceBelow: Double?
+
+    init(
+        isEnabled: Bool = true,
+        percentMoveThreshold: Double = 1.5,
+        priceAbove: Double? = nil,
+        priceBelow: Double? = nil
+    ) {
+        self.isEnabled = isEnabled
+        self.percentMoveThreshold = max(percentMoveThreshold, 0.25)
+        self.priceAbove = priceAbove
+        self.priceBelow = priceBelow
+    }
+}
+
 struct SavingsEntry: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
@@ -485,6 +504,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
     var pricePerShare: Double?
     var amount: Double
     var notes: String?
+    var fundingBankAccount: String?
 
     init(
         id: UUID = UUID(),
@@ -494,7 +514,8 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         shares: Double? = nil,
         pricePerShare: Double? = nil,
         amount: Double,
-        notes: String? = nil
+        notes: String? = nil,
+        fundingBankAccount: String? = nil
     ) {
         self.id = id
         self.date = date
@@ -504,6 +525,45 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         self.pricePerShare = pricePerShare
         self.amount = amount
         self.notes = notes
+        self.fundingBankAccount = fundingBankAccount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case date
+        case type
+        case ticker
+        case shares
+        case pricePerShare
+        case amount
+        case notes
+        case fundingBankAccount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        type = try container.decode(PortfolioTransactionType.self, forKey: .type)
+        ticker = try container.decodeIfPresent(String.self, forKey: .ticker)
+        shares = try container.decodeIfPresent(Double.self, forKey: .shares)
+        pricePerShare = try container.decodeIfPresent(Double.self, forKey: .pricePerShare)
+        amount = try container.decode(Double.self, forKey: .amount)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        fundingBankAccount = try container.decodeIfPresent(String.self, forKey: .fundingBankAccount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(date, forKey: .date)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(ticker, forKey: .ticker)
+        try container.encodeIfPresent(shares, forKey: .shares)
+        try container.encodeIfPresent(pricePerShare, forKey: .pricePerShare)
+        try container.encode(amount, forKey: .amount)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encodeIfPresent(fundingBankAccount, forKey: .fundingBankAccount)
     }
 }
 
@@ -718,6 +778,54 @@ struct CachedQuote: Codable, Sendable, Equatable {
     var updatedAt: Date
 }
 
+struct TickerNote: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var ticker: String
+    var text: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), ticker: String, text: String, createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.ticker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.text = text
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+struct TickerNewsArticle: Identifiable, Codable, Sendable, Equatable {
+    var id: String { url }
+    var headline: String
+    var source: String
+    var summary: String
+    var url: String
+    var imageURL: String?
+    var publishedAt: Date
+}
+
+struct TickerResearch: Codable, Sendable, Equatable {
+    var bullCase: String
+    var bearCase: String
+    var newsSummary: String
+    var articles: [TickerNewsArticle]
+    var updatedAt: Date?
+
+    init(
+        bullCase: String = "",
+        bearCase: String = "",
+        newsSummary: String = "",
+        articles: [TickerNewsArticle] = [],
+        updatedAt: Date? = nil
+    ) {
+        self.bullCase = bullCase
+        self.bearCase = bearCase
+        self.newsSummary = newsSummary
+        self.articles = articles
+        self.updatedAt = updatedAt
+    }
+}
+
 struct PortfolioValuePoint: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var date: Date
@@ -729,6 +837,147 @@ struct PortfolioValuePoint: Identifiable, Codable, Sendable, Equatable {
         self.date = date
         self.grossValue = grossValue
         self.netValue = netValue
+    }
+}
+
+struct TickerPricePoint: Identifiable, Sendable, Equatable {
+    let id: UUID
+    var date: Date
+    var close: Double
+
+    init(id: UUID = UUID(), date: Date, close: Double) {
+        self.id = id
+        self.date = date
+        self.close = close
+    }
+
+    static func closes(from points: [TickerPricePoint]) -> [Double] {
+        points.map(\.close)
+    }
+
+    static func estimated(from closes: [Double], endingOn endDate: Date = Date()) -> [TickerPricePoint] {
+        guard !closes.isEmpty else { return [] }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        var date = calendar.startOfDay(for: endDate)
+        var points: [TickerPricePoint] = []
+
+        for close in closes.reversed() {
+            points.insert(TickerPricePoint(date: date, close: close), at: 0)
+            repeat {
+                guard let previous = calendar.date(byAdding: .day, value: -1, to: date) else { break }
+                date = previous
+            } while calendar.isDateInWeekend(date)
+        }
+
+        return points
+    }
+
+    static func closesForIndicators(history: [TickerPricePoint], currentPrice: Double?) -> [Double] {
+        var closes = closes(from: history)
+        guard let currentPrice, currentPrice > 0 else { return closes }
+        if closes.isEmpty { return [currentPrice] }
+
+        if let lastDate = history.last?.date,
+           Calendar.current.isDateInToday(lastDate) {
+            closes[closes.count - 1] = currentPrice
+        } else {
+            closes.append(currentPrice)
+        }
+        return closes
+    }
+}
+
+struct MACDResult: Equatable, Sendable {
+    let line: Double
+    let signal: Double
+    let histogram: Double
+}
+
+enum TickerIndicators {
+    static func sma(_ values: [Double], period: Int) -> Double? {
+        guard period > 0, values.count >= period else { return nil }
+        return values.suffix(period).reduce(0, +) / Double(period)
+    }
+
+    static func ema(_ values: [Double], period: Int) -> Double? {
+        guard period > 0, values.count >= period else { return nil }
+        let multiplier = 2.0 / Double(period + 1)
+        var ema = values.prefix(period).reduce(0, +) / Double(period)
+        for price in values.dropFirst(period) {
+            ema = ((price - ema) * multiplier) + ema
+        }
+        return ema
+    }
+
+    static func emaValues(_ values: [Double], period: Int) -> [Double] {
+        guard period > 0, values.count >= period else { return [] }
+        let multiplier = 2.0 / Double(period + 1)
+        var output = [Double](repeating: 0, count: values.count)
+        var ema = values.prefix(period).reduce(0, +) / Double(period)
+        output[period - 1] = ema
+        for index in period..<values.count {
+            ema = ((values[index] - ema) * multiplier) + ema
+            output[index] = ema
+        }
+        return output
+    }
+
+    static func rsi(_ values: [Double], period: Int = 14) -> Double? {
+        guard period > 0, values.count > period else { return nil }
+
+        var averageGain = 0.0
+        var averageLoss = 0.0
+        for index in 1...period {
+            let delta = values[index] - values[index - 1]
+            if delta >= 0 {
+                averageGain += delta
+            } else {
+                averageLoss += abs(delta)
+            }
+        }
+        averageGain /= Double(period)
+        averageLoss /= Double(period)
+
+        if values.count > period + 1 {
+            for index in (period + 1)..<values.count {
+                let delta = values[index] - values[index - 1]
+                let gain = max(delta, 0)
+                let loss = max(-delta, 0)
+                averageGain = ((averageGain * Double(period - 1)) + gain) / Double(period)
+                averageLoss = ((averageLoss * Double(period - 1)) + loss) / Double(period)
+            }
+        }
+
+        if averageLoss == 0 {
+            return averageGain == 0 ? 50 : 100
+        }
+        let relativeStrength = averageGain / averageLoss
+        return 100 - (100 / (1 + relativeStrength))
+    }
+
+    static func macd(
+        _ values: [Double],
+        fastPeriod: Int = 12,
+        slowPeriod: Int = 26,
+        signalPeriod: Int = 9
+    ) -> MACDResult? {
+        guard fastPeriod > 0,
+              slowPeriod > fastPeriod,
+              signalPeriod > 0,
+              values.count >= slowPeriod + signalPeriod - 1 else {
+            return nil
+        }
+
+        let fastEMA = emaValues(values, period: fastPeriod)
+        let slowEMA = emaValues(values, period: slowPeriod)
+        let macdSeries = (slowPeriod - 1..<values.count).map { fastEMA[$0] - slowEMA[$0] }
+        guard let line = macdSeries.last,
+              let signal = ema(macdSeries, period: signalPeriod) else {
+            return nil
+        }
+        return MACDResult(line: line, signal: signal, histogram: line - signal)
     }
 }
 
@@ -788,6 +1037,9 @@ private struct BudgetSnapshotStore: Codable, Sendable {
     let holdings: [PortfolioHolding]?
     let marketDataSettings: MarketDataSettings?
     let watchlistTickers: [String]?
+    let watchlistAlertSettings: [String: WatchlistAlertSettings]?
+    let tickerNotes: [String: [TickerNote]]?
+    let tickerResearch: [String: TickerResearch]?
     let cachedQuotes: [String: CachedQuote]?
     let portfolioValueHistory: [PortfolioValuePoint]?
     let portfolioTransactions: [PortfolioTransaction]?
@@ -815,6 +1067,9 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         case holdings
         case marketDataSettings
         case watchlistTickers
+        case watchlistAlertSettings
+        case tickerNotes
+        case tickerResearch
         case cachedQuotes
         case portfolioValueHistory
         case portfolioTransactions
@@ -843,6 +1098,9 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         holdings: [PortfolioHolding],
         marketDataSettings: MarketDataSettings,
         watchlistTickers: [String],
+        watchlistAlertSettings: [String: WatchlistAlertSettings],
+        tickerNotes: [String: [TickerNote]],
+        tickerResearch: [String: TickerResearch],
         cachedQuotes: [String: CachedQuote],
         portfolioValueHistory: [PortfolioValuePoint],
         portfolioTransactions: [PortfolioTransaction],
@@ -869,6 +1127,9 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         self.holdings = holdings
         self.marketDataSettings = marketDataSettings
         self.watchlistTickers = watchlistTickers
+        self.watchlistAlertSettings = watchlistAlertSettings
+        self.tickerNotes = tickerNotes
+        self.tickerResearch = tickerResearch
         self.cachedQuotes = cachedQuotes
         self.portfolioValueHistory = portfolioValueHistory
         self.portfolioTransactions = portfolioTransactions
@@ -898,6 +1159,9 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         holdings = try container.decodeIfPresent([PortfolioHolding].self, forKey: .holdings)
         marketDataSettings = try container.decodeIfPresent(MarketDataSettings.self, forKey: .marketDataSettings)
         watchlistTickers = try container.decodeIfPresent([String].self, forKey: .watchlistTickers)
+        watchlistAlertSettings = try container.decodeIfPresent([String: WatchlistAlertSettings].self, forKey: .watchlistAlertSettings)
+        tickerNotes = try container.decodeIfPresent([String: [TickerNote]].self, forKey: .tickerNotes)
+        tickerResearch = try container.decodeIfPresent([String: TickerResearch].self, forKey: .tickerResearch)
         cachedQuotes = try container.decodeIfPresent([String: CachedQuote].self, forKey: .cachedQuotes)
         portfolioValueHistory = try container.decodeIfPresent([PortfolioValuePoint].self, forKey: .portfolioValueHistory)
         portfolioTransactions = try container.decodeIfPresent([PortfolioTransaction].self, forKey: .portfolioTransactions)
@@ -932,6 +1196,9 @@ class BudgetModel: ObservableObject {
     @Published var holdings: [PortfolioHolding] = []
     @Published var marketDataSettings: MarketDataSettings = MarketDataSettings()
     @Published var watchlistTickers: [String] = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"]
+    @Published var watchlistAlertSettings: [String: WatchlistAlertSettings] = [:]
+    @Published var tickerNotes: [String: [TickerNote]] = [:]
+    @Published var tickerResearch: [String: TickerResearch] = [:]
     @Published var cachedQuotes: [String: CachedQuote] = [:]
     @Published var marketDataWarning: String?
     @Published var portfolioValueHistory: [PortfolioValuePoint] = []
@@ -1040,6 +1307,9 @@ class BudgetModel: ObservableObject {
             holdings: holdings,
             marketDataSettings: marketDataSettings,
             watchlistTickers: watchlistTickers,
+            watchlistAlertSettings: watchlistAlertSettings,
+            tickerNotes: tickerNotes,
+            tickerResearch: tickerResearch,
             cachedQuotes: cachedQuotes,
             portfolioValueHistory: portfolioValueHistory,
             portfolioTransactions: portfolioTransactions,
@@ -1135,6 +1405,9 @@ class BudgetModel: ObservableObject {
         holdings = snapshot.holdings ?? []
         marketDataSettings = snapshot.marketDataSettings ?? MarketDataSettings()
         watchlistTickers = Self.normalizedTickers(snapshot.watchlistTickers ?? ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "TSLA"])
+        watchlistAlertSettings = Self.normalizedWatchlistAlertSettings(snapshot.watchlistAlertSettings ?? [:])
+        tickerNotes = Self.normalizedTickerNotes(snapshot.tickerNotes ?? [:])
+        tickerResearch = Self.normalizedTickerResearch(snapshot.tickerResearch ?? [:])
         cachedQuotes = snapshot.cachedQuotes ?? [:]
         portfolioValueHistory = snapshot.portfolioValueHistory ?? []
         portfolioTransactions = snapshot.portfolioTransactions ?? []
@@ -1203,6 +1476,92 @@ class BudgetModel: ObservableObject {
         return normalized
     }
 
+    private static func normalizedWatchlistAlertSettings(_ settings: [String: WatchlistAlertSettings]) -> [String: WatchlistAlertSettings] {
+        settings.reduce(into: [String: WatchlistAlertSettings]()) { result, item in
+            let ticker = item.key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !ticker.isEmpty else { return }
+            var cleanSettings = item.value
+            cleanSettings.percentMoveThreshold = max(cleanSettings.percentMoveThreshold, 0.25)
+            if let priceAbove = cleanSettings.priceAbove, priceAbove <= 0 {
+                cleanSettings.priceAbove = nil
+            }
+            if let priceBelow = cleanSettings.priceBelow, priceBelow <= 0 {
+                cleanSettings.priceBelow = nil
+            }
+            result[ticker] = cleanSettings
+        }
+    }
+
+    private static func normalizedTickerNotes(_ notes: [String: [TickerNote]]) -> [String: [TickerNote]] {
+        notes.reduce(into: [String: [TickerNote]]()) { result, item in
+            let ticker = item.key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !ticker.isEmpty else { return }
+            result[ticker] = item.value
+                .map { note in
+                    TickerNote(
+                        id: note.id,
+                        ticker: ticker,
+                        text: note.text,
+                        createdAt: note.createdAt,
+                        updatedAt: note.updatedAt
+                    )
+                }
+                .sorted { $0.updatedAt > $1.updatedAt }
+        }
+    }
+
+    private static func normalizedTickerResearch(_ research: [String: TickerResearch]) -> [String: TickerResearch] {
+        research.reduce(into: [String: TickerResearch]()) { result, item in
+            let ticker = item.key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !ticker.isEmpty else { return }
+            result[ticker] = item.value
+        }
+    }
+
+    func addTickerNote(ticker: String, text: String) {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTicker.isEmpty, !cleanText.isEmpty else { return }
+        tickerNotes[cleanTicker, default: []].insert(TickerNote(ticker: cleanTicker, text: cleanText), at: 0)
+    }
+
+    func updateTickerNote(_ note: TickerNote, text: String) {
+        let cleanTicker = note.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTicker.isEmpty, !cleanText.isEmpty else { return }
+        guard let index = tickerNotes[cleanTicker]?.firstIndex(where: { $0.id == note.id }) else { return }
+        tickerNotes[cleanTicker]?[index].text = cleanText
+        tickerNotes[cleanTicker]?[index].updatedAt = Date()
+        tickerNotes[cleanTicker]?.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    func deleteTickerNote(_ note: TickerNote) {
+        let cleanTicker = note.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        tickerNotes[cleanTicker]?.removeAll { $0.id == note.id }
+    }
+
+    func notes(for ticker: String) -> [TickerNote] {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return tickerNotes[cleanTicker] ?? []
+    }
+
+    func watchlistAlertSettings(for ticker: String) -> WatchlistAlertSettings {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return watchlistAlertSettings[cleanTicker] ?? WatchlistAlertSettings()
+    }
+
+    func setWatchlistAlertSettings(_ settings: WatchlistAlertSettings, for ticker: String) {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanTicker.isEmpty else { return }
+        watchlistAlertSettings[cleanTicker] = settings
+    }
+
+    func setTickerResearch(_ research: TickerResearch, for ticker: String) {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !cleanTicker.isEmpty else { return }
+        tickerResearch[cleanTicker] = research
+    }
+
     var marginUsedFromLedger: Double {
         portfolioTransactions.reduce(0) { partial, tx in
             switch tx.type {
@@ -1267,9 +1626,43 @@ class BudgetModel: ObservableObject {
         }.sorted { $0.ticker < $1.ticker }
     }
 
-    func addPortfolioTransaction(_ transaction: PortfolioTransaction) {
+    func addPortfolioTransaction(
+        _ transaction: PortfolioTransaction,
+        affectsBalances: Bool = true,
+        fundingBankAccount: String? = nil
+    ) {
+        var transaction = transaction
+        if transaction.type == .contribution, transaction.fundingBankAccount == nil {
+            let cleanFundingBankAccount = fundingBankAccount?.trimmingCharacters(in: .whitespacesAndNewlines)
+            transaction.fundingBankAccount = cleanFundingBankAccount?.isEmpty == false ? cleanFundingBankAccount : nil
+        }
         portfolioTransactions.append(transaction)
+        if affectsBalances {
+            applyCashImpact(for: transaction)
+        }
+        roundPortfolioCashBalance()
         synchronizeLegacyMarginStateFromLedger()
+        recordPortfolioValueHistory()
+    }
+
+    func updatePortfolioTransaction(_ updatedTransaction: PortfolioTransaction) {
+        guard let index = portfolioTransactions.firstIndex(where: { $0.id == updatedTransaction.id }) else { return }
+        let previousTransaction = portfolioTransactions[index]
+        reverseEditableCashImpact(for: previousTransaction)
+        portfolioTransactions[index] = updatedTransaction
+        applyEditableCashImpact(for: updatedTransaction)
+        roundPortfolioCashBalance()
+        synchronizeLegacyMarginStateFromLedger()
+        recordPortfolioValueHistory()
+    }
+
+    func deletePortfolioTransaction(id: UUID) {
+        guard let index = portfolioTransactions.firstIndex(where: { $0.id == id }) else { return }
+        let removedTransaction = portfolioTransactions.remove(at: index)
+        reverseEditableCashImpact(for: removedTransaction)
+        roundPortfolioCashBalance()
+        synchronizeLegacyMarginStateFromLedger()
+        recordPortfolioValueHistory()
     }
 
     func addInvestment(
@@ -1283,18 +1676,6 @@ class BudgetModel: ObservableObject {
         let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !cleanTicker.isEmpty else { return }
 
-        if fundingSource == .newContribution {
-            addPortfolioTransaction(
-                PortfolioTransaction(
-                    date: date,
-                    type: .contribution,
-                    amount: dollarsInvested,
-                    notes: "Auto contribution for \(cleanTicker) buy"
-                )
-            )
-            portfolioSnapshot.cashBalance += dollarsInvested
-        }
-
         addPortfolioTransaction(
             PortfolioTransaction(
                 date: date,
@@ -1303,24 +1684,9 @@ class BudgetModel: ObservableObject {
                 shares: sharesBought,
                 pricePerShare: pricePerShare,
                 amount: dollarsInvested,
-                notes: "Funding: \(fundingSource.rawValue)"
+                notes: fundingSource == .newContribution ? "Funding: New Contribution" : "Funding: Cash/Margin"
             )
         )
-
-        switch fundingSource {
-        case .cash, .newContribution:
-            portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance - dollarsInvested, 0)
-        case .margin:
-            addPortfolioTransaction(
-                PortfolioTransaction(
-                    date: date,
-                    type: .manualAdjustment,
-                    amount: dollarsInvested,
-                    notes: "Margin draw for \(cleanTicker) buy"
-                )
-            )
-        }
-        synchronizeLegacyMarginStateFromLedger()
     }
 
     func markElectricBillPaidByMargin(actualAmount: Double, date: Date) {
@@ -1334,15 +1700,162 @@ class BudgetModel: ObservableObject {
         )
     }
 
+    private func applyCashImpact(for transaction: PortfolioTransaction) {
+        let amount = transaction.amount
+        guard amount != 0 else { return }
+
+        switch transaction.type {
+        case .contribution:
+            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: -amount)
+            let marginPaydown = min(max(marginUsedFromLedger, 0), max(amount, 0))
+            if marginPaydown > 0 {
+                portfolioTransactions.append(
+                    PortfolioTransaction(
+                        date: transaction.date,
+                        type: .manualAdjustment,
+                        amount: -marginPaydown,
+                        notes: "Cash contribution applied to margin balance"
+                    )
+                )
+            }
+            portfolioSnapshot.cashBalance += max(amount - marginPaydown, 0)
+        case .dividend:
+            portfolioSnapshot.cashBalance += amount
+        case .buy:
+            let cashUsed = min(max(portfolioSnapshot.cashBalance, 0), max(amount, 0))
+            portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance - cashUsed, 0)
+            let marginDraw = max(amount - cashUsed, 0)
+            guard marginDraw > 0 else { return }
+            portfolioTransactions.append(
+                PortfolioTransaction(
+                    date: transaction.date,
+                    type: .manualAdjustment,
+                    amount: marginDraw,
+                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy"
+                )
+            )
+        case .sell:
+            let marginPaydown = min(max(portfolioSnapshot.marginUsed, 0), max(amount, 0))
+            portfolioSnapshot.cashBalance += max(amount - marginPaydown, 0)
+        case .billPaidByMargin, .marginInterest, .manualAdjustment:
+            break
+        }
+        roundPortfolioCashBalance()
+    }
+
+    private func reverseCashImpact(for transaction: PortfolioTransaction) {
+        let amount = transaction.amount
+        guard amount != 0 else { return }
+
+        switch transaction.type {
+        case .contribution:
+            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: amount)
+            portfolioSnapshot.cashBalance -= amount
+        case .dividend:
+            portfolioSnapshot.cashBalance -= amount
+        case .buy:
+            portfolioSnapshot.cashBalance += min(max(amount, 0), amount)
+        case .sell:
+            portfolioSnapshot.cashBalance -= amount
+        case .billPaidByMargin, .marginInterest, .manualAdjustment:
+            break
+        }
+        portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance, 0)
+        roundPortfolioCashBalance()
+    }
+
+    private func roundPortfolioCashBalance() {
+        portfolioSnapshot.cashBalance = (portfolioSnapshot.cashBalance * 100).rounded() / 100
+    }
+
+    private func applyEditableCashImpact(for transaction: PortfolioTransaction) {
+        switch transaction.type {
+        case .contribution, .dividend:
+            applyCashImpact(for: transaction)
+        case .buy, .sell, .billPaidByMargin, .marginInterest, .manualAdjustment:
+            break
+        }
+    }
+
+    private func reverseEditableCashImpact(for transaction: PortfolioTransaction) {
+        switch transaction.type {
+        case .contribution, .dividend:
+            reverseCashImpact(for: transaction)
+        case .buy, .sell, .billPaidByMargin, .marginInterest, .manualAdjustment:
+            break
+        }
+    }
+
     func synchronizeLegacyMarginStateFromLedger() {
+        let legacyMarginUsed = max(portfolioSnapshot.marginUsed, 0)
+        if portfolioTransactions.isEmpty, legacyMarginUsed > 0 {
+            portfolioTransactions.append(
+                PortfolioTransaction(
+                    type: .manualAdjustment,
+                    amount: legacyMarginUsed,
+                    notes: "Imported existing margin balance"
+                )
+            )
+        }
+
         let derivedHoldings = holdingsFromTransactions
         if !derivedHoldings.isEmpty || !portfolioTransactions.isEmpty {
             holdings = derivedHoldings
             portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
         }
 
+        sweepCashAgainstMarginIfNeeded()
+
         portfolioSnapshot.freeMarginLimit = marginSettings.interestFreeMarginLimit
         portfolioSnapshot.marginInterestRate = marginSettings.marginInterestRate
+    }
+
+    private func sweepCashAgainstMarginIfNeeded() {
+        let availableCash = max(portfolioSnapshot.cashBalance, 0)
+        let currentMargin = max(marginUsedFromLedger, 0)
+        let sweepAmount = min(availableCash, currentMargin)
+        guard sweepAmount > 0 else {
+            roundPortfolioCashBalance()
+            return
+        }
+
+        let roundedSweep = (sweepAmount * 100).rounded() / 100
+        guard roundedSweep > 0 else { return }
+
+        portfolioTransactions.append(
+            PortfolioTransaction(
+                type: .manualAdjustment,
+                amount: -roundedSweep,
+                notes: "Cash balance swept to pay down margin"
+            )
+        )
+        portfolioSnapshot.cashBalance = max(availableCash - roundedSweep, 0)
+        portfolioSnapshot.marginUsed = max(currentMargin - roundedSweep, 0)
+        roundPortfolioCashBalance()
+    }
+
+    private func recordPortfolioValueHistory() {
+        let holdingsValue = holdings.reduce(0) { partial, holding in
+            let quote = cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
+            return partial + holding.shares * quote
+        }
+        let gross = holdingsValue + portfolioSnapshot.cashBalance
+        let net = gross - portfolioSnapshot.marginUsed
+        let now = Date()
+
+        if let last = portfolioValueHistory.last, now.timeIntervalSince(last.date) < 60 {
+            portfolioValueHistory[portfolioValueHistory.count - 1] = PortfolioValuePoint(
+                id: last.id,
+                date: now,
+                grossValue: gross,
+                netValue: net
+            )
+        } else {
+            portfolioValueHistory.append(PortfolioValuePoint(date: now, grossValue: gross, netValue: net))
+            if portfolioValueHistory.count > 500 {
+                portfolioValueHistory = Array(portfolioValueHistory.suffix(500))
+            }
+        }
     }
 
     func categoryName(for expense: Expense) -> String {
@@ -1416,6 +1929,10 @@ class BudgetModel: ObservableObject {
             guard paymentAccount == normalizedName else { return partial }
             return partial + expense.amount
         }
+    }
+
+    func isCreditCardPayment(_ expense: Expense) -> Bool {
+        creditCardPaymentTarget(from: expense.note) != nil
     }
 
     func creditCardPaymentTarget(from note: String) -> String? {
@@ -1546,6 +2063,7 @@ class BudgetModel: ObservableObject {
         var wantsTotals: [UUID: Double] = [:]
 
         for expense in expenses {
+            guard !isCreditCardPayment(expense) else { continue }
             switch expense.section {
             case .needs:
                 needsTotals[expense.categoryId, default: 0] += expense.amount
@@ -1583,7 +2101,7 @@ class BudgetModel: ObservableObject {
         let normalized = normalizedAccountName(accountName)
         guard !normalized.isEmpty else { return }
         guard let index = bankAccounts.firstIndex(where: { normalizedAccountName($0.name) == normalized }) else { return }
-        bankAccounts[index].balance += delta
+        bankAccounts[index].balance = ((bankAccounts[index].balance + delta) * 100).rounded() / 100
     }
 
     private func normalizedAccountName(_ name: String) -> String {

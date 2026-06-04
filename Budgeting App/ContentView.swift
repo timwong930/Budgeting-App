@@ -8,6 +8,8 @@
 import SwiftUI
 import UIKit
 import Charts
+import Combine
+import SafariServices
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -82,9 +84,13 @@ struct ContentView: View {
     @State private var homeWatchlistRows: [HomeWatchlistRow] = []
     @State private var isLoadingHomeWatchlist = false
     @State private var homeWatchlistError: String?
+    @State private var homeWatchlistDraft = ""
+    @State private var selectedHomeWatchlistTicker: TickerSelection?
+    @State private var selectedWatchlistAlertTicker: TickerSelection?
     @State private var selectedHomeNetWorthRange: HomeNetWorthRange = .threeMonths
     @State private var selectedHomeNetWorthPoint: PortfolioValuePoint?
     @State private var holdingsAutoRefreshTask: Task<Void, Never>?
+    @State private var watchlistAlertTask: Task<Void, Never>?
     @State private var isRefreshingHoldingsQuotes = false
     @FocusState private var focusedField: FocusedField?
     private let marketDataService = MarketDataService()
@@ -114,8 +120,15 @@ struct ContentView: View {
         let previousClose: Double?
         let sma20: Double?
         let sma50: Double?
+        let ema20: Double?
         let rsi14: Double?
-        let closes14: [Double]
+        let macd: MACDResult?
+        let priceHistory: [TickerPricePoint]
+    }
+
+    private struct TickerSelection: Identifiable {
+        let ticker: String
+        var id: String { ticker }
     }
 
     private enum FocusedField: Hashable {
@@ -240,6 +253,197 @@ struct ContentView: View {
             case savings(SavingsEntry)
         }
     }
+
+    private struct TopRecurringCharge: Identifiable {
+        let id: UUID
+        let name: String
+        let amount: Double
+        let occurrences: Int
+        let paid: Int
+        let tint: Color
+    }
+
+    private struct ContinuousChargeSummary {
+        let totalDue: Double
+        let totalPaid: Double
+        let totalUnpaid: Double
+        let occurrenceCount: Int
+        let paidCount: Int
+        let unpaidCount: Int
+        let nextDueDate: Date?
+        let nextDueName: String?
+        let topCharges: [TopRecurringCharge]
+
+        var paidProgress: Double {
+            guard totalDue > 0 else { return 0 }
+            return min(max(totalPaid / totalDue, 0), 1)
+        }
+    }
+
+    private struct RecurringChargesCard: View {
+        let summary: ContinuousChargeSummary
+
+        var body: some View {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    progress
+                    metricRow
+                    nextCharge
+                    topCharges
+                }
+            }
+        }
+
+        private var header: some View {
+            HStack(alignment: .top) {
+                Label("Recurring Charges", systemImage: "repeat.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(summary.totalDue, format: .currency(code: "USD"))
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.pink)
+                    Text("since start dates")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+
+        private var progress: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("\(summary.paidCount) paid")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Text("\(summary.unpaidCount) unpaid")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                ProgressView(value: summary.paidProgress)
+                    .tint(.pink)
+            }
+        }
+
+        private var metricRow: some View {
+            HStack(spacing: 10) {
+                RecurringChargeMetricTile(
+                    title: "Paid",
+                    value: summary.totalPaid,
+                    subtitle: "\(summary.paidCount) charges",
+                    tint: .green,
+                    systemImage: "checkmark.circle.fill"
+                )
+                RecurringChargeMetricTile(
+                    title: "Open",
+                    value: summary.totalUnpaid,
+                    subtitle: "\(summary.unpaidCount) charges",
+                    tint: .orange,
+                    systemImage: "clock.fill"
+                )
+            }
+        }
+
+        @ViewBuilder
+        private var nextCharge: some View {
+            if let nextDate = summary.nextDueDate, let nextName = summary.nextDueName {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .foregroundStyle(.pink)
+                        .frame(width: 30, height: 30)
+                        .background(Color.pink.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(nextName)
+                            .font(.subheadline.weight(.semibold))
+                        Text("Next charge \(nextDate, format: .dateTime.month().day().year())")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+        }
+
+        @ViewBuilder
+        private var topCharges: some View {
+            if !summary.topCharges.isEmpty {
+                Divider()
+                VStack(spacing: 10) {
+                    ForEach(Array(summary.topCharges.prefix(3))) { charge in
+                        RecurringChargeRow(charge: charge)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct RecurringChargeMetricTile: View {
+        let title: String
+        let value: Double
+        let subtitle: String
+        let tint: Color
+        let systemImage: String
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(tint)
+                        .frame(width: 26, height: 26)
+                        .background(tint.opacity(0.12), in: Circle())
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(value, format: .currency(code: "USD").precision(.fractionLength(0)))
+                    .font(.title2.weight(.bold))
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(tint.opacity(0.22), lineWidth: 1)
+            )
+        }
+    }
+
+    private struct RecurringChargeRow: View {
+        let charge: TopRecurringCharge
+
+        var body: some View {
+            HStack(spacing: 10) {
+                Image(systemName: "creditcard.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(charge.tint)
+                    .frame(width: 34, height: 34)
+                    .background(charge.tint.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(charge.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(charge.paid)/\(charge.occurrences) paid")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(charge.amount, format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.pink)
+            }
+        }
+    }
     
     var body: some View {
         NavigationStack {
@@ -315,8 +519,6 @@ struct ContentView: View {
                             showingMarginAddInvestment = true
                         case .addManualHolding:
                             showingMarginManualHolding = true
-                        case .electricBill:
-                            showingMarginElectricBill = true
                         case .marginSettings:
                             showingMarginSettings = true
                         case .ledgerHistory:
@@ -332,12 +534,16 @@ struct ContentView: View {
                 budget.income = budget.income(for: selectedMonth)
                 budget.applyMonthlyAllocations(for: selectedMonth)
                 updateMonthlyData()
+                scheduleBudgetNotifications()
+                BudgetBackgroundRefreshCoordinator.shared.scheduleAppRefresh()
                 if scenePhase == .active {
                     startHoldingsAutoRefreshLoop()
+                    startWatchlistAlertLoop()
                 }
             }
             .onDisappear {
                 stopHoldingsAutoRefreshLoop()
+                stopWatchlistAlertLoop()
             }
             .onChange(of: selectedMonth) { _, newValue in
                 budget.income = budget.income(for: newValue)
@@ -347,8 +553,11 @@ struct ContentView: View {
             .onChange(of: scenePhase) { _, newValue in
                 if newValue == .active {
                     startHoldingsAutoRefreshLoop()
+                    startWatchlistAlertLoop()
                 } else {
                     stopHoldingsAutoRefreshLoop()
+                    stopWatchlistAlertLoop()
+                    BudgetBackgroundRefreshCoordinator.shared.scheduleAppRefresh()
                 }
             }
             .onChange(of: budget.income) { _, newValue in
@@ -377,11 +586,39 @@ struct ContentView: View {
                 guard selectedTab == .home else { return }
                 await refreshHomeDashboard()
             }
+            .onReceive(budget.objectWillChange.debounce(for: .milliseconds(800), scheduler: RunLoop.main)) { _ in
+                scheduleBudgetNotifications()
+            }
         }
         .sheet(isPresented: $showingAddNeedsCategory) {
             AddCategoryView(budget: budget, categoryType: .needs, selectedMonth: selectedMonth)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedHomeWatchlistTicker) { selection in
+            let ticker = selection.ticker
+            let row = homeWatchlistRows.first(where: { $0.symbol == ticker })
+            TickerSnapshotDetailView(
+                budget: budget,
+                ticker: ticker,
+                companyName: row?.companyName,
+                quoteSnapshot: row.map {
+                    MarketQuoteSnapshot(
+                        price: $0.price,
+                        change: $0.change,
+                        percentChange: $0.percentChange,
+                        open: $0.open,
+                        high: $0.dayHigh,
+                        low: $0.dayLow,
+                        previousClose: $0.previousClose
+                    )
+                },
+                historicalCloses: row?.priceHistory.map(\.close) ?? [],
+                priceHistory: row?.priceHistory
+            )
+        }
+        .sheet(item: $selectedWatchlistAlertTicker) { selection in
+            WatchlistAlertSettingsView(budget: budget, ticker: selection.ticker)
         }
         .sheet(isPresented: $showingAddWantsCategory) {
             AddCategoryView(budget: budget, categoryType: .wants, selectedMonth: selectedMonth)
@@ -627,10 +864,10 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Settings")
                 }
-                homeRollupSection
-                homeWatchlistSection
+                homeInsightSummarySection
                 homeCashFlowSection
                 homeNetWorthChartSection
+                homeWatchlistSection
             }
             .padding(.horizontal)
             .padding(.top, 28)
@@ -682,7 +919,10 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
 
+                budgetHubSnapshotSection
+
                 if budgetPageFocus == .log {
+                    recurringChargesSection
                     logTrendsSection
                     accountBalancesSection
                     logTransactionsSection
@@ -923,6 +1163,23 @@ struct ContentView: View {
         return holdingsValue + budget.portfolioSnapshot.cashBalance - budget.portfolioSnapshot.marginUsed
     }
 
+    private var homeTotalNetWorth: Double {
+        let totalBank = budget.bankAccounts.reduce(0) { $0 + $1.balance }
+        let totalCredit = budget.creditAccounts
+            .filter(\.isActive)
+            .reduce(0) { $0 + creditAccountActualBalance($1) }
+        return totalBank + homePortfolioNetValue - totalCredit
+    }
+
+    private var homeCashFlowNet: Double {
+        totalMonthlyIncomeLogged - totalMonthlySpent
+    }
+
+    private var homeIncomeExpenseRatio: Double {
+        guard totalMonthlySpent > 0 else { return totalMonthlyIncomeLogged > 0 ? 99 : 0 }
+        return totalMonthlyIncomeLogged / totalMonthlySpent
+    }
+
     private var homeLatestHoldingsUpdate: Date? {
         budget.cachedQuotes.values.map(\.updatedAt).max()
     }
@@ -962,6 +1219,18 @@ struct ContentView: View {
         guard let startDate else { return sorted }
         let filtered = sorted.filter { $0.date >= startDate }
         return filtered.isEmpty ? sorted : filtered
+    }
+
+    private var homeNetWorthDelta: Double {
+        let points = homeNetWorthHistoryPoints
+        guard let first = points.first, let last = points.last else { return 0 }
+        return last.netValue - first.netValue
+    }
+
+    private var homeNetWorthDeltaPercent: Double {
+        let points = homeNetWorthHistoryPoints
+        guard let first = points.first, abs(first.netValue) > 0.01 else { return 0 }
+        return homeNetWorthDelta / abs(first.netValue)
     }
 
     private var categorySummaryItems: [CategorySummaryItem] {
@@ -1009,6 +1278,10 @@ struct ContentView: View {
     private var monthInterval: DateInterval? {
         let calendar = Calendar.current
         return calendar.dateInterval(of: .month, for: selectedMonth)
+    }
+
+    private var monthlySpendingExpenses: [Expense] {
+        monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
     }
 
     private var trendRangeStart: Date? {
@@ -1061,7 +1334,7 @@ struct ContentView: View {
         guard let start = trendRangeStart, let end = trendRangeEnd else { return 0 }
         switch selectedLogTrend {
         case .spending:
-            return monthlyExpenses.filter { $0.date >= start && $0.date <= end }.count
+            return monthlySpendingExpenses.filter { $0.date >= start && $0.date <= end }.count
         case .income:
             return monthlyIncomes.filter { $0.date >= start && $0.date <= end }.count
         }
@@ -1072,7 +1345,7 @@ struct ContentView: View {
         let calendar = Calendar.current
         switch selectedLogTrend {
         case .spending:
-            return Set(monthlyExpenses.filter { $0.date >= start && $0.date <= end }.map { calendar.startOfDay(for: $0.date) }).count
+            return Set(monthlySpendingExpenses.filter { $0.date >= start && $0.date <= end }.map { calendar.startOfDay(for: $0.date) }).count
         case .income:
             return Set(monthlyIncomes.filter { $0.date >= start && $0.date <= end }.map { calendar.startOfDay(for: $0.date) }).count
         }
@@ -1084,7 +1357,7 @@ struct ContentView: View {
         var totals: [Date: Double] = [:]
         switch selectedLogTrend {
         case .spending:
-            for entry in monthlyExpenses where entry.date >= start && entry.date <= end {
+            for entry in monthlySpendingExpenses where entry.date >= start && entry.date <= end {
                 let day = calendar.startOfDay(for: entry.date)
                 totals[day, default: 0] += entry.amount
             }
@@ -1122,12 +1395,13 @@ struct ContentView: View {
         monthlyExpenses = budget.expenses.filter { interval.contains($0.date) }
         monthlyIncomes = budget.incomes.filter { interval.contains($0.date) }
         monthlySavingsEntries = budget.savingsEntries.filter { interval.contains($0.date) }
-        totalMonthlySpent = monthlyExpenses.reduce(0) { $0 + $1.amount }
+        let spendingExpenses = monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
+        totalMonthlySpent = spendingExpenses.reduce(0) { $0 + $1.amount }
         totalMonthlyIncomeLogged = monthlyIncomes.reduce(0) { $0 + $1.amount }
 
         var needsTotals: [UUID: Double] = [:]
         var wantsTotals: [UUID: Double] = [:]
-        for expense in monthlyExpenses {
+        for expense in spendingExpenses {
             switch expense.section {
             case .needs:
                 needsTotals[expense.categoryId, default: 0] += expense.amount
@@ -1149,7 +1423,7 @@ struct ContentView: View {
 
         dailySpending = buildDailySeries(
             interval: interval,
-            amountsByDate: dailyTotals(from: monthlyExpenses.map { ($0.date, $0.amount) })
+            amountsByDate: dailyTotals(from: spendingExpenses.map { ($0.date, $0.amount) })
         )
         dailyIncome = buildDailySeries(
             interval: interval,
@@ -1533,6 +1807,118 @@ struct ContentView: View {
         return min(max(paymentDay, 1), maxDay)
     }
 
+    private var continuousChargeSummary: ContinuousChargeSummary {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var totalDue: Double = 0
+        var totalPaid: Double = 0
+        var totalUnpaid: Double = 0
+        var occurrenceCount = 0
+        var paidCount = 0
+        var unpaidCount = 0
+        var topCharges: [TopRecurringCharge] = []
+
+        for payment in budget.recurringPayments where payment.isActive && payment.kind == .expense {
+            let dates = recurringOccurrenceDates(for: payment, through: today)
+            guard !dates.isEmpty else { continue }
+            let paidForPayment = dates.filter { isRecurringOccurrencePaid(payment, on: $0) }.count
+            let unpaidForPayment = dates.count - paidForPayment
+            let due = Double(dates.count) * payment.amount
+            let paid = Double(paidForPayment) * payment.amount
+            let unpaid = Double(unpaidForPayment) * payment.amount
+
+            totalDue += due
+            totalPaid += paid
+            totalUnpaid += unpaid
+            occurrenceCount += dates.count
+            paidCount += paidForPayment
+            unpaidCount += unpaidForPayment
+            topCharges.append(
+                TopRecurringCharge(
+                    id: payment.id,
+                    name: payment.name,
+                    amount: due,
+                    occurrences: dates.count,
+                    paid: paidForPayment,
+                    tint: colorFor(section: payment.section, categoryId: payment.categoryId, isIncome: false)
+                )
+            )
+        }
+
+        let nextExpense = budget.recurringPayments
+            .filter { $0.isActive && $0.kind == .expense }
+            .compactMap { payment -> (payment: RecurringPayment, date: Date)? in
+                guard let date = nextRecurringOccurrenceDate(for: payment, after: today) else { return nil }
+                return (payment, date)
+            }
+            .min { $0.date < $1.date }
+
+        return ContinuousChargeSummary(
+            totalDue: totalDue,
+            totalPaid: totalPaid,
+            totalUnpaid: totalUnpaid,
+            occurrenceCount: occurrenceCount,
+            paidCount: paidCount,
+            unpaidCount: unpaidCount,
+            nextDueDate: nextExpense?.date,
+            nextDueName: nextExpense?.payment.name,
+            topCharges: topCharges.sorted { $0.amount > $1.amount }
+        )
+    }
+
+    private func recurringOccurrenceDates(for payment: RecurringPayment, through endDate: Date) -> [Date] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: payment.startDate)
+        guard start <= endDate else { return [] }
+
+        var components = calendar.dateComponents([.year, .month], from: start)
+        components.day = 1
+        guard var cursor = calendar.date(from: components) else { return [] }
+
+        var dates: [Date] = []
+        while cursor <= endDate {
+            let day = recurringOccurrenceDay(in: cursor, paymentDay: payment.dayOfMonth)
+            if let date = calendar.date(from: DateComponents(
+                year: calendar.component(.year, from: cursor),
+                month: calendar.component(.month, from: cursor),
+                day: day
+            )) {
+                let normalized = calendar.startOfDay(for: date)
+                if normalized >= start && normalized <= endDate {
+                    dates.append(normalized)
+                }
+            }
+            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
+            cursor = nextMonth
+        }
+        return dates
+    }
+
+    private func nextRecurringOccurrenceDate(for payment: RecurringPayment, after date: Date) -> Date? {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: max(payment.startDate, date))
+        var components = calendar.dateComponents([.year, .month], from: start)
+        components.day = 1
+        guard var cursor = calendar.date(from: components) else { return nil }
+
+        for _ in 0..<36 {
+            let day = recurringOccurrenceDay(in: cursor, paymentDay: payment.dayOfMonth)
+            if let occurrence = calendar.date(from: DateComponents(
+                year: calendar.component(.year, from: cursor),
+                month: calendar.component(.month, from: cursor),
+                day: day
+            )) {
+                let normalized = calendar.startOfDay(for: occurrence)
+                if normalized >= start {
+                    return normalized
+                }
+            }
+            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: cursor) else { return nil }
+            cursor = nextMonth
+        }
+        return nil
+    }
+
     private func recurringOccurrenceKey(paymentId: UUID, date: Date) -> String {
         let calendar = Calendar.current
         let comps = calendar.dateComponents([.year, .month, .day], from: date)
@@ -1605,6 +1991,7 @@ struct ContentView: View {
         let expense: Expense?
         let income: IncomeEntry?
         let isPaid: Bool
+        let isTransfer: Bool
         let tint: Color
         let isCreditDue: Bool
         let paymentAccount: String
@@ -1628,6 +2015,7 @@ struct ContentView: View {
                 expense: nil,
                 income: nil,
                 isPaid: isRecurringOccurrencePaid($0.payment, on: date),
+                isTransfer: false,
                 tint: colorFor(section: $0.payment.section, categoryId: $0.payment.categoryId, isIncome: $0.payment.kind == .income),
                 isCreditDue: false,
                 paymentAccount: $0.payment.paymentAccount,
@@ -1649,6 +2037,7 @@ struct ContentView: View {
                     expense: $0,
                     income: nil,
                     isPaid: true,
+                    isTransfer: false,
                     tint: colorFor(section: $0.section, categoryId: $0.categoryId, isIncome: false),
                     isCreditDue: false,
                     paymentAccount: $0.paymentAccount,
@@ -1670,6 +2059,7 @@ struct ContentView: View {
                     expense: nil,
                     income: $0,
                     isPaid: true,
+                    isTransfer: false,
                     tint: colorFor(section: .needs, categoryId: nil, isIncome: true),
                     isCreditDue: false,
                     paymentAccount: "",
@@ -1691,9 +2081,10 @@ struct ContentView: View {
                     expense: nil,
                     income: nil,
                     isPaid: true,
+                    isTransfer: transaction.type == .contribution,
                     tint: portfolioEventColor(transaction),
                     isCreditDue: false,
-                    paymentAccount: "Investment Account",
+                    paymentAccount: transaction.fundingBankAccount ?? "Investment Account",
                     iconName: portfolioEventIcon(transaction),
                     creditAccount: nil,
                     portfolioTransaction: transaction
@@ -1713,6 +2104,7 @@ struct ContentView: View {
                 expense: nil,
                 income: nil,
                 isPaid: false,
+                isTransfer: false,
                 tint: colorForCreditAccount(account.id),
                 isCreditDue: true,
                 paymentAccount: account.name,
@@ -1730,6 +2122,9 @@ struct ContentView: View {
 
     private func portfolioEventName(_ transaction: PortfolioTransaction) -> String {
         let ticker = transaction.ticker?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if transaction.type == .contribution {
+            return "Transfer to Portfolio"
+        }
         let base = transaction.type.title
         return ticker.isEmpty ? base : "\(base) \(ticker.uppercased())"
     }
@@ -1923,14 +2318,14 @@ struct ContentView: View {
                     )
                 }
             } else {
-                GlassCard {
-                    VStack(spacing: 10) {
+                GlassCard(padding: 10) {
+                    VStack(spacing: 8) {
                         ForEach(Array(logTransactionItems.prefix(20).enumerated()), id: \.element.id) { _, item in
-                            HStack(spacing: 10) {
+                            HStack(spacing: 8) {
                                 Image(systemName: item.iconName)
                                     .font(.subheadline)
                                     .foregroundStyle(item.tint)
-                                    .frame(width: 28, height: 28)
+                                    .frame(width: 24, height: 24)
                                     .background(item.tint.opacity(0.12), in: Circle())
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.title)
@@ -2124,12 +2519,12 @@ struct ContentView: View {
     }
 
     private func calendarEventChip(_ event: CalendarEventItem) -> some View {
-        Button {
-            openCalendarEvent(event)
-        } label: {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
+        HStack(spacing: 4) {
+            Button {
+                openCalendarEvent(event)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 3) {
                         Image(systemName: event.iconName)
                             .font(.caption2)
                         Text(event.name)
@@ -2138,7 +2533,7 @@ struct ContentView: View {
                             .allowsTightening(true)
                     }
                     if event.amount > 0 {
-                        Text("\(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))")
+                        Text(calendarChipAmountText(for: event))
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     }
@@ -2146,17 +2541,26 @@ struct ContentView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                if event.recurringPayment != nil {
+            if let recurring = event.recurringPayment {
+                Button {
+                    markRecurringOccurrencePaid(recurring, on: event.date)
+                } label: {
                     Image(systemName: event.isPaid ? "checkmark.circle.fill" : "checkmark.circle")
                         .font(.caption)
-                        .foregroundStyle(event.isPaid ? Color.green : Color.secondary)
+                        .foregroundStyle(event.isPaid ? Color.green : Color.white.opacity(0.9))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(event.isPaid)
+                .accessibilityLabel(event.isPaid ? "\(event.name) paid" : "Mark \(event.name) paid")
             }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: calendarEventChipHeight)
         .background(
@@ -2169,6 +2573,14 @@ struct ContentView: View {
     private func calendarOverflowMenu(events: [CalendarEventItem], hiddenEventCount: Int) -> some View {
         Menu {
             ForEach(events) { event in
+                if let recurring = event.recurringPayment, !event.isPaid {
+                    Button {
+                        markRecurringOccurrencePaid(recurring, on: event.date)
+                    } label: {
+                        Label("Mark Paid: \(calendarMenuTitle(for: event))", systemImage: "checkmark.circle")
+                    }
+                }
+
                 Button {
                     openCalendarEvent(event)
                 } label: {
@@ -2218,11 +2630,21 @@ struct ContentView: View {
     }
 
     private func calendarMenuTitle(for event: CalendarEventItem) -> String {
-        let amount = event.amount > 0 ? " \(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))" : ""
+        let amount = event.amount > 0 ? " \(calendarChipAmountText(for: event))" : ""
         return "\(event.name)\(amount)"
     }
 
+    private func calendarChipAmountText(for event: CalendarEventItem) -> String {
+        if event.isTransfer {
+            return event.amount.formatted(.currency(code: "USD"))
+        }
+        return "\(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))"
+    }
+
     private func calendarEventBackground(for event: CalendarEventItem) -> Color {
+        if event.isTransfer {
+            return event.tint.opacity(0.68)
+        }
         if event.isIncome {
             return Color.green.opacity(0.68)
         }
@@ -3393,6 +3815,126 @@ struct ContentView: View {
         }
     }
 
+    private var budgetHubSnapshotSection: some View {
+        let charges = continuousChargeSummary
+        return GlassCard {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("Budget Snapshot", systemImage: "chart.pie.fill")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(selectedMonth, format: .dateTime.month(.wide).year())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(remainingBudgetForMonth, format: .currency(code: "USD"))
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(remainingBudgetForMonth >= 0 ? .green : .red)
+                }
+
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.primary.opacity(0.10))
+                        HStack(spacing: 0) {
+                            Rectangle()
+                                .fill(Color.blue.opacity(0.75))
+                                .frame(width: geometry.size.width * budgetSegmentWidth(budget.needsBudget))
+                            Rectangle()
+                                .fill(Color.green.opacity(0.75))
+                                .frame(width: geometry.size.width * budgetSegmentWidth(budget.savingsBudget))
+                            Rectangle()
+                                .fill(Color.orange.opacity(0.78))
+                                .frame(width: geometry.size.width * budgetSegmentWidth(budget.wantsBudget))
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
+                .frame(height: 8)
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    insightMetricTile(title: "Spent", value: totalMonthlySpent, subtitle: "month to date", tint: .red, systemImage: "arrow.down.forward")
+                    insightMetricTile(title: "Income", value: totalMonthlyIncomeLogged, subtitle: "logged", tint: .green, systemImage: "arrow.up.forward")
+                    insightMetricTile(title: "Charges", value: charges.totalDue, subtitle: "continuous", tint: .pink, systemImage: "repeat.circle.fill")
+                    insightMetricTile(title: "Unpaid", value: charges.totalUnpaid, subtitle: "\(charges.unpaidCount) open", tint: .orange, systemImage: "exclamationmark.circle.fill")
+                }
+            }
+        }
+    }
+
+    private var recurringChargesSection: some View {
+        RecurringChargesCard(summary: continuousChargeSummary)
+    }
+
+    private var homeInsightSummarySection: some View {
+        let charges = continuousChargeSummary
+        return VStack(spacing: 14) {
+            GlassCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Total Net Worth", systemImage: "wallet.pass.fill")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text("Portfolio, banks, and credit cards")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: homeTotalNetWorth >= 0 ? "chevron.up" : "chevron.down")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(homeTotalNetWorth >= 0 ? .green : .red)
+                    }
+
+                    Text(homeTotalNetWorth, format: .currency(code: "USD"))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(homeTotalNetWorth >= 0 ? .green : .red)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+
+                    Text("Portfolio \(homePortfolioNetValue, format: .currency(code: "USD"))  Cash flow \(homeCashFlowNet, format: .currency(code: "USD"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    homeMiniTrendChart(points: selectedLogTrend == .income ? dailyIncome : dailySpending, color: homeCashFlowNet >= 0 ? .green : .pink)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                insightMetricTile(title: "Runway", valueText: runwayText, subtitle: "based on current spending", tint: .primary, systemImage: "timer")
+                insightMetricTile(title: "Savings Rate", value: autoSavedThisMonth, subtitle: "this month", tint: .green, systemImage: "checkmark.circle.fill")
+            }
+
+            GlassCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Label("Income vs Expenses", systemImage: "arrow.left.arrow.right")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(homeIncomeExpenseRatio, specifier: "%.1f"):1")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.yellow)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.yellow.opacity(0.12), in: Capsule())
+                            .overlay(Capsule().stroke(Color.yellow.opacity(0.55), lineWidth: 1))
+                    }
+
+                    incomeExpenseRow(title: "Income", amount: totalMonthlyIncomeLogged, tint: .green, systemImage: "arrow.up.forward")
+                    incomeExpenseRow(title: "Expenses", amount: totalMonthlySpent, tint: .pink, systemImage: "arrow.down.forward")
+                    Divider()
+                    incomeExpenseRow(title: "Net", amount: homeCashFlowNet, tint: .purple, systemImage: "checkmark.circle.fill")
+                }
+            }
+
+            if charges.occurrenceCount > 0 {
+                recurringChargesSection
+            }
+        }
+    }
+
     private var homeRollupSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -3508,32 +4050,108 @@ struct ContentView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Button("Refresh") {
+                        Button {
                             Task { await refreshHomeWatchlist() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption.weight(.bold))
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityLabel("Refresh watchlist")
                     }
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Ticker", text: $homeWatchlistDraft)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.subheadline)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Button {
+                        addHomeWatchlistTicker()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.caption.weight(.bold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(sanitizedHomeWatchlistDraft.isEmpty)
+                    .accessibilityLabel("Add ticker")
                 }
 
                 if let homeWatchlistError {
                     Text(homeWatchlistError)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if homeWatchlistRows.isEmpty {
-                    Text("Add tickers in Settings to build your watchlist.")
+                }
+
+                if budget.watchlistTickers.isEmpty {
+                    Text("Add a ticker to start tracking it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    homeWatchlistSummary
-
-                    VStack(spacing: 10) {
-                        ForEach(homeWatchlistRows) { row in
-                            homeWatchlistRowCard(row)
-                            if row.id != homeWatchlistRows.last?.id {
-                                Divider()
+                    watchlistTickerActions
+                    if !homeWatchlistRows.isEmpty {
+                        homeWatchlistSummary
+                        VStack(spacing: 2) {
+                            ForEach(homeWatchlistRows) { row in
+                                homeWatchlistRowCard(row)
+                                if row.id != homeWatchlistRows.last?.id {
+                                    Divider()
+                                }
                             }
                         }
                     }
+
+                    TradingViewWatchlistBoard(symbols: budget.watchlistTickers) { ticker in
+                        selectedHomeWatchlistTicker = TickerSelection(ticker: ticker)
+                    }
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private var watchlistTickerActions: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(budget.watchlistTickers, id: \.self) { ticker in
+                    HStack(spacing: 6) {
+                        Button {
+                            selectedHomeWatchlistTicker = TickerSelection(ticker: ticker.uppercased())
+                        } label: {
+                            Text(ticker.uppercased())
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open \(ticker) snapshot")
+
+                        Button {
+                            selectedWatchlistAlertTicker = TickerSelection(ticker: ticker.uppercased())
+                        } label: {
+                            Image(systemName: "bell")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit \(ticker) alerts")
+
+                        Button {
+                            removeHomeWatchlistTicker(ticker)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(ticker)")
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.secondary.opacity(0.10), in: Capsule())
                 }
             }
         }
@@ -3541,14 +4159,30 @@ struct ContentView: View {
 
     private var homeNetWorthChartSection: some View {
         GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    Text("Net Worth Over Time")
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "wallet.pass.fill")
                         .font(.headline)
+                        .foregroundStyle(.purple)
+                        .frame(width: 38, height: 38)
+                        .background(Color.purple.opacity(0.16), in: Circle())
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Net Worth Over Time")
+                            .font(.headline)
+                        Text(homePortfolioNetValue, format: .currency(code: "USD"))
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .foregroundStyle(homePortfolioNetValue < 0 ? Color.pink : Color.primary)
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                    }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(homePortfolioNetValue, format: .currency(code: "USD"))
-                            .font(.subheadline.weight(.semibold))
+                        Text(homeNetWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(homeNetWorthDelta >= 0 ? .green : .pink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background((homeNetWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
                         if let homeLatestHoldingsUpdate {
                             Text("Updated \(homeLatestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
                                 .font(.caption2)
@@ -3573,21 +4207,21 @@ struct ContentView: View {
                             y: .value("Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.green.opacity(0.18))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.pink.opacity(0.24), Color.pink.opacity(0.02)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
 
                         LineMark(
                             x: .value("Date", point.date),
                             y: .value("Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.green)
-
-                        LineMark(
-                            x: .value("Date", point.date),
-                            y: .value("Gross Portfolio", point.grossValue)
-                        )
-                        .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.blue.opacity(0.7))
+                        .foregroundStyle(.pink)
+                        .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
                         if let selectedHomeNetWorthPoint {
                             RuleMark(x: .value("Date", selectedHomeNetWorthPoint.date))
@@ -3596,24 +4230,24 @@ struct ContentView: View {
                                 x: .value("Date", selectedHomeNetWorthPoint.date),
                                 y: .value("Net Worth", selectedHomeNetWorthPoint.netValue)
                             )
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.pink)
                         }
                     }
                     .chartYAxis {
                         AxisMarks(position: .leading) { value in
-                            AxisGridLine()
-                            AxisTick()
+                            AxisGridLine().foregroundStyle(Color.secondary.opacity(0.12))
                             AxisValueLabel {
                                 if let amount = value.as(Double.self) {
                                     Text(amount, format: .currency(code: "USD"))
                                 }
                             }
+                            .foregroundStyle(.secondary)
+                            .font(.caption2)
                         }
                     }
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 4)) { value in
-                            AxisGridLine()
-                            AxisTick()
+                            AxisGridLine().foregroundStyle(Color.secondary.opacity(0.08))
                             AxisValueLabel {
                                 if let date = value.as(Date.self) {
                                     switch selectedHomeNetWorthRange {
@@ -3677,15 +4311,15 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .frame(height: 220)
+                    .frame(height: 240)
 
                     homeNetWorthRangeSelector
 
                     HStack(spacing: 14) {
                         Label("Net Worth", systemImage: "line.diagonal")
-                            .foregroundStyle(.green)
-                        Label("Gross Portfolio", systemImage: "line.diagonal")
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.pink)
+                        Text("\(homeNetWorthDelta >= 0 ? "+" : "")\(homeNetWorthDelta, format: .currency(code: "USD")) in range")
+                            .foregroundStyle(.secondary)
                     }
                     .font(.caption)
                 }
@@ -3712,6 +4346,40 @@ struct ContentView: View {
     private func stopHoldingsAutoRefreshLoop() {
         holdingsAutoRefreshTask?.cancel()
         holdingsAutoRefreshTask = nil
+    }
+
+    private func startWatchlistAlertLoop() {
+        guard watchlistAlertTask == nil else { return }
+        watchlistAlertTask = Task {
+            await refreshHomeWatchlist()
+            await checkWatchlistAlerts()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000_000)
+                if Task.isCancelled { break }
+                await refreshHomeWatchlist()
+                await checkWatchlistAlerts()
+            }
+        }
+    }
+
+    private func stopWatchlistAlertLoop() {
+        watchlistAlertTask?.cancel()
+        watchlistAlertTask = nil
+    }
+
+    @MainActor
+    private func checkWatchlistAlerts() async {
+        guard budget.marketDataSettings.canFetchMarketData else { return }
+        await BudgetNotificationService.shared.sendWatchlistAlertsIfNeeded(
+            budget: budget,
+            marketDataService: marketDataService
+        )
+    }
+
+    private func scheduleBudgetNotifications() {
+        Task {
+            await BudgetNotificationService.shared.rescheduleNotifications(for: budget)
+        }
     }
 
     @MainActor
@@ -3762,8 +4430,105 @@ struct ContentView: View {
                 .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
+        .padding(10)
         .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var runwayText: String {
+        guard totalMonthlySpent > 0 else { return "--" }
+        let liquid = budget.bankAccounts.reduce(0) { $0 + $1.balance }
+        let months = max(liquid / totalMonthlySpent, 0)
+        if months >= 12 {
+            return "\(Int(months / 12))y \(Int(months.truncatingRemainder(dividingBy: 12)))m"
+        }
+        return "\(Int(months.rounded(.down)))m"
+    }
+
+    private func budgetSegmentWidth(_ amount: Double) -> Double {
+        let total = max(budget.needsBudget + budget.savingsBudget + budget.wantsBudget, 0)
+        guard total > 0 else { return 0 }
+        return min(max(amount / total, 0), 1)
+    }
+
+    private func insightMetricTile(title: String, value: Double, subtitle: String, tint: Color, systemImage: String) -> some View {
+        insightMetricTile(
+            title: title,
+            valueText: value.formatted(.currency(code: "USD").precision(.fractionLength(0))),
+            subtitle: subtitle,
+            tint: tint,
+            systemImage: systemImage
+        )
+    }
+
+    private func insightMetricTile(title: String, valueText: String, subtitle: String, tint: Color, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 26, height: 26)
+                    .background(tint.opacity(0.12), in: Circle())
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(valueText)
+                .font(.title2.weight(.bold))
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(tint.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func incomeExpenseRow(title: String, amount: Double, tint: Color, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: Circle())
+            Text(title)
+                .font(.headline)
+            Spacer()
+            Text(amount, format: .currency(code: "USD"))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(tint)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+    }
+
+    private func recurringChargeRow(_ charge: TopRecurringCharge) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "creditcard.fill")
+                .font(.subheadline)
+                .foregroundStyle(charge.tint)
+                .frame(width: 34, height: 34)
+                .background(charge.tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(charge.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text("\(charge.paid)/\(charge.occurrences) paid")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(charge.amount, format: .currency(code: "USD"))
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.pink)
+        }
     }
 
     private func homeMarketCardView(_ card: HomeMarketCard) -> some View {
@@ -4013,12 +4778,6 @@ struct ContentView: View {
             return
         }
 
-        guard budget.marketDataSettings.provider == .finnhub else {
-            homeWatchlistRows = []
-            homeWatchlistError = "Watchlist indicators require provider = Finnhub in Settings."
-            return
-        }
-
         let symbols = budget.watchlistTickers
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { !$0.isEmpty }
@@ -4046,11 +4805,13 @@ struct ContentView: View {
                     provider: .finnhub,
                     apiKey: apiKey
                 )
-                let historicalCloses = (try? await marketDataService.fetchRecentCloses(
+                let historicalHistory = (try? await marketDataService.fetchCompositeRecentPriceHistory(
                     ticker: symbol,
                     settings: budget.marketDataSettings,
                     days: 90
-                )) ?? [quote.price, quote.price]
+                )) ?? TickerPricePoint.estimated(from: [quote.price, quote.price])
+                let indicatorCloses = TickerPricePoint.closesForIndicators(history: historicalHistory, currentPrice: quote.price)
+                let macd = TickerIndicators.macd(indicatorCloses)
                 rows.append(
                     HomeWatchlistRow(
                         symbol: symbol,
@@ -4063,21 +4824,25 @@ struct ContentView: View {
                         dayHigh: quote.high,
                         dayLow: quote.low,
                         previousClose: quote.previousClose,
-                        sma20: simpleMovingAverage(historicalCloses, period: 20),
-                        sma50: simpleMovingAverage(historicalCloses, period: 50),
-                        rsi14: relativeStrengthIndex(historicalCloses, period: 14),
-                        closes14: Array(historicalCloses.suffix(30))
+                        sma20: TickerIndicators.sma(indicatorCloses, period: 20),
+                        sma50: TickerIndicators.sma(indicatorCloses, period: 50),
+                        ema20: TickerIndicators.ema(indicatorCloses, period: 20),
+                        rsi14: TickerIndicators.rsi(indicatorCloses, period: 14),
+                        macd: macd,
+                        priceHistory: Array(historicalHistory.suffix(90))
                     )
                 )
             } catch {
                 lastError = error
                 failedSymbols.append(symbol)
                 if let fallbackPrice = budget.cachedQuotes[symbol]?.price, fallbackPrice > 0 {
-                    let cachedCloses = (try? await marketDataService.fetchRecentCloses(
+                    let cachedHistory = (try? await marketDataService.fetchCompositeRecentPriceHistory(
                         ticker: symbol,
                         settings: budget.marketDataSettings,
                         days: 90
-                    )) ?? [fallbackPrice, fallbackPrice]
+                    )) ?? TickerPricePoint.estimated(from: [fallbackPrice, fallbackPrice])
+                    let indicatorCloses = TickerPricePoint.closesForIndicators(history: cachedHistory, currentPrice: fallbackPrice)
+                    let macd = TickerIndicators.macd(indicatorCloses)
                     rows.append(
                         HomeWatchlistRow(
                             symbol: symbol,
@@ -4090,10 +4855,12 @@ struct ContentView: View {
                             dayHigh: nil,
                             dayLow: nil,
                             previousClose: nil,
-                            sma20: simpleMovingAverage(cachedCloses, period: 20),
-                            sma50: simpleMovingAverage(cachedCloses, period: 50),
-                            rsi14: relativeStrengthIndex(cachedCloses, period: 14),
-                            closes14: Array(cachedCloses.suffix(30))
+                            sma20: TickerIndicators.sma(indicatorCloses, period: 20),
+                            sma50: TickerIndicators.sma(indicatorCloses, period: 50),
+                            ema20: TickerIndicators.ema(indicatorCloses, period: 20),
+                            rsi14: TickerIndicators.rsi(indicatorCloses, period: 14),
+                            macd: macd,
+                            priceHistory: Array(cachedHistory.suffix(90))
                         )
                     )
                 }
@@ -4143,12 +4910,15 @@ struct ContentView: View {
     }
 
     private func homeWatchlistRowCard(_ row: HomeWatchlistRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
+        Button {
+            selectedHomeWatchlistTicker = TickerSelection(ticker: row.symbol)
+        } label: {
+            HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.symbol)
                         .font(.subheadline)
                         .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
                     if let companyName = row.companyName, !companyName.isEmpty {
                         Text(companyName)
                             .font(.caption2)
@@ -4162,24 +4932,75 @@ struct ContentView: View {
                     }
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(row.percentChange / 100, format: .percent.precision(.fractionLength(2)))
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(row.percentChange >= 0 ? .green : .red)
-                    Text(row.change, format: .currency(code: "USD"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack {
                 Text(row.price, format: .currency(code: "USD"))
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(row.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(row.percentChange >= 0 ? .green : .red)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background((row.percentChange >= 0 ? Color.green : Color.red).opacity(0.12), in: Capsule())
+                Button {
+                    selectedWatchlistAlertTicker = TickerSelection(ticker: row.symbol)
+                } label: {
+                    Image(systemName: "bell")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(row.symbol) alerts")
+                Button {
+                    removeHomeWatchlistTicker(row.symbol)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(row.symbol)")
+            }
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sanitizedHomeWatchlistDraft: String {
+        homeWatchlistDraft
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+    }
+
+    private func addHomeWatchlistTicker() {
+        let ticker = sanitizedHomeWatchlistDraft
+        guard !ticker.isEmpty else { return }
+        if !budget.watchlistTickers.contains(ticker) {
+            budget.watchlistTickers.append(ticker)
+        }
+        homeWatchlistDraft = ""
+        Task { await refreshHomeWatchlist() }
+    }
+
+    private func removeHomeWatchlistTicker(_ ticker: String) {
+        budget.watchlistTickers.removeAll { $0.uppercased() == ticker.uppercased() }
+        budget.watchlistAlertSettings.removeValue(forKey: ticker.uppercased())
+        homeWatchlistRows.removeAll { $0.symbol.uppercased() == ticker.uppercased() }
+    }
+
+    private func homeWatchlistDetailPreview(_ row: HomeWatchlistRow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(row.change, format: .currency(code: "USD"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if let rsi = row.rsi14 {
                     Text("RSI14 \(rsi, format: .number.precision(.fractionLength(1)))")
                         .font(.caption)
+                        .fontWeight(.semibold)
                         .foregroundStyle(rsi > 70 ? .red : (rsi < 30 ? .green : .secondary))
                 }
             }
@@ -4187,8 +5008,8 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 watchlistIndicatorPill("SMA20", value: row.sma20)
                 watchlistIndicatorPill("SMA50", value: row.sma50)
+                watchlistIndicatorPill("EMA20", value: row.ema20)
                 watchlistIndicatorPill("Open", value: row.open)
-                watchlistIndicatorPill("Prev", value: row.previousClose)
             }
 
             if let dayLow = row.dayLow, let dayHigh = row.dayHigh, dayHigh > dayLow {
@@ -4207,18 +5028,13 @@ struct ContentView: View {
                 }
             }
 
-            if row.closes14.count >= 2 {
-                Chart(Array(row.closes14.enumerated()), id: \.offset) { item in
-                    LineMark(
-                        x: .value("Index", item.offset),
-                        y: .value("Price", item.element)
-                    )
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(row.percentChange >= 0 ? .green : .red)
-                }
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .frame(height: 40)
+            if row.priceHistory.count >= 2 || !row.symbol.isEmpty {
+                TickerPriceHistoryChart(
+                    points: row.priceHistory,
+                    trendIsPositive: row.percentChange >= 0,
+                    style: .compact,
+                    symbol: row.symbol
+                )
             }
         }
         .padding(.vertical, 4)
@@ -4243,30 +5059,78 @@ struct ContentView: View {
         .padding(.vertical, 6)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+}
 
-    private func simpleMovingAverage(_ values: [Double], period: Int) -> Double? {
-        guard period > 0, values.count >= period else { return nil }
-        let slice = values.suffix(period)
-        let sum = slice.reduce(0, +)
-        return sum / Double(period)
+private struct WatchlistAlertSettingsView: View {
+    @ObservedObject var budget: BudgetModel
+    let ticker: String
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isEnabled = true
+    @State private var percentMoveThreshold = 1.5
+    @State private var priceAbove = 0.0
+    @State private var priceBelow = 0.0
+
+    private var cleanTicker: String {
+        ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 
-    private func relativeStrengthIndex(_ values: [Double], period: Int) -> Double? {
-        guard period > 0, values.count > period else { return nil }
-        let recent = Array(values.suffix(period + 1))
-        var gains: Double = 0
-        var losses: Double = 0
-        for index in 1..<recent.count {
-            let delta = recent[index] - recent[index - 1]
-            if delta >= 0 {
-                gains += delta
-            } else {
-                losses += abs(delta)
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Alerts") {
+                    Toggle("Enabled", isOn: $isEnabled)
+                    LabeledContent("Move threshold") {
+                        TextField("1.5%", value: $percentMoveThreshold, format: .number.precision(.fractionLength(0...2)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Notify above") {
+                        TextField("Optional", value: $priceAbove, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Notify below") {
+                        TextField("Optional", value: $priceBelow, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section {
+                    Text("Leave a price alert at 0 to ignore that trigger. Move alerts compare the latest quote to the cached quote and the daily percentage change.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("\(cleanTicker) Alerts")
+            .onAppear {
+                let settings = budget.watchlistAlertSettings(for: cleanTicker)
+                isEnabled = settings.isEnabled
+                percentMoveThreshold = settings.percentMoveThreshold
+                priceAbove = settings.priceAbove ?? 0
+                priceBelow = settings.priceBelow ?? 0
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        budget.setWatchlistAlertSettings(
+                            WatchlistAlertSettings(
+                                isEnabled: isEnabled,
+                                percentMoveThreshold: percentMoveThreshold,
+                                priceAbove: priceAbove > 0 ? priceAbove : nil,
+                                priceBelow: priceBelow > 0 ? priceBelow : nil
+                            ),
+                            for: cleanTicker
+                        )
+                        dismiss()
+                    }
+                }
             }
         }
-        if losses == 0 { return 100 }
-        let relativeStrength = gains / losses
-        return 100 - (100 / (1 + relativeStrength))
     }
 }
 
@@ -4298,7 +5162,6 @@ enum MarginQuickAction {
     case addTransaction
     case addInvestment
     case addManualHolding
-    case electricBill
     case marginSettings
     case ledgerHistory
 }
@@ -4367,6 +5230,12 @@ struct AppSettingsView: View {
 struct WatchlistSettingsView: View {
     @ObservedObject var budget: BudgetModel
     @State private var newTicker: String = ""
+    @State private var selectedTicker: TickerSnapshotSelection?
+
+    private struct TickerSnapshotSelection: Identifiable {
+        let ticker: String
+        var id: String { ticker }
+    }
 
     var body: some View {
         Form {
@@ -4391,12 +5260,33 @@ struct WatchlistSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(budget.watchlistTickers, id: \.self) { ticker in
-                        Text(ticker)
+                        Button {
+                            selectedTicker = TickerSnapshotSelection(ticker: ticker.uppercased())
+                        } label: {
+                            Text(ticker)
+                                .foregroundStyle(.primary)
+                        }
                     }
                     .onDelete(perform: deleteTicker)
                     .onMove(perform: moveTicker)
                 }
             }
+
+            if !budget.watchlistTickers.isEmpty {
+                Section("Live Quotes") {
+                    TradingViewWatchlistBoard(symbols: budget.watchlistTickers) { ticker in
+                        selectedTicker = TickerSnapshotSelection(ticker: ticker)
+                    }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .sheet(item: $selectedTicker) { selection in
+            TickerSnapshotDetailView(
+                budget: budget,
+                ticker: selection.ticker
+            )
         }
         .navigationTitle("Watchlist")
         .toolbar {
@@ -4432,6 +5322,1021 @@ struct WatchlistSettingsView: View {
     }
 }
 
+struct TickerSnapshotDetailView: View {
+    @ObservedObject var budget: BudgetModel
+    let ticker: String
+    let companyName: String?
+    let quoteSnapshot: MarketQuoteSnapshot?
+    let historicalCloses: [Double]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var snapshot: MarketQuoteSnapshot?
+    @State private var priceHistory: [TickerPricePoint]
+    @State private var noteDraft = ""
+    @State private var editingNote: TickerNote?
+    @State private var editingNoteText = ""
+    @State private var isRefreshing = false
+    @State private var selectedArticleURL: ArticleURL?
+    @State private var refreshError: String?
+    @State private var companyProfile: MarketCompanyProfile?
+    @State private var annualDividendPerShare: Double?
+    @State private var stockFinancials: StockFinancials?
+
+    private let marketDataService = MarketDataService()
+
+    init(
+        budget: BudgetModel,
+        ticker: String,
+        companyName: String? = nil,
+        quoteSnapshot: MarketQuoteSnapshot? = nil,
+        historicalCloses: [Double] = [],
+        priceHistory: [TickerPricePoint]? = nil
+    ) {
+        self.budget = budget
+        self.ticker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.companyName = companyName
+        self.quoteSnapshot = quoteSnapshot
+        self.historicalCloses = historicalCloses
+        let resolvedHistory = priceHistory ?? TickerPricePoint.estimated(from: historicalCloses)
+        _snapshot = State(initialValue: quoteSnapshot)
+        _priceHistory = State(initialValue: resolvedHistory)
+    }
+
+    private var closes: [Double] { TickerPricePoint.closes(from: priceHistory) }
+    private var indicatorCloses: [Double] {
+        TickerPricePoint.closesForIndicators(history: priceHistory, currentPrice: snapshot?.price)
+    }
+
+    private var cleanTicker: String { ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+    private var research: TickerResearch { budget.tickerResearch[cleanTicker] ?? TickerResearch() }
+    private var notes: [TickerNote] { budget.notes(for: cleanTicker) }
+    private var latestPrice: Double { snapshot?.price ?? budget.cachedQuotes[cleanTicker]?.price ?? closes.last ?? 0 }
+    private var priceChangeTint: Color { (snapshot?.percentChange ?? 0) >= 0 ? .green : .red }
+
+    private var sma20: Double? { TickerIndicators.sma(indicatorCloses, period: 20) }
+    private var sma50: Double? { TickerIndicators.sma(indicatorCloses, period: 50) }
+    private var ema20: Double? { TickerIndicators.ema(indicatorCloses, period: 20) }
+    private var rsi14: Double? { TickerIndicators.rsi(indicatorCloses, period: 14) }
+    private var macd: MACDResult? { TickerIndicators.macd(indicatorCloses) }
+
+    private struct FinancialDisplayRow: Identifiable {
+        let id = UUID()
+        let label: String
+        let value: String
+    }
+
+    private struct FinancialDisplaySection: Identifiable {
+        let id = UUID()
+        let title: String
+        let rows: [FinancialDisplayRow]
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    chartSection
+                    financialsSection
+                    notesSection
+                    aiCaseSection
+                    newsSection
+                }
+                .padding(.vertical)
+                .padding(.bottom, 24)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Snapshot")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await refreshTickerData() }
+                    } label: {
+                        if isRefreshing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isRefreshing)
+                    .accessibilityLabel("Refresh ticker")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task {
+                if snapshot == nil || priceHistory.count < 2 || research.articles.isEmpty || stockFinancials == nil {
+                    await refreshTickerData()
+                }
+            }
+            .sheet(item: $selectedArticleURL) { item in
+                SafariView(url: item.url)
+                    .ignoresSafeArea()
+            }
+            .sheet(item: $editingNote) { note in
+                NavigationStack {
+                    Form {
+                        TextEditor(text: $editingNoteText)
+                            .frame(minHeight: 160)
+                    }
+                    .navigationTitle("Edit Note")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { editingNote = nil }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                budget.updateTickerNote(note, text: editingNoteText)
+                                editingNote = nil
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var heroSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(companyName?.isEmpty == false ? companyName! : cleanTicker)
+                            .font(.headline)
+                        Text(latestPrice > 0 ? latestPrice.formatted(.currency(code: "USD")) : "--")
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    if let snapshot {
+                        VStack(alignment: .trailing, spacing: 5) {
+                            Text(snapshot.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(priceChangeTint)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(priceChangeTint.opacity(0.12), in: Capsule())
+                            Text(snapshot.change, format: .currency(code: "USD"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let updatedAt = budget.cachedQuotes[cleanTicker]?.updatedAt {
+                    Label("Updated \(updatedAt, format: .dateTime.month().day().hour().minute())", systemImage: "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let refreshError {
+                    Text(refreshError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let refreshError {
+                Text(refreshError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+            TradingViewTickerChartPanel(
+                symbol: cleanTicker,
+                fallbackPoints: priceHistory,
+                trendIsPositive: (snapshot?.percentChange ?? 0) >= 0
+            )
+        }
+    }
+
+    private var financialsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let stockFinancials {
+                financialsPanel(stockFinancials)
+            } else {
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(cleanTicker) Financials")
+                            .font(.headline)
+                        Text("Financial metrics will appear after the next Finnhub refresh.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func financialsPanel(_ financials: StockFinancials) -> some View {
+        let sections = financialDisplaySections(for: financials)
+        return VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .top) {
+                Text(cleanTicker)
+                    .foregroundStyle(.blue)
+                Text("Financials")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("TradingView")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.12), in: Capsule())
+            }
+            .font(.system(size: 32, weight: .bold, design: .rounded))
+            .minimumScaleFactor(0.55)
+            .lineLimit(1)
+
+            fiscalSummary(financials)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 22, alignment: .top),
+                    GridItem(.flexible(), spacing: 22, alignment: .top)
+                ],
+                alignment: .leading,
+                spacing: 26
+            ) {
+                ForEach(sections) { section in
+                    financialSection(section)
+                }
+            }
+        }
+        .padding(24)
+        .background(Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .environment(\.colorScheme, .dark)
+    }
+
+    private func fiscalSummary(_ financials: StockFinancials) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            financialRow("Fiscal year end", value: financials.fiscalYearEnd ?? "--")
+            financialRow("Last fiscal period", value: financials.lastFiscalPeriod ?? "--")
+            financialRow("Last fiscal period end date", value: financials.lastFiscalPeriodEndDate ?? "--")
+        }
+    }
+
+    private func financialSection(_ section: FinancialDisplaySection) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(section.title)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.primary)
+                .padding(.top, 2)
+            ForEach(section.rows) { row in
+                financialRow(row.label, value: row.value)
+            }
+        }
+    }
+
+    private func financialRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private func financialDisplaySections(for financials: StockFinancials) -> [FinancialDisplaySection] {
+        [
+            FinancialDisplaySection(
+                title: "Valuation",
+                rows: [
+                    row("Market capitalization", formatFinancialMillions(financials.marketCapitalization)),
+                    row("Enterprise value", formatFinancialMillions(financials.enterpriseValue)),
+                    row("Enterprise value/EBITDA (TTM)", formatNumber(financials.enterpriseValueToEBITDA)),
+                    row("P/E ratio", formatNumber(financials.peRatio)),
+                    row("P/S ratio", formatNumber(financials.psRatio)),
+                    row("P/B ratio", formatNumber(financials.pbRatio)),
+                    row("P/CF ratio", formatNumber(financials.pcfRatio)),
+                    row("P/FCF ratio", formatNumber(financials.pfcfRatio))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Cash Flow",
+                rows: [
+                    row("Operating cash flow (TTM)", formatFinancialMillions(financials.operatingCashFlow)),
+                    row("Investing cash flow (TTM)", formatFinancialMillions(financials.investingCashFlow)),
+                    row("Financing cash flow (TTM)", formatFinancialMillions(financials.financingCashFlow)),
+                    row("Free cash flow (TTM)", formatFinancialMillions(financials.freeCashFlow)),
+                    row("CapEx (TTM)", formatFinancialMillions(financials.capex))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Income Statement",
+                rows: [
+                    row("Total revenue (TTM)", formatFinancialMillions(financials.totalRevenue)),
+                    row("Revenue per share (TTM)", formatNumber(financials.revenuePerShare)),
+                    row("Gross profit (TTM)", formatFinancialMillions(financials.grossProfit)),
+                    row("Operating income (TTM)", formatFinancialMillions(financials.operatingIncome)),
+                    row("Net income (TTM)", formatFinancialMillions(financials.netIncome)),
+                    row("EPS diluted (TTM)", formatNumber(financials.epsDilutedTTM)),
+                    row("EPS diluted (FQ)", formatNumber(financials.epsDilutedFQ)),
+                    row("Total shares outstanding", formatFinancialMillions(financials.totalSharesOutstanding)),
+                    row("Shares float", formatFinancialMillions(financials.sharesFloat))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Profitability",
+                rows: [
+                    row("Gross margin (TTM)", formatPercent(financials.grossMargin)),
+                    row("Operating margin (TTM)", formatPercent(financials.operatingMargin)),
+                    row("Pretax margin (TTM)", formatPercent(financials.pretaxMargin)),
+                    row("Net margin (TTM)", formatPercent(financials.netMargin))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Balance Sheet",
+                rows: [
+                    row("Total assets (FQ)", formatFinancialMillions(financials.totalAssets)),
+                    row("Total liabilities (FQ)", formatFinancialMillions(financials.totalLiabilities)),
+                    row("Total equity (FQ)", formatFinancialMillions(financials.totalEquity)),
+                    row("Total debt (FQ)", formatFinancialMillions(financials.totalDebt))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Efficiency",
+                rows: [
+                    row("Return on assets (TTM)", formatPercent(financials.returnOnAssets)),
+                    row("Return on equity (TTM)", formatPercent(financials.returnOnEquity)),
+                    row("Return on invested capital (TTM)", formatPercent(financials.returnOnInvestedCapital)),
+                    row("Revenue per employee (FY)", formatAbbreviated(financials.revenuePerEmployee)),
+                    row("Net income per employee (FY)", formatAbbreviated(financials.netIncomePerEmployee))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Price History",
+                rows: [
+                    row("Average volume (10 day)", formatVolumeMillions(financials.averageVolume10Day)),
+                    row("1-Year beta", formatNumber(financials.betaOneYear)),
+                    row("52 Week high", formatNumber(financials.week52High)),
+                    row("52 Week low", formatNumber(financials.week52Low)),
+                    row("1 year price target", formatNumber(financials.oneYearPriceTarget))
+                ]
+            ),
+            FinancialDisplaySection(
+                title: "Dividends",
+                rows: [
+                    row("Dividend yield indicated", formatPercent(financials.dividendYieldIndicated ?? dividendYieldPercent)),
+                    row("Dividends per share (FY)", formatNumber(financials.dividendsPerShareFY ?? annualDividendPerShare)),
+                    row("Last payment amount", formatNumber(financials.lastDividendAmount)),
+                    row("Last ex-dividend date", financials.lastDividendExDate ?? "--")
+                ]
+            )
+        ]
+    }
+
+    private func row(_ label: String, _ value: String) -> FinancialDisplayRow {
+        FinancialDisplayRow(label: label, value: value)
+    }
+
+    private func formatFinancialMillions(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        let absValue = abs(value)
+        if absValue >= 1_000_000 {
+            return "\(formatCompact(value / 1_000_000))T"
+        }
+        if absValue >= 1_000 {
+            return "\(formatCompact(value / 1_000))B"
+        }
+        return "\(formatCompact(value))M"
+    }
+
+    private func formatVolumeMillions(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return "\(formatCompact(value))M"
+    }
+
+    private func formatAbbreviated(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        let absValue = abs(value)
+        if absValue >= 1_000_000_000_000 {
+            return "\(formatCompact(value / 1_000_000_000_000))T"
+        }
+        if absValue >= 1_000_000_000 {
+            return "\(formatCompact(value / 1_000_000_000))B"
+        }
+        if absValue >= 1_000_000 {
+            return "\(formatCompact(value / 1_000_000))M"
+        }
+        if absValue >= 1_000 {
+            return "\(formatCompact(value / 1_000))K"
+        }
+        return formatCompact(value)
+    }
+
+    private func formatPercent(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return "\(formatCompact(value))%"
+    }
+
+    private func formatNumber(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return formatCompact(value)
+    }
+
+    private func formatCompact(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = abs(value) >= 100 ? 1 : 2
+        formatter.usesGroupingSeparator = true
+        return formatter.string(from: NSNumber(value: value)) ?? "--"
+    }
+
+    private var notesSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Notes", systemImage: "note.text")
+                        .font(.headline)
+                    Spacer()
+                    Text("\(notes.count)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    TextField("Add note", text: $noteDraft, axis: .vertical)
+                        .lineLimit(2...4)
+                        .padding(10)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Button {
+                        budget.addTickerNote(ticker: cleanTicker, text: noteDraft)
+                        noteDraft = ""
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.caption.weight(.bold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if notes.isEmpty {
+                    Text("No notes for \(cleanTicker) yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(notes) { note in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(note.text)
+                                .font(.subheadline)
+                            HStack {
+                                Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
+                                Spacer()
+                                Button("Edit") {
+                                    editingNoteText = note.text
+                                    editingNote = note
+                                }
+                                Button(role: .destructive) {
+                                    budget.deleteTickerNote(note)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private var aiCaseSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("AI Case")
+                        .font(.headline)
+                    Spacer()
+                    if let updatedAt = research.updatedAt {
+                        Text(updatedAt, format: .dateTime.month().day().hour().minute())
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Bull", systemImage: "arrow.up.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Text(research.bullCase.isEmpty ? "Refresh to generate a bull case from price action, indicators, and news." : research.bullCase)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Bear", systemImage: "arrow.down.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Text(research.bearCase.isEmpty ? "Refresh to generate a bear case from price action, indicators, and news." : research.bearCase)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private var newsSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Recent News")
+                    .font(.headline)
+                if !research.newsSummary.isEmpty {
+                    Text(research.newsSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if research.articles.isEmpty {
+                    Text("Recent articles will appear when Finnhub news is available.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(research.articles) { article in
+                        Button {
+                            if let url = URL(string: article.url) {
+                                selectedArticleURL = ArticleURL(url: url)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(article.source.isEmpty ? "News" : article.source)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(article.publishedAt, format: .dateTime.month().day())
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(article.headline)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                if !article.summary.isEmpty {
+                                    Text(article.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(3)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        if article.id != research.articles.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func tickerMetricPill(_ title: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value.map { $0.formatted(.currency(code: "USD")) } ?? "--")
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func tickerNumberPill(_ title: String, value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value.map { $0.formatted(.number.precision(.fractionLength(2))) } ?? "--")
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func tickerTextPill(_ title: String, value: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value?.isEmpty == false ? value! : "--")
+                .font(.caption.weight(.bold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var dividendYieldPercent: Double? {
+        guard let annualDividendPerShare, latestPrice > 0 else { return nil }
+        return (annualDividendPerShare / latestPrice) * 100
+    }
+
+    @MainActor
+    private func refreshTickerData() async {
+        guard !isRefreshing else { return }
+        guard budget.marketDataSettings.canFetchMarketData else {
+            refreshError = "Missing market data credentials in Settings."
+            return
+        }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
+        refreshError = nil
+
+        do {
+            let quote = try await marketDataService.fetchQuoteSnapshot(ticker: cleanTicker, settings: budget.marketDataSettings)
+            snapshot = quote
+            budget.cachedQuotes[cleanTicker] = CachedQuote(ticker: cleanTicker, price: quote.price, updatedAt: Date())
+        } catch {
+            refreshError = "Using cached quote data."
+        }
+
+        if let fetchedHistory = try? await marketDataService.fetchCompositeRecentPriceHistory(ticker: cleanTicker, settings: budget.marketDataSettings, days: 90),
+           fetchedHistory.count >= 2 {
+            priceHistory = fetchedHistory
+        } else if priceHistory.count < 2, let snapshot {
+            priceHistory = TickerPricePoint.estimated(from: compactTickerSessionPrices(from: snapshot))
+        }
+
+        if let details = try? await marketDataService.fetchQuoteDetails(ticker: cleanTicker, settings: budget.marketDataSettings) {
+            annualDividendPerShare = details.annualDividendPerShare
+        }
+
+        if let financials = try? await marketDataService.fetchStockFinancials(ticker: cleanTicker, settings: budget.marketDataSettings) {
+            stockFinancials = financials
+        }
+
+        let apiKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !apiKey.isEmpty,
+           let profile = try? await marketDataService.fetchCompanyProfile(ticker: cleanTicker, provider: .finnhub, apiKey: apiKey) {
+            companyProfile = profile
+        }
+
+        let articles = (try? await marketDataService.fetchRecentNews(ticker: cleanTicker, settings: budget.marketDataSettings, daysBack: 14)) ?? research.articles
+        let generated = generatedResearch(articles: articles)
+        budget.setTickerResearch(generated, for: cleanTicker)
+    }
+
+    private func generatedResearch(articles: [TickerNewsArticle]) -> TickerResearch {
+        let trend = indicatorCloses.count >= 2 ? ((indicatorCloses.last ?? 0) - (indicatorCloses.first ?? 0)) / max(indicatorCloses.first ?? 1, 1) : 0
+        let priceVsSMA = latestPrice - (sma20 ?? latestPrice)
+        let currentRSI = rsi14
+        let currentMACD = macd
+        let topSources = Array(Set(articles.prefix(5).map(\.source).filter { !$0.isEmpty })).prefix(3).joined(separator: ", ")
+        let newsLead = articles.first?.headline ?? "No fresh headline is cached yet"
+
+        let bull = [
+            trend >= 0 ? "Price trend is positive across the loaded history." : "The setup can improve if price reclaims the short-term average.",
+            priceVsSMA >= 0 ? "Current price is above SMA 20, which supports near-term momentum." : "A move back over SMA 20 would improve the technical picture.",
+            (currentRSI ?? 50) < 70 ? "RSI is not flashing an overbought reading." : "RSI is elevated, so upside may need consolidation.",
+            (currentMACD?.histogram ?? 0) >= 0 ? "MACD histogram is positive." : "A bullish MACD turn would strengthen the case.",
+            "Recent coverage led by: \(newsLead)."
+        ].joined(separator: " ")
+
+        let bear = [
+            trend < 0 ? "Loaded price history is trending lower." : "Positive price action can still reverse if news or broad market risk weakens.",
+            priceVsSMA < 0 ? "Current price is below SMA 20, showing short-term pressure." : "A break back below SMA 20 would weaken the setup.",
+            (currentRSI ?? 50) > 70 ? "RSI is overbought." : "RSI could still deteriorate if sellers regain control.",
+            (currentMACD?.histogram ?? 0) < 0 ? "MACD histogram is negative." : "A MACD rollover would weaken momentum.",
+            articles.isEmpty ? "There are no cached articles to verify the narrative." : "News concentration from \(topSources.isEmpty ? "recent sources" : topSources) should be checked for one-sided coverage."
+        ].joined(separator: " ")
+
+        let summary = articles.prefix(4).map { article in
+            "\(article.source.isEmpty ? "News" : article.source): \(article.headline)"
+        }.joined(separator: " ")
+
+        return TickerResearch(
+            bullCase: bull,
+            bearCase: bear,
+            newsSummary: summary,
+            articles: articles,
+            updatedAt: Date()
+        )
+    }
+
+    private func compactTickerSessionPrices(from snapshot: MarketQuoteSnapshot) -> [Double] {
+        [snapshot.previousClose, snapshot.open, snapshot.low, snapshot.price, snapshot.high]
+            .compactMap { $0 }
+            .filter { $0 > 0 }
+            .reduce(into: [Double]()) { values, value in
+                if values.last != value {
+                    values.append(value)
+                }
+            }
+    }
+}
+
+private struct ArticleURL: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
+struct TickerPriceHistoryChart: View {
+    enum Style {
+        case compact
+        case detailed
+    }
+
+    let points: [TickerPricePoint]
+    let trendIsPositive: Bool
+    var style: Style = .detailed
+    /// When set, renders a TradingView embed chart with Swift Charts fallback.
+    var symbol: String? = nil
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedPoint: TickerPricePoint?
+
+    private var tint: Color { trendIsPositive ? .green : .red }
+
+    private var yDomain: ClosedRange<Double> {
+        let prices = points.map(\.close)
+        guard let minPrice = prices.min(), let maxPrice = prices.max() else {
+            return 0...1
+        }
+        if minPrice == maxPrice {
+            let padding = max(minPrice * 0.02, 0.01)
+            return (minPrice - padding)...(maxPrice + padding)
+        }
+        let range = maxPrice - minPrice
+        let padding = max(range * 0.06, maxPrice * 0.002)
+        return (minPrice - padding)...(maxPrice + padding)
+    }
+
+    private var xAxisDates: [Date] {
+        guard let first = points.first?.date, let last = points.last?.date else { return [] }
+        if style == .compact {
+            return [first, last]
+        }
+
+        let calendar = Calendar.current
+        let spanDays = max(calendar.dateComponents([.day], from: first, to: last).day ?? 0, 1)
+        let strideDays: Int
+        switch spanDays {
+        case ..<10:
+            strideDays = 1
+        case ..<35:
+            strideDays = 7
+        case ..<120:
+            strideDays = 14
+        default:
+            strideDays = 30
+        }
+
+        var marks: [Date] = []
+        var cursor = calendar.startOfDay(for: first)
+        let end = calendar.startOfDay(for: last)
+        while cursor <= end {
+            marks.append(cursor)
+            guard let next = calendar.date(byAdding: .day, value: strideDays, to: cursor) else { break }
+            cursor = next
+        }
+        if marks.last != last {
+            marks.append(last)
+        }
+        return marks
+    }
+
+    private var periodChangePercent: Double? {
+        guard let first = points.first?.close,
+              let last = points.last?.close,
+              first > 0 else { return nil }
+        return ((last - first) / first) * 100
+    }
+
+    private var timeframeCaption: String {
+        guard let first = points.first?.date, let last = points.last?.date else { return "" }
+
+        let calendar = Calendar.current
+        let spanDays = max(calendar.dateComponents([.day], from: first, to: last).day ?? 0, 1)
+        let spanLabel: String
+        if spanDays >= 56 {
+            let months = max(Int(round(Double(spanDays) / 30.0)), 1)
+            spanLabel = "~\(months) mo"
+        } else if spanDays >= 14 {
+            let weeks = max(Int(round(Double(spanDays) / 7.0)), 1)
+            spanLabel = "~\(weeks) wk"
+        } else {
+            spanLabel = "\(spanDays)d"
+        }
+
+        let rangeLabel = "\(first.formatted(.dateTime.month(.abbreviated).day())) – \(last.formatted(.dateTime.month(.abbreviated).day().year()))"
+        return "\(points.count) sessions · \(spanLabel) · \(rangeLabel)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: style == .detailed ? 8 : 4) {
+            if style == .detailed {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Price History")
+                        .font(.headline)
+                    Spacer()
+                    if let periodChangePercent {
+                        Text(periodChangePercent / 100, format: .percent.sign(strategy: .always()).precision(.fractionLength(1)))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(periodChangePercent >= 0 ? .green : .red)
+                    }
+                }
+            }
+
+            if let symbol, !symbol.isEmpty {
+                if style == .detailed {
+                    TradingViewTickerChartPanel(
+                        symbol: symbol,
+                        fallbackPoints: points,
+                        trendIsPositive: trendIsPositive
+                    )
+                } else {
+                    TradingViewCompactTickerChart(
+                        symbol: symbol,
+                        fallbackPoints: points,
+                        trendIsPositive: trendIsPositive,
+                        height: 80
+                    )
+                }
+                if points.count >= 2 {
+                    Text(timeframeCaption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else if points.count >= 2 {
+                chart
+                Text(timeframeCaption)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chart: some View {
+        Chart(points) { point in
+            AreaMark(
+                x: .value("Date", point.date),
+                yStart: .value("Baseline", yDomain.lowerBound),
+                yEnd: .value("Close", point.close)
+            )
+            .interpolationMethod(.monotone)
+            .foregroundStyle(tint.opacity(style == .detailed ? 0.18 : 0.16))
+
+            LineMark(
+                x: .value("Date", point.date),
+                y: .value("Close", point.close)
+            )
+            .interpolationMethod(.monotone)
+            .foregroundStyle(tint)
+            .lineStyle(
+                StrokeStyle(
+                    lineWidth: style == .detailed ? 3 : 2,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+
+            if style == .detailed, let selectedPoint, selectedPoint.id == point.id {
+                RuleMark(x: .value("Date", point.date))
+                    .foregroundStyle(tint.opacity(0.35))
+
+                PointMark(
+                    x: .value("Date", point.date),
+                    y: .value("Close", point.close)
+                )
+                .foregroundStyle(tint)
+            }
+        }
+        .chartYScale(domain: yDomain)
+        .chartXScale(domain: (points.first?.date ?? .now)...(points.last?.date ?? .now))
+        .chartPlotStyle { plotArea in
+            plotArea.clipped()
+        }
+        .chartXAxis {
+            AxisMarks(values: xAxisDates) { value in
+                if style == .detailed {
+                    AxisGridLine().foregroundStyle(Color.secondary.opacity(0.08))
+                }
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    .font(.caption2)
+            }
+        }
+        .chartYAxis {
+            if style == .detailed {
+                AxisMarks(position: .leading) { value in
+                    AxisGridLine().foregroundStyle(Color.secondary.opacity(0.10))
+                    AxisValueLabel {
+                        if let amount = value.as(Double.self) {
+                            Text(amount, format: .currency(code: "USD").precision(.fractionLength(0)))
+                        }
+                    }
+                    .font(.caption2)
+                }
+            } else {
+                AxisMarks { _ in
+                    AxisGridLine().foregroundStyle(Color.clear)
+                }
+            }
+        }
+        .chartOverlay { proxy in
+            if style == .detailed {
+                GeometryReader { geometry in
+                    ZStack(alignment: .topLeading) {
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 8)
+                                    .onChanged { value in
+                                        guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                                        guard let plotFrameAnchor = proxy.plotFrame else { return }
+                                        let plotFrame = geometry[plotFrameAnchor]
+                                        let xPosition = value.location.x - plotFrame.origin.x
+                                        if let date: Date = proxy.value(atX: xPosition) {
+                                            selectedPoint = nearestPoint(to: date)
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        selectedPoint = nil
+                                    }
+                            )
+
+                        if let selectedPoint,
+                           let plotFrameAnchor = proxy.plotFrame {
+                            let plotFrame = geometry[plotFrameAnchor]
+                            let xPosition = proxy.position(forX: selectedPoint.date) ?? plotFrame.minX
+                            let yPosition = proxy.position(forY: selectedPoint.close) ?? plotFrame.minY
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(selectedPoint.date, format: .dateTime.month(.abbreviated).day().year())
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(selectedPoint.close, format: .currency(code: "USD"))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                            .padding(6)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .position(
+                                x: min(max(xPosition, plotFrame.minX + 70), plotFrame.maxX - 70),
+                                y: max(plotFrame.minY + 14, yPosition - 24)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(height: style == .detailed ? 220 : 56)
+        .clipped()
+    }
+
+    private func nearestPoint(to date: Date) -> TickerPricePoint? {
+        points.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+    }
+}
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+
 struct GlassCard<Content: View>: View {
     let content: Content
     let padding: CGFloat
@@ -4445,6 +6350,7 @@ struct GlassCard<Content: View>: View {
         content
             .padding(padding)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
@@ -5050,7 +6956,6 @@ struct CustomTabBar: View {
                         Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
                         Button("Add Investment") { onMarginQuickAction(.addInvestment) }
                         Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
-                        Button("Electric Bill") { onMarginQuickAction(.electricBill) }
                         Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
                         Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
                     } else if selectedTab == .calendar {
@@ -5082,7 +6987,6 @@ struct CustomTabBar: View {
                         Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
                         Button("Add Investment") { onMarginQuickAction(.addInvestment) }
                         Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
-                        Button("Electric Bill") { onMarginQuickAction(.electricBill) }
                         Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
                         Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
                     } else if selectedTab == .calendar {
@@ -6630,12 +8534,35 @@ struct CalendarEntryEditorView: View {
         return Array(Set(names)).sorted()
     }
 
+    private var bankPaymentAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
     private var creditCardOptions: [String] {
         budget.creditAccounts
             .map(\.name)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .sorted()
+    }
+
+    private static func userNoteWithoutCreditCardPaymentMarker(_ note: String) -> String {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:"),
+              let endIndex = trimmed.firstIndex(of: "]") else {
+            return trimmed
+        }
+        let afterMarker = trimmed.index(after: endIndex)
+        return String(trimmed[afterMarker...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func markedCreditCardPaymentNote(targetCard: String) -> String {
+        let prefix = "[CC_PAYMENT:\(targetCard.trimmingCharacters(in: .whitespacesAndNewlines))]"
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedNote.isEmpty ? prefix : "\(prefix)\n\(trimmedNote)"
     }
 
     init(
@@ -6646,6 +8573,8 @@ struct CalendarEntryEditorView: View {
         self.budget = budget
         self.selectedDate = selectedDate
         self.existingRecurringPayment = existingRecurringPayment
+        let existingNote = existingRecurringPayment?.note ?? ""
+        let existingTargetCard = existingNote.isEmpty ? "" : budget.creditCardPaymentTarget(from: existingNote) ?? ""
         _name = State(initialValue: existingRecurringPayment?.name ?? "")
         _amount = State(initialValue: existingRecurringPayment?.amount ?? 0)
         _date = State(initialValue: existingRecurringPayment?.startDate ?? selectedDate)
@@ -6655,7 +8584,9 @@ struct CalendarEntryEditorView: View {
         _section = State(initialValue: existingRecurringPayment?.section ?? .needs)
         _categoryId = State(initialValue: existingRecurringPayment?.categoryId ?? budget.needsCategories.first?.id)
         _paymentAccount = State(initialValue: existingRecurringPayment?.paymentAccount ?? "")
-        _note = State(initialValue: existingRecurringPayment?.note ?? "")
+        _isCreditCardPayment = State(initialValue: !existingTargetCard.isEmpty)
+        _targetCreditAccountName = State(initialValue: existingTargetCard)
+        _note = State(initialValue: Self.userNoteWithoutCreditCardPaymentMarker(existingNote))
     }
 
     var body: some View {
@@ -6698,38 +8629,40 @@ struct CalendarEntryEditorView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             } else {
-                                Picker("Credit Card", selection: $targetCreditAccountName) {
+                                Picker("Apply to card", selection: $targetCreditAccountName) {
                                     ForEach(creditCardOptions, id: \.self) { accountName in
                                         Text(accountName).tag(accountName)
                                     }
                                 }
                             }
                         }
-                        Picker("Section", selection: $section) {
-                            ForEach(BudgetSection.allCases) { item in
-                                Text(item.title).tag(item)
+                        if !isCreditCardPayment {
+                            Picker("Section", selection: $section) {
+                                ForEach(BudgetSection.allCases) { item in
+                                    Text(item.title).tag(item)
+                                }
                             }
-                        }
-                        Toggle("Other category", isOn: $useCustomCategory)
-                        if useCustomCategory {
-                            TextField("Custom category", text: $customCategoryName)
-                        } else if categories.isEmpty {
-                            Text("Add a category in Plan first.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Category", selection: $categoryId) {
-                                ForEach(categories) { category in
-                                    Text(category.name).tag(Optional(category.id))
+                            Toggle("Other category", isOn: $useCustomCategory)
+                            if useCustomCategory {
+                                TextField("Custom category", text: $customCategoryName)
+                            } else if categories.isEmpty {
+                                Text("Add a category in Plan first.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Picker("Category", selection: $categoryId) {
+                                    ForEach(categories) { category in
+                                        Text(category.name).tag(Optional(category.id))
+                                    }
                                 }
                             }
                         }
                     }
 
                     if kind == .expense {
-                        Picker("Paid with", selection: $paymentAccount) {
+                        Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
                             Text("None").tag("")
-                            ForEach(paymentAccountOptions, id: \.self) { accountName in
+                            ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
                                 Text(accountName).tag(accountName)
                             }
                         }
@@ -6809,9 +8742,7 @@ struct CalendarEntryEditorView: View {
 
                             let markerNote: String
                             if kind == .expense && isCreditCardPayment {
-                                let prefix = "[CC_PAYMENT:\(targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines))]"
-                                let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                                markerNote = trimmedNote.isEmpty ? prefix : "\(prefix)\n\(trimmedNote)"
+                                markerNote = markedCreditCardPaymentNote(targetCard: targetCreditAccountName)
                             } else {
                                 markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
                             }
@@ -6874,9 +8805,7 @@ struct CalendarEntryEditorView: View {
                             guard let resolvedCategoryId else { return }
                             let markerNote: String
                             if isCreditCardPayment {
-                                let prefix = "[CC_PAYMENT:\(targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines))]"
-                                let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                                markerNote = trimmedNote.isEmpty ? prefix : "\(prefix)\n\(trimmedNote)"
+                                markerNote = markedCreditCardPaymentNote(targetCard: targetCreditAccountName)
                             } else {
                                 markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
                             }
@@ -7293,7 +9222,7 @@ struct PortfolioTransactionDetailView: View {
 
     private var signedAmount: Double {
         switch transaction.type {
-        case .sell, .dividend:
+        case .sell, .dividend, .contribution:
             return transaction.amount
         default:
             return -transaction.amount
@@ -7302,6 +9231,9 @@ struct PortfolioTransactionDetailView: View {
 
     private var entryTitle: String {
         let ticker = transaction.ticker?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if transaction.type == .contribution {
+            return "Transfer to Portfolio"
+        }
         let base = transaction.type.title
         return ticker.isEmpty ? base : "\(base) \(ticker.uppercased())"
     }
@@ -7350,6 +9282,16 @@ struct PortfolioTransactionDetailView: View {
                     Spacer()
                     Text(signedAmount, format: .currency(code: "USD"))
                         .foregroundStyle(signedAmount >= 0 ? .green : .primary)
+                }
+                if transaction.type == .contribution,
+                   let fundingBankAccount = transaction.fundingBankAccount,
+                   !fundingBankAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack {
+                        Text("From Account")
+                        Spacer()
+                        Text(fundingBankAccount)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let notes = transaction.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Section("Notes") {

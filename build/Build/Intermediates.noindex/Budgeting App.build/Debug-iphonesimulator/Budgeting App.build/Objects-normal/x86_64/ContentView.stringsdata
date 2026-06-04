@@ -1,0 +1,4216 @@
+{
+  "source": "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Recurring Charges",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 300
+        }
+      },
+      {
+        "comment": "",
+        "key": "since start dates",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 308
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld paid",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 318
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld unpaid",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 322
+        }
+      },
+      {
+        "comment": "",
+        "key": "Next charge %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/%lld paid",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 436
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 865
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget Focus",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 915
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Cards",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 970
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Snapshot",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1016
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add your income to start planning.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1611
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set Income",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1617
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set income",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 1624
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Income",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1584
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1593
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%% used",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1605
+        }
+      },
+      {
+        "comment": "",
+        "key": "Transactions",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense History",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2301
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@%@",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 2339
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Balances",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2372
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2376
+        }
+      },
+      {
+        "comment": "",
+        "key": "Banks",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2377
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cards",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2380
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bank Accounts",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2405
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Cards",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2422
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio Holdings",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2440
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 2446
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld more calendar events",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 2599
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 2483
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ paid",
+        "location": {
+          "startingColumn": 52,
+          "startingLine": 2560
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mark %@ paid",
+        "location": {
+          "startingColumn": 75,
+          "startingLine": 2560
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mark Paid: %@",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 2580
+        }
+      },
+      {
+        "comment": "",
+        "key": "+%lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2591
+        }
+      },
+      {
+        "comment": "",
+        "key": "Next Step",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2725
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add your first category to start allocating your budget.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2727
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a Needs Category",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 2731
+        }
+      },
+      {
+        "comment": "",
+        "key": "Plan Highlights",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2741
+        }
+      },
+      {
+        "comment": "",
+        "key": "Unlock your plan targets",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2771
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add income to see monthly goals for needs, wants, and savings.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2773
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2837
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set what you take home and how often it lands.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2840
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2848
+        }
+      },
+      {
+        "comment": "",
+        "key": "$0",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 2854
+        }
+      },
+      {
+        "comment": "",
+        "key": "Pay Frequency",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 2879
+        }
+      },
+      {
+        "comment": "",
+        "key": "Pay Frequency",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2872
+        }
+      },
+      {
+        "comment": "",
+        "key": "This controls your monthly roll-up.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2874
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Income",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 2897
+        }
+      },
+      {
+        "comment": "",
+        "key": "50/30/20 Budget Breakdown",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2926
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enter your income to see budget breakdown",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 2957
+        }
+      },
+      {
+        "comment": "",
+        "key": "Trend",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2980
+        }
+      },
+      {
+        "comment": "",
+        "key": "Avg / day",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2998
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3135
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spent",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3136
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3141
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spent",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3142
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 3147
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3151
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spent",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3152
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3240
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3241
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3246
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3247
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 3252
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3256
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Allocated",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3343
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ of %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3347
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spent this month",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3417
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ of %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3421
+        }
+      },
+      {
+        "comment": "",
+        "key": "History",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 3500
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saved this month",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3491
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ of %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3494
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enter your income to see summary",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 3618
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining Budget",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 3599
+        }
+      },
+      {
+        "comment": "",
+        "key": "After planned allocations",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 3601
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add %@",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 3690
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 3685
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add %@",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 3788
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 3783
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget Snapshot",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 3824
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio %@  Cash flow %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3897
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio, banks, and credit cards",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 3881
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total Net Worth",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 3878
+        }
+      },
+      {
+        "comment": "",
+        "key": "%.1f:1",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3916
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income vs Expenses",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 3913
+        }
+      },
+      {
+        "comment": "",
+        "key": "Everything at a Glance",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 3941
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings Goal Progress (MTD)",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3954
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3958
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a Finnhub API key in Settings to load market cards.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3991
+        }
+      },
+      {
+        "comment": "",
+        "key": "Top Assets",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3973
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 3980
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cash Flow",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4008
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spending",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4013
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4028
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a ticker to start tracking it.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 4091
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 4046
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh watchlist",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 4060
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 4065
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add ticker",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 4081
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open %@ snapshot",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 4130
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit %@ alerts",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 4140
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove %@",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 4150
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add more portfolio activity over time to see your trend.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 4200
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth Over Time",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4170
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated: --",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 4191
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 4187
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 4206
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 4207
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 4219
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 4220
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 4227
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 4230
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 4231
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 4297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Gross %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 4300
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@%@ in range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4321
+        }
+      },
+      {
+        "comment": "",
+        "key": "Net Worth",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 4319
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/%lld paid",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4523
+        }
+      },
+      {
+        "comment": "",
+        "key": "Unavailable",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4563
+        }
+      },
+      {
+        "comment": "",
+        "key": "No data",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4570
+        }
+      },
+      {
+        "comment": "",
+        "key": "N/A",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4548
+        }
+      },
+      {
+        "comment": "",
+        "key": "Index",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4582
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4583
+        }
+      },
+      {
+        "comment": "",
+        "key": "Index",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4588
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4589
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not enough data yet.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4607
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4614
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4615
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4621
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 4622
+        }
+      },
+      {
+        "comment": "",
+        "key": "Strongest: %@ (%@) • Weakest: %@ (%@)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4905
+        }
+      },
+      {
+        "comment": "",
+        "key": "Avg %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4900
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld up",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 4893
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld down",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 4896
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit %@ alerts",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 4953
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove %@",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 4963
+        }
+      },
+      {
+        "comment": "",
+        "key": "RSI14 %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5001
+        }
+      },
+      {
+        "comment": "",
+        "key": "Day range",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5018
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ - %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5022
+        }
+      },
+      {
+        "comment": "",
+        "key": "N/A",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 5053
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ Alerts",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5106
+        }
+      },
+      {
+        "comment": "",
+        "key": "Alerts",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5081
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enabled",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5082
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move threshold",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5083
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notify above",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5088
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notify below",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5093
+        }
+      },
+      {
+        "comment": "",
+        "key": "1.5%",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 5084
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 5089
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 5094
+        }
+      },
+      {
+        "comment": "",
+        "key": "Leave a price alert at 0 to ignore that trigger. Move alerts compare the latest quote to the cached quote and the daily percentage change.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5116
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5119
+        }
+      },
+      {
+        "comment": "",
+        "key": "Settings",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5220
+        }
+      },
+      {
+        "comment": "",
+        "key": "Market Data",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5176
+        }
+      },
+      {
+        "comment": "",
+        "key": "Alpaca Fallback",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5193
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Defaults",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5211
+        }
+      },
+      {
+        "comment": "",
+        "key": "Used for SPY comparison and quote refresh.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5188
+        }
+      },
+      {
+        "comment": "",
+        "key": "Provider",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5177
+        }
+      },
+      {
+        "comment": "",
+        "key": "API key",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 5182
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist Tickers",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5185
+        }
+      },
+      {
+        "comment": "",
+        "key": "IEX works for free stock market data; SIP requires an Alpaca market data subscription.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5206
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use Alpaca when primary provider fails",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5194
+        }
+      },
+      {
+        "comment": "",
+        "key": "Alpaca API key ID",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 5195
+        }
+      },
+      {
+        "comment": "",
+        "key": "Alpaca secret key",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 5198
+        }
+      },
+      {
+        "comment": "",
+        "key": "Data feed",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5201
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total margin available",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 5212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Interest-free margin limit",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 5214
+        }
+      },
+      {
+        "comment": "",
+        "key": "Personal max margin cap",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 5216
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5223
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5291
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Ticker",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 5242
+        }
+      },
+      {
+        "comment": "",
+        "key": "Current Watchlist",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 5257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Live Quotes",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5276
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use stock symbols only (for example AAPL, MSFT, NVDA).",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 5252
+        }
+      },
+      {
+        "comment": "",
+        "key": "e.g. AAPL",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 5244
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5247
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tickers yet.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5259
+        }
+      },
+      {
+        "comment": "",
+        "key": "Snapshot",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5408
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh ticker",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 5422
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5425
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Note",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 5443
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5446
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 5449
+        }
+      },
+      {
+        "comment": "",
+        "key": "Updated %@",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 5488
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ Financials",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5524
+        }
+      },
+      {
+        "comment": "",
+        "key": "Financial metrics will appear after the next Finnhub refresh.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5526
+        }
+      },
+      {
+        "comment": "",
+        "key": "Financials",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 5542
+        }
+      },
+      {
+        "comment": "",
+        "key": "TradingView",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 5545
+        }
+      },
+      {
+        "comment": "",
+        "key": "No notes for %@ yet.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5794
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5771
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 5768
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 5779
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 5805
+        }
+      },
+      {
+        "comment": "",
+        "key": "AI Case",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5835
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bull",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 5845
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bear",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 5854
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recent News",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 5869
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recent articles will appear when Finnhub news is available.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 5877
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price History",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6167
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 6211
+        }
+      },
+      {
+        "comment": "",
+        "key": "Baseline",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 6213
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 6219
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 6220
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 6233
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 6237
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 6238
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%% allocated",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6431
+        }
+      },
+      {
+        "comment": "",
+        "key": "Left %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6435
+        }
+      },
+      {
+        "comment": "",
+        "key": "Planned this month",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 6471
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 6551
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add %@",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 6559
+        }
+      },
+      {
+        "comment": "",
+        "key": "• %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 6651
+        }
+      },
+      {
+        "comment": "",
+        "key": "/",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 6698
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%% allocated",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 6728
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6733
+        }
+      },
+      {
+        "comment": "",
+        "key": "Over budget: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6737
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete category?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 6913
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category actions",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 6826
+        }
+      },
+      {
+        "comment": "",
+        "key": "Allocated: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6807
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 6815
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 6816
+        }
+      },
+      {
+        "comment": "",
+        "key": "Spent",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 6831
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining:",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 6841
+        }
+      },
+      {
+        "comment": "",
+        "key": "Over budget",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 6850
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%% spent",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 6877
+        }
+      },
+      {
+        "comment": "",
+        "key": "Log Expense",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 6887
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 6916
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 6917
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 6919
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick add menu",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 6979
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick add menu",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 7016
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Transaction",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6956
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Investment",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6957
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Manual Holding",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6958
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Settings",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6959
+        }
+      },
+      {
+        "comment": "",
+        "key": "Activity Ledger",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6960
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Calendar Entry",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6962
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Cards",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6963
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show Tabs",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 6972
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Expense",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 6966
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Income",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 6969
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ tab",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 7054
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Transaction",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6987
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Investment",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6988
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Manual Holding",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6989
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin Settings",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6990
+        }
+      },
+      {
+        "comment": "",
+        "key": "Activity Ledger",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6991
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Calendar Entry",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6993
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Cards",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 6994
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Expense",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 6997
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Income",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 7000
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete savings goal?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 7184
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings goal actions",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 7121
+        }
+      },
+      {
+        "comment": "",
+        "key": "Target: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7098
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7101
+        }
+      },
+      {
+        "comment": "",
+        "key": "History",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7108
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7110
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7111
+        }
+      },
+      {
+        "comment": "",
+        "key": "Current:",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7126
+        }
+      },
+      {
+        "comment": "",
+        "key": "$0",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7128
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saved this month",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7144
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7159
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7162
+        }
+      },
+      {
+        "comment": "",
+        "key": "Log Savings",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 7170
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7187
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7188
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 7190
+        }
+      },
+      {
+        "comment": "",
+        "key": "of %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7214
+        }
+      },
+      {
+        "comment": "",
+        "key": "of %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 7250
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete expense?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 7308
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense actions",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 7305
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7294
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7295
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7311
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7312
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 7314
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete income?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 7358
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income actions",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 7355
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7344
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7345
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7361
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7362
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 7364
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income History",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7402
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete income?",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 7405
+        }
+      },
+      {
+        "comment": "",
+        "key": "No income entries this month.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7382
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 7396
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7409
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7412
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 7414
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7418
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete expense?",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 7477
+        }
+      },
+      {
+        "comment": "",
+        "key": "No expenses this month.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7453
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 7468
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7481
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7484
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 7486
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7490
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete savings entry?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 7535
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings entry actions",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 7532
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7521
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7522
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7538
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 7539
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 7541
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete savings entry?",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 7598
+        }
+      },
+      {
+        "comment": "",
+        "key": "No savings logged this month.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7574
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 7589
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7602
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 7605
+        }
+      },
+      {
+        "comment": "",
+        "key": "This cannot be undone.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 7607
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7611
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Category",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7669
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7659
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7660
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7663
+        }
+      },
+      {
+        "comment": "",
+        "key": "Available budget: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7665
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7673
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7676
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Category",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7732
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7724
+        }
+      },
+      {
+        "comment": "",
+        "key": "Allocated Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7725
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7728
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7736
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7739
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Savings Goal",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7787
+        }
+      },
+      {
+        "comment": "",
+        "key": "Goal / Account Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7775
+        }
+      },
+      {
+        "comment": "",
+        "key": "Target Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7776
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Contribution",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7778
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings Goal Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7781
+        }
+      },
+      {
+        "comment": "",
+        "key": "Available savings budget: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7783
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7791
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7794
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Savings Goal",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7850
+        }
+      },
+      {
+        "comment": "",
+        "key": "Goal / Account Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7838
+        }
+      },
+      {
+        "comment": "",
+        "key": "Target Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7839
+        }
+      },
+      {
+        "comment": "",
+        "key": "Monthly Contribution",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7841
+        }
+      },
+      {
+        "comment": "",
+        "key": "Current Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7843
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings Goal Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7846
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7854
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7857
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Expense",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7975
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a category in Plan Mode first.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7953
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7922
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7923
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 7925
+        }
+      },
+      {
+        "comment": "",
+        "key": "Section",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7926
+        }
+      },
+      {
+        "comment": "",
+        "key": "Other category",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7948
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom category",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 7951
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 7957
+        }
+      },
+      {
+        "comment": "",
+        "key": "Paid with",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7963
+        }
+      },
+      {
+        "comment": "",
+        "key": "Note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 7969
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick add popular wants",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 7933
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 7964
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 7971
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 7997
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8000
+        }
+      },
+      {
+        "comment": "",
+        "key": "Log Savings",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8099
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a savings goal in Plan Mode first.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8084
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8079
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8080
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8082
+        }
+      },
+      {
+        "comment": "",
+        "key": "Goal",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8088
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 8095
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8110
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8113
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Income",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8185
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8167
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8168
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8170
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bank Account",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8171
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saved Accounts",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8173
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 8174
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 8181
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8192
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8195
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8250
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8251
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8253
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bank Account",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8254
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saved Accounts",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8256
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 8257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 8264
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8272
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8275
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a category in Plan Mode first.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8356
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8342
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8343
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8345
+        }
+      },
+      {
+        "comment": "",
+        "key": "Section",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8346
+        }
+      },
+      {
+        "comment": "",
+        "key": "Other category",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8351
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom category",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8354
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8360
+        }
+      },
+      {
+        "comment": "",
+        "key": "Paid with",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8366
+        }
+      },
+      {
+        "comment": "",
+        "key": "Note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8372
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8367
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 8374
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8387
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8390
+        }
+      },
+      {
+        "comment": "",
+        "key": "Description",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8457
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8458
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8460
+        }
+      },
+      {
+        "comment": "",
+        "key": "Goal",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8461
+        }
+      },
+      {
+        "comment": "",
+        "key": "Savings Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 8467
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8475
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8478
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Calendar Entry",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 8684
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Recurring",
+        "location": {
+          "startingColumn": 87,
+          "startingLine": 8684
+        }
+      },
+      {
+        "comment": "",
+        "key": "Entry Type",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8595
+        }
+      },
+      {
+        "comment": "",
+        "key": "Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8613
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recurring",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8604
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mode",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8597
+        }
+      },
+      {
+        "comment": "",
+        "key": "Kind",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8607
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8608
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8609
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a credit card in Credit Accounts first.",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 8628
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a category in Plan first.",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 8649
+        }
+      },
+      {
+        "comment": "",
+        "key": "Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8614
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8615
+        }
+      },
+      {
+        "comment": "",
+        "key": "Start date",
+        "location": {
+          "startingColumn": 81,
+          "startingLine": 8619
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 96,
+          "startingLine": 8619
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Card Payment",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8625
+        }
+      },
+      {
+        "comment": "",
+        "key": "Apply to card",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 8632
+        }
+      },
+      {
+        "comment": "",
+        "key": "Section",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8640
+        }
+      },
+      {
+        "comment": "",
+        "key": "Other category",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8645
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom category",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 8647
+        }
+      },
+      {
+        "comment": "",
+        "key": "Category",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 8653
+        }
+      },
+      {
+        "comment": "",
+        "key": "Pay from",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 8663
+        }
+      },
+      {
+        "comment": "",
+        "key": "Paid with",
+        "location": {
+          "startingColumn": 67,
+          "startingLine": 8663
+        }
+      },
+      {
+        "comment": "",
+        "key": "Deposit to",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8670
+        }
+      },
+      {
+        "comment": "",
+        "key": "Note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8677
+        }
+      },
+      {
+        "comment": "",
+        "key": "Active",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 8680
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 8664
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 8671
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8703
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8706
+        }
+      },
+      {
+        "comment": "",
+        "key": "Credit Accounts",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8917
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8879
+        }
+      },
+      {
+        "comment": "",
+        "key": "Accounts",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8887
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Credit Account",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8883
+        }
+      },
+      {
+        "comment": "",
+        "key": "No accounts added yet.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8889
+        }
+      },
+      {
+        "comment": "",
+        "key": "Closing: %lld  Due: %lld",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 8899
+        }
+      },
+      {
+        "comment": "",
+        "key": "Actual: %@",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 8902
+        }
+      },
+      {
+        "comment": "",
+        "key": "Utilization: %.1f%%",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 8905
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8921
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Credit Account",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 8981
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8947
+        }
+      },
+      {
+        "comment": "",
+        "key": "Balances",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8964
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 8977
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Name",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8948
+        }
+      },
+      {
+        "comment": "",
+        "key": "Closing Day",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8952
+        }
+      },
+      {
+        "comment": "",
+        "key": "Due Day",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8957
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account name",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8949
+        }
+      },
+      {
+        "comment": "",
+        "key": "1-31",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8953
+        }
+      },
+      {
+        "comment": "",
+        "key": "1-31",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8958
+        }
+      },
+      {
+        "comment": "",
+        "key": "Starting Balance",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8965
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total Credit Limit",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 8970
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8966
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 8971
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 8978
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8985
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 8988
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Account",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9077
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Details",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 9017
+        }
+      },
+      {
+        "comment": "",
+        "key": "Balances",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 9049
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 9073
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Name",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9018
+        }
+      },
+      {
+        "comment": "",
+        "key": "Closing Day",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9022
+        }
+      },
+      {
+        "comment": "",
+        "key": "Due Day",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9034
+        }
+      },
+      {
+        "comment": "",
+        "key": "Active",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 9046
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 9019
+        }
+      },
+      {
+        "comment": "",
+        "key": "1-31",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9024
+        }
+      },
+      {
+        "comment": "",
+        "key": "1-31",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9036
+        }
+      },
+      {
+        "comment": "",
+        "key": "Starting Balance",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9050
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total Credit Limit",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9059
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9052
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9061
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional note",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 9074
+        }
+      },
+      {
+        "comment": "",
+        "key": "Card Details",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9208
+        }
+      },
+      {
+        "comment": "",
+        "key": "Transaction History",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9177
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9141
+        }
+      },
+      {
+        "comment": "",
+        "key": "Closing day",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9147
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9149
+        }
+      },
+      {
+        "comment": "",
+        "key": "Due day",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9153
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9155
+        }
+      },
+      {
+        "comment": "",
+        "key": "Actual balance",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9159
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total credit limit",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9165
+        }
+      },
+      {
+        "comment": "",
+        "key": "Utilization",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9171
+        }
+      },
+      {
+        "comment": "",
+        "key": "%.1f%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9173
+        }
+      },
+      {
+        "comment": "",
+        "key": "No transactions found for this card yet.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9179
+        }
+      },
+      {
+        "comment": "",
+        "key": "Note",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9201
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 9212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 9297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Type",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9245
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ticker",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9252
+        }
+      },
+      {
+        "comment": "",
+        "key": "Date",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9259
+        }
+      },
+      {
+        "comment": "",
+        "key": "Shares",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9266
+        }
+      },
+      {
+        "comment": "",
+        "key": "Price/Share",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9274
+        }
+      },
+      {
+        "comment": "",
+        "key": "Amount",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9281
+        }
+      },
+      {
+        "comment": "",
+        "key": "From Account",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9290
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 9308
+        }
+      },
+      {
+        "comment": "",
+        "key": "Bank Accounts",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9362
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9324
+        }
+      },
+      {
+        "comment": "",
+        "key": "Accounts",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9332
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Bank Account",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 9328
+        }
+      },
+      {
+        "comment": "",
+        "key": "No bank accounts added yet.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9334
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 9366
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Bank Account",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 9405
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Details",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9389
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 9401
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Name",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 9390
+        }
+      },
+      {
+        "comment": "",
+        "key": "Balance",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 9394
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account name",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 9391
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 9395
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional note",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 9402
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 9409
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 9412
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Account",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 9453
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Details",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 9437
+        }
+      },
+      {
+        "comment": "",
+        "key": "Notes",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 9449
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account Name",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9438
+        }
+      },
+      {
+        "comment": "",
+        "key": "Balance",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 9442
+        }
+      },
+      {
+        "comment": "",
+        "key": "Account name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 9439
+        }
+      },
+      {
+        "comment": "",
+        "key": "0.00",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 9443
+        }
+      },
+      {
+        "comment": "",
+        "key": "Optional note",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 9450
+        }
+      }
+    ]
+  },
+  "version": 1
+}

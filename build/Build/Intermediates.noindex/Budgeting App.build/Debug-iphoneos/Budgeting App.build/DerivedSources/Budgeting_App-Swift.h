@@ -346,6 +346,9 @@ extern "C" {
 #if __has_warning("-Watimport-in-framework-header")
 #pragma clang diagnostic ignored "-Watimport-in-framework-header"
 #endif
+@import Foundation;
+@import ObjectiveC;
+@import UIKit;
 #endif
 
 #endif // defined(__OBJC__)
@@ -367,6 +370,14 @@ extern "C" {
 #endif
 
 #if defined(__OBJC__)
+
+@class UIApplication;
+SWIFT_CLASS("_TtC13Budgeting_App17BudgetAppDelegate")
+@interface BudgetAppDelegate : NSObject <UIApplicationDelegate>
+- (BOOL)application:(UIApplication * _Nonnull)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> * _Nullable)launchOptions SWIFT_WARN_UNUSED_RESULT;
+- (void)applicationDidEnterBackground:(UIApplication * _Nonnull)application;
+- (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+@end
 
 #endif // defined(__OBJC__)
 #if __has_attribute(external_source_symbol)

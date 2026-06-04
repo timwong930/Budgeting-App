@@ -6,6 +6,34 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A1B2C3E02F1B518D0082AFEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1BAFE9342F1B518D0082AFEF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1B2C3D92F1B518D0082AFEF;
+			remoteInfo = BudgetingWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1B2C3DD2F1B518D0082AFEF /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgeting App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetingWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -41,34 +69,6 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		A1B2C3DD2F1B518D0082AFEF /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
-/* Begin PBXBuildFile section */
-		A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-/* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		A1B2C3E02F1B518D0082AFEF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 1BAFE9342F1B518D0082AFEF /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A1B2C3D92F1B518D0082AFEF;
-			remoteInfo = BudgetingWidgets;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXGroup section */
 		1BAFE9332F1B518D0082AFEF = {
 			isa = PBXGroup;
@@ -98,7 +98,7 @@
 				1BAFE9382F1B518D0082AFEF /* Sources */,
 				1BAFE9392F1B518D0082AFEF /* Frameworks */,
 				1BAFE93A2F1B518D0082AFEF /* Resources */,
-				A1B2C3DD2F1B518D0082AFEF /* Embed App Extensions */,
+				A1B2C3DD2F1B518D0082AFEF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -139,21 +139,13 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXTargetDependency section */
-		A1B2C3DF2F1B518D0082AFEF /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A1B2C3D92F1B518D0082AFEF /* BudgetingWidgets */;
-			targetProxy = A1B2C3E02F1B518D0082AFEF /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXProject section */
 		1BAFE9342F1B518D0082AFEF /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					1BAFE93B2F1B518D0082AFEF = {
 						CreatedOnToolsVersion = 26.2;
@@ -213,6 +205,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1B2C3DF2F1B518D0082AFEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1B2C3D92F1B518D0082AFEF /* BudgetingWidgets */;
+			targetProxy = A1B2C3E02F1B518D0082AFEF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1BAFE9452F1B518F0082AFEF /* Debug */ = {
@@ -274,6 +274,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -331,6 +332,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -347,14 +349,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MVL45M2MW6;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Momo's Money!";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Budgeting App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Momo's Money";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -387,14 +385,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MVL45M2MW6;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Momo's Money!";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Budgeting App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Momo's Money";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -425,7 +419,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MVL45M2MW6;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = BudgetingWidgets-Info.plist;
+				INFOPLIST_FILE = "BudgetingWidgets-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -453,7 +447,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = MVL45M2MW6;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = BudgetingWidgets-Info.plist;
+				INFOPLIST_FILE = "BudgetingWidgets-Info.plist";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

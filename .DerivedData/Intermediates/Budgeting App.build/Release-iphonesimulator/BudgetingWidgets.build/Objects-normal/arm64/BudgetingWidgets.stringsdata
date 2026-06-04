@@ -1,0 +1,56 @@
+{
+  "source": "/Users/timothywong/Documents/XCode/Budgeting App/BudgetingWidgets/BudgetingWidgets.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Budget Left",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 146
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income: %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 156
+        }
+      },
+      {
+        "comment": "",
+        "key": "This Month",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 165
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@/%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 181
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget Summary",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 199
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick look at remaining budget and section progress.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 200
+        }
+      }
+    ]
+  },
+  "version": 1
+}
