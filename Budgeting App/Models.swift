@@ -11,6 +11,7 @@ import OSLog
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
+import FoundationModels
 
 enum PayFrequency: String, CaseIterable, Identifiable, Codable, Sendable {
     case weekly = "Weekly"
@@ -73,6 +74,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var categoryId: UUID
     var paymentAccount: String
     var note: String
+    var creditCardPaymentTarget: String?
 
     init(
         id: UUID = UUID(),
@@ -82,7 +84,8 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         section: BudgetSection,
         categoryId: UUID,
         paymentAccount: String = "",
-        note: String = ""
+        note: String = "",
+        creditCardPaymentTarget: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -92,6 +95,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.categoryId = categoryId
         self.paymentAccount = paymentAccount
         self.note = note
+        self.creditCardPaymentTarget = creditCardPaymentTarget
     }
 
     enum CodingKeys: String, CodingKey {
@@ -103,6 +107,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case categoryId
         case paymentAccount
         case note
+        case creditCardPaymentTarget
     }
 
     init(from decoder: Decoder) throws {
@@ -115,6 +120,25 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         categoryId = try container.decode(UUID.self, forKey: .categoryId)
         paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        creditCardPaymentTarget = try container.decodeIfPresent(String.self, forKey: .creditCardPaymentTarget)
+        if creditCardPaymentTarget == nil {
+            creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
+        }
+    }
+
+    private static func extractCreditCardTarget(from note: inout String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !accountName.isEmpty {
+            let afterMarker = trimmed.index(after: endIndex)
+            note = String(trimmed[afterMarker...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return accountName
+        }
+        return nil
     }
 }
 
@@ -187,6 +211,34 @@ struct BankAccount: Identifiable, Codable, Sendable, Equatable {
         self.id = id
         self.name = name
         self.balance = balance
+        self.note = note
+    }
+}
+
+struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var amount: Double
+    var date: Date
+    var fromAccountName: String
+    var toAccountName: String
+    var note: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        amount: Double,
+        date: Date = Date(),
+        fromAccountName: String,
+        toAccountName: String,
+        note: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.date = date
+        self.fromAccountName = fromAccountName
+        self.toAccountName = toAccountName
         self.note = note
     }
 }
@@ -288,6 +340,7 @@ struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
     var categoryId: UUID?
     var paymentAccount: String
     var note: String
+    var creditCardPaymentTarget: String?
 
     init(
         id: UUID = UUID(),
@@ -301,7 +354,8 @@ struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
         section: BudgetSection = .needs,
         categoryId: UUID? = nil,
         paymentAccount: String = "",
-        note: String = ""
+        note: String = "",
+        creditCardPaymentTarget: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -315,6 +369,7 @@ struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
         self.categoryId = categoryId
         self.paymentAccount = paymentAccount
         self.note = note
+        self.creditCardPaymentTarget = creditCardPaymentTarget
     }
 
     enum CodingKeys: String, CodingKey {
@@ -330,6 +385,7 @@ struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
         case categoryId
         case paymentAccount
         case note
+        case creditCardPaymentTarget
     }
 
     init(from decoder: Decoder) throws {
@@ -346,6 +402,25 @@ struct RecurringPayment: Identifiable, Codable, Sendable, Equatable {
         categoryId = try container.decodeIfPresent(UUID.self, forKey: .categoryId)
         paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        creditCardPaymentTarget = try container.decodeIfPresent(String.self, forKey: .creditCardPaymentTarget)
+        if creditCardPaymentTarget == nil {
+            creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
+        }
+    }
+
+    private static func extractCreditCardTarget(from note: inout String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
+        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !accountName.isEmpty {
+            let afterMarker = trimmed.index(after: endIndex)
+            note = String(trimmed[afterMarker...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return accountName
+        }
+        return nil
     }
 }
 
@@ -781,18 +856,32 @@ struct CachedQuote: Codable, Sendable, Equatable {
 struct TickerNote: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var ticker: String
+    var title: String?
     var text: String
+    var url: String?
+    var urlTitle: String?
+    var category: String?
     var createdAt: Date
     var updatedAt: Date
 
-    init(id: UUID = UUID(), ticker: String, text: String, createdAt: Date = Date(), updatedAt: Date = Date()) {
+    init(id: UUID = UUID(), ticker: String, title: String? = nil, text: String, url: String? = nil, urlTitle: String? = nil, category: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.ticker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.title = title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.text = text
+        self.url = url?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.urlTitle = urlTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        self.category = category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 }
+
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+let noteCategories = ["Idea", "Research", "YouTube", "News", "Earnings", "Technical", "Analysis"]
 
 struct TickerNewsArticle: Identifiable, Codable, Sendable, Equatable {
     var id: String { url }
@@ -1048,6 +1137,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
     let recurringPayments: [RecurringPayment]?
     let creditAccounts: [CreditAccount]?
     let bankAccounts: [BankAccount]?
+    let cashTransfers: [CashTransfer]?
 
     enum CodingKeys: String, CodingKey {
         case income
@@ -1078,6 +1168,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         case recurringPayments
         case creditAccounts
         case bankAccounts
+        case cashTransfers
     }
 
     init(
@@ -1108,7 +1199,8 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         recurringElectricBill: RecurringMarginBill,
         recurringPayments: [RecurringPayment],
         creditAccounts: [CreditAccount],
-        bankAccounts: [BankAccount]
+        bankAccounts: [BankAccount],
+        cashTransfers: [CashTransfer]
     ) {
         self.income = income
         self.incomeByMonth = incomeByMonth
@@ -1138,6 +1230,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         self.recurringPayments = recurringPayments
         self.creditAccounts = creditAccounts
         self.bankAccounts = bankAccounts
+        self.cashTransfers = cashTransfers
     }
 
     init(from decoder: Decoder) throws {
@@ -1170,6 +1263,7 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         recurringPayments = try container.decodeIfPresent([RecurringPayment].self, forKey: .recurringPayments)
         creditAccounts = try container.decodeIfPresent([CreditAccount].self, forKey: .creditAccounts)
         bankAccounts = try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts)
+        cashTransfers = try container.decodeIfPresent([CashTransfer].self, forKey: .cashTransfers)
     }
 }
 
@@ -1208,6 +1302,7 @@ class BudgetModel: ObservableObject {
     @Published var recurringPayments: [RecurringPayment] = []
     @Published var creditAccounts: [CreditAccount] = []
     @Published var bankAccounts: [BankAccount] = []
+    @Published var cashTransfers: [CashTransfer] = []
 
     private static let saveFileName = "budget.json"
     private let localSaveURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -1289,6 +1384,14 @@ class BudgetModel: ObservableObject {
     }
 
     private func scheduleSave() {
+        saveToDisk(async: true)
+    }
+
+    func saveNow() {
+        saveToDisk(async: false)
+    }
+
+    private func saveToDisk(async: Bool) {
         let snapshot = BudgetSnapshotStore(
             income: income,
             incomeByMonth: incomeByMonth,
@@ -1317,7 +1420,8 @@ class BudgetModel: ObservableObject {
             recurringElectricBill: recurringElectricBill,
             recurringPayments: recurringPayments,
             creditAccounts: creditAccounts,
-            bankAccounts: bankAccounts
+            bankAccounts: bankAccounts,
+            cashTransfers: cashTransfers
         )
 
         let localSaveURL = localSaveURL
@@ -1332,7 +1436,7 @@ class BudgetModel: ObservableObject {
             return
         }
 
-        saveQueue.async {
+        let work = {
             do {
                 try data.write(to: localSaveURL, options: Data.WritingOptions.atomic)
                 if let sharedSaveURL {
@@ -1359,6 +1463,12 @@ class BudgetModel: ObservableObject {
                 WidgetCenter.shared.reloadAllTimelines()
             }
             #endif
+        }
+
+        if async {
+            saveQueue.async(execute: work)
+        } else {
+            work()
         }
     }
 
@@ -1416,6 +1526,7 @@ class BudgetModel: ObservableObject {
         recurringPayments = snapshot.recurringPayments ?? []
         creditAccounts = snapshot.creditAccounts ?? []
         bankAccounts = snapshot.bankAccounts ?? []
+        cashTransfers = snapshot.cashTransfers ?? []
 
         if expenses.isEmpty {
             let importedNeeds = needsCategories.compactMap { category -> Expense? in
@@ -1433,6 +1544,27 @@ class BudgetModel: ObservableObject {
 
         recalculateSpent()
         synchronizeLegacyMarginStateFromLedger()
+        migratePortfolioValueHistory()
+    }
+
+    private func migratePortfolioValueHistory() {
+        var fixedCount = 0
+        for i in portfolioValueHistory.indices {
+            let point = portfolioValueHistory[i]
+            if point.netValue > point.grossValue {
+                let correctedNet = point.grossValue - portfolioSnapshot.marginUsed
+                portfolioValueHistory[i] = PortfolioValuePoint(
+                    id: point.id,
+                    date: point.date,
+                    grossValue: point.grossValue,
+                    netValue: correctedNet
+                )
+                fixedCount += 1
+            }
+        }
+        if fixedCount > 0 {
+            logger.notice("Migrated \(fixedCount) portfolio history points with incorrect net worth values")
+        }
     }
 
     private func iCloudSaveURL() -> URL? {
@@ -1501,7 +1633,11 @@ class BudgetModel: ObservableObject {
                     TickerNote(
                         id: note.id,
                         ticker: ticker,
+                        title: note.title,
                         text: note.text,
+                        url: note.url,
+                        urlTitle: note.urlTitle,
+                        category: note.category,
                         createdAt: note.createdAt,
                         updatedAt: note.updatedAt
                     )
@@ -1518,31 +1654,80 @@ class BudgetModel: ObservableObject {
         }
     }
 
-    func addTickerNote(ticker: String, text: String) {
+    func addTickerNote(ticker: String, title: String? = nil, text: String, url: String? = nil, urlTitle: String? = nil, category: String? = nil) {
         let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTicker.isEmpty, !cleanText.isEmpty else { return }
-        tickerNotes[cleanTicker, default: []].insert(TickerNote(ticker: cleanTicker, text: cleanText), at: 0)
+        var notes = tickerNotes[cleanTicker] ?? []
+        notes.insert(TickerNote(ticker: cleanTicker, title: title, text: cleanText, url: url, urlTitle: urlTitle, category: category), at: 0)
+        tickerNotes[cleanTicker] = notes
+        saveNow()
     }
 
-    func updateTickerNote(_ note: TickerNote, text: String) {
-        let cleanTicker = note.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    func updateTickerNote(_ note: TickerNote, title: String? = nil, text: String, url: String? = nil, urlTitle: String? = nil, category: String? = nil) {
+        updateTickerNote(id: note.id, ticker: note.ticker, title: title, text: text, url: url, urlTitle: urlTitle, category: category)
+    }
+
+    func updateTickerNote(id: UUID, ticker: String, title: String? = nil, text: String, url: String? = nil, urlTitle: String? = nil, category: String? = nil) {
+        let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTicker.isEmpty, !cleanText.isEmpty else { return }
-        guard let index = tickerNotes[cleanTicker]?.firstIndex(where: { $0.id == note.id }) else { return }
-        tickerNotes[cleanTicker]?[index].text = cleanText
-        tickerNotes[cleanTicker]?[index].updatedAt = Date()
-        tickerNotes[cleanTicker]?.sort { $0.updatedAt > $1.updatedAt }
+        guard var notes = tickerNotes[cleanTicker],
+              let index = notes.firstIndex(where: { $0.id == id }) else { return }
+        notes[index].title = title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        notes[index].text = cleanText
+        notes[index].url = url?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        notes[index].urlTitle = urlTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        notes[index].category = category?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        notes[index].updatedAt = Date()
+        tickerNotes[cleanTicker] = notes.sorted { $0.updatedAt > $1.updatedAt }
+        saveNow()
     }
 
     func deleteTickerNote(_ note: TickerNote) {
         let cleanTicker = note.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        tickerNotes[cleanTicker]?.removeAll { $0.id == note.id }
+        guard var notes = tickerNotes[cleanTicker] else { return }
+        notes.removeAll { $0.id == note.id }
+        tickerNotes[cleanTicker] = notes
+        saveNow()
     }
 
     func notes(for ticker: String) -> [TickerNote] {
         let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return tickerNotes[cleanTicker] ?? []
+    }
+
+    @available(iOS 26.0, *)
+    func summarizeNotes(for ticker: String) async throws -> String {
+        let notes = notes(for: ticker)
+        guard !notes.isEmpty else { return "No notes to summarize." }
+        guard case .available = SystemLanguageModel.default.availability else {
+            throw NSError(domain: "BudgetModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "Apple Intelligence is not available on this device."])
+        }
+
+        let notesText = notes.enumerated().map { i, note in
+            var parts: [String] = []
+            if let title = note.title { parts.append("Title: \(title)") }
+            parts.append("Note: \(note.text)")
+            if let url = note.url { parts.append("URL: \(url)") }
+            if let category = note.category { parts.append("Category: \(category)") }
+            return "\(i+1). " + parts.joined(separator: "\n   ")
+        }.joined(separator: "\n\n")
+
+        let session = LanguageModelSession(instructions: """
+        You are a concise investment research assistant. Create a true synthesis of the user's ticker notes, not a note-by-note rewrite.
+        Return only 3-5 markdown bullets.
+        Combine duplicate points.
+        Focus on the investment thesis, material risks, catalysts, and open questions.
+        Do not include an introduction, conclusion, or source list.
+        """)
+        let response = try await session.respond(to: """
+        Summarize these notes about stock \(ticker.uppercased()).
+        Output only 3-5 concise markdown bullets:
+
+        \(notesText)
+        """)
+        return response.content
     }
 
     func watchlistAlertSettings(for ticker: String) -> WatchlistAlertSettings {
@@ -1909,6 +2094,27 @@ class BudgetModel: ObservableObject {
         applyBalanceImpact(for: removedExpense, multiplier: -1)
     }
 
+    func addCashTransfer(_ transfer: CashTransfer) {
+        guard canApplyCashTransfer(transfer) else { return }
+        cashTransfers.append(transfer)
+        applyBalanceImpact(for: transfer, multiplier: 1)
+    }
+
+    func updateCashTransfer(_ updatedTransfer: CashTransfer) {
+        guard canApplyCashTransfer(updatedTransfer),
+              let index = cashTransfers.firstIndex(where: { $0.id == updatedTransfer.id }) else { return }
+        let previousTransfer = cashTransfers[index]
+        applyBalanceImpact(for: previousTransfer, multiplier: -1)
+        cashTransfers[index] = updatedTransfer
+        applyBalanceImpact(for: updatedTransfer, multiplier: 1)
+    }
+
+    func deleteCashTransfer(id: UUID) {
+        guard let index = cashTransfers.firstIndex(where: { $0.id == id }) else { return }
+        let removedTransfer = cashTransfers.remove(at: index)
+        applyBalanceImpact(for: removedTransfer, multiplier: -1)
+    }
+
     func removeExpenses(for categoryId: UUID) {
         let removedExpenses = expenses.filter { $0.categoryId == categoryId }
         expenses.removeAll { $0.categoryId == categoryId }
@@ -1921,7 +2127,7 @@ class BudgetModel: ObservableObject {
         let normalizedName = normalizedAccountName(account.name)
         guard !normalizedName.isEmpty else { return 0 }
         return expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(from: expense.note),
+            if let paidCard = creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
@@ -1932,17 +2138,15 @@ class BudgetModel: ObservableObject {
     }
 
     func isCreditCardPayment(_ expense: Expense) -> Bool {
-        creditCardPaymentTarget(from: expense.note) != nil
+        creditCardPaymentTarget(for: expense) != nil
     }
 
-    func creditCardPaymentTarget(from note: String) -> String? {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("[CC_PAYMENT:") else { return nil }
-        guard let endIndex = trimmed.firstIndex(of: "]") else { return nil }
-        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
-        guard startIndex < endIndex else { return nil }
-        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return accountName.isEmpty ? nil : accountName
+    func creditCardPaymentTarget(for expense: Expense) -> String? {
+        if let target = expense.creditCardPaymentTarget?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !target.isEmpty {
+            return target
+        }
+        return creditCardPaymentTarget(from: expense.note)
     }
 
     func applyMonthlyAllocations(for date: Date) {
@@ -2097,6 +2301,19 @@ class BudgetModel: ObservableObject {
         applyBankAccountDelta(named: expense.paymentAccount, delta: -expense.amount * multiplier)
     }
 
+    private func applyBalanceImpact(for transfer: CashTransfer, multiplier: Double) {
+        applyBankAccountDelta(named: transfer.fromAccountName, delta: -transfer.amount * multiplier)
+        applyBankAccountDelta(named: transfer.toAccountName, delta: transfer.amount * multiplier)
+    }
+
+    private func canApplyCashTransfer(_ transfer: CashTransfer) -> Bool {
+        let from = normalizedAccountName(transfer.fromAccountName)
+        let to = normalizedAccountName(transfer.toAccountName)
+        guard transfer.amount > 0, !from.isEmpty, !to.isEmpty, from != to else { return false }
+        let availableAccounts = Set(bankAccounts.map { normalizedAccountName($0.name) })
+        return availableAccounts.contains(from) && availableAccounts.contains(to)
+    }
+
     private func applyBankAccountDelta(named accountName: String, delta: Double) {
         let normalized = normalizedAccountName(accountName)
         guard !normalized.isEmpty else { return }
@@ -2106,5 +2323,17 @@ class BudgetModel: ObservableObject {
 
     private func normalizedAccountName(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:"),
+              let endIndex = trimmed.firstIndex(of: "]") else {
+            return nil
+        }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
     }
 }

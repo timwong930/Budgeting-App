@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BNC0000E2F1B60000082AFEF /* BudgetNotificationContentExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -17,6 +18,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = A1B2C3D92F1B518D0082AFEF;
 			remoteInfo = BudgetingWidgets;
+		};
+		BNC000102F1B60000082AFEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1BAFE9342F1B518D0082AFEF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BNC000092F1B60000082AFEF;
+			remoteInfo = BudgetNotificationContentExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -28,6 +36,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed Foundation Extensions */,
+				BNC0000E2F1B60000082AFEF /* BudgetNotificationContentExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -37,6 +46,7 @@
 /* Begin PBXFileReference section */
 		1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgeting App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetingWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetNotificationContentExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -48,6 +58,11 @@
 		A1B2C3D52F1B518D0082AFEF /* BudgetingWidgets */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = BudgetingWidgets;
+			sourceTree = "<group>";
+		};
+		BNC000052F1B60000082AFEF /* BudgetNotificationContentExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BudgetNotificationContentExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -67,6 +82,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BNC0000C2F1B60000082AFEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -75,6 +97,7 @@
 			children = (
 				1BAFE93E2F1B518D0082AFEF /* Budgeting App */,
 				A1B2C3D52F1B518D0082AFEF /* BudgetingWidgets */,
+				BNC000052F1B60000082AFEF /* BudgetNotificationContentExtension */,
 				1BAFE93D2F1B518D0082AFEF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -84,6 +107,7 @@
 			children = (
 				1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */,
 				A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */,
+				BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -104,6 +128,7 @@
 			);
 			dependencies = (
 				A1B2C3DF2F1B518D0082AFEF /* PBXTargetDependency */,
+				BNC0000F2F1B60000082AFEF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1BAFE93E2F1B518D0082AFEF /* Budgeting App */,
@@ -137,6 +162,28 @@
 			productReference = A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		BNC000092F1B60000082AFEF /* BudgetNotificationContentExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BNC000132F1B60000082AFEF /* Build configuration list for PBXNativeTarget "BudgetNotificationContentExtension" */;
+			buildPhases = (
+				BNC0000B2F1B60000082AFEF /* Sources */,
+				BNC0000C2F1B60000082AFEF /* Frameworks */,
+				BNC0000A2F1B60000082AFEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				BNC000052F1B60000082AFEF /* BudgetNotificationContentExtension */,
+			);
+			name = BudgetNotificationContentExtension;
+			packageProductDependencies = (
+			);
+			productName = BudgetNotificationContentExtension;
+			productReference = BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -148,6 +195,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					1BAFE93B2F1B518D0082AFEF = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					BNC000092F1B60000082AFEF = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -168,6 +218,7 @@
 			targets = (
 				1BAFE93B2F1B518D0082AFEF /* Budgeting App */,
 				A1B2C3D92F1B518D0082AFEF /* BudgetingWidgets */,
+				BNC000092F1B60000082AFEF /* BudgetNotificationContentExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -181,6 +232,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A1B2C3DA2F1B518D0082AFEF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BNC0000A2F1B60000082AFEF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -204,6 +262,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BNC0000B2F1B60000082AFEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -211,6 +276,11 @@
 			isa = PBXTargetDependency;
 			target = A1B2C3D92F1B518D0082AFEF /* BudgetingWidgets */;
 			targetProxy = A1B2C3E02F1B518D0082AFEF /* PBXContainerItemProxy */;
+		};
+		BNC0000F2F1B60000082AFEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BNC000092F1B60000082AFEF /* BudgetNotificationContentExtension */;
+			targetProxy = BNC000102F1B60000082AFEF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -414,6 +484,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = BudgetingWidgets/BudgetingWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -442,6 +513,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = BudgetingWidgets/BudgetingWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -456,6 +528,60 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "Timothy-Wong.Budgeting-App.BudgetingWidgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BNC000112F1B60000082AFEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MVL45M2MW6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BudgetNotificationContentExtension-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Timothy-Wong.Budgeting-App.NotificationContent";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BNC000122F1B60000082AFEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MVL45M2MW6;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BudgetNotificationContentExtension-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Timothy-Wong.Budgeting-App.NotificationContent";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -492,6 +618,15 @@
 			buildConfigurations = (
 				A1B2C3E12F1B518D0082AFEF /* Debug */,
 				A1B2C3E22F1B518D0082AFEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BNC000132F1B60000082AFEF /* Build configuration list for PBXNativeTarget "BudgetNotificationContentExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BNC000112F1B60000082AFEF /* Debug */,
+				BNC000122F1B60000082AFEF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

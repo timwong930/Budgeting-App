@@ -2,8 +2,8 @@ import SwiftUI
 import Charts
 
 private enum HoldingsViewMode: String, CaseIterable, Identifiable {
-    case minimized = "Minimized"
-    case full = "Full"
+    case cards = "Cards"
+    case classic = "Classic"
     var id: String { rawValue }
 }
 
@@ -104,7 +104,7 @@ struct MarginDashboardView: View {
     @Binding var showHistory: Bool
     @Binding var showManualHolding: Bool
 
-    @AppStorage("margin.holdingsViewMode") private var holdingsViewMode: HoldingsViewMode = .full
+    @AppStorage("margin.holdingsViewMode") private var holdingsViewMode: HoldingsViewMode = .cards
     @State private var isRefreshingPrices = false
     @State private var selectedHolding: PortfolioHolding?
     @AppStorage("margin.selectedNetWorthRange") private var selectedNetWorthRange: NetWorthRange = .threeMonths
@@ -121,6 +121,18 @@ struct MarginDashboardView: View {
 
     private let marketDataService = MarketDataService()
     private let drawdowns: [Double] = [0.20, 0.35, 0.50]
+
+    private var holdingsGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 50), spacing: 4),
+            GridItem(.flexible(minimum: 44), spacing: 8, alignment: .trailing),
+            GridItem(.flexible(minimum: 50), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 55), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 36), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 36), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 55), spacing: 0, alignment: .trailing),
+        ]
+    }
 
     private var displayHoldings: [PortfolioHolding] {
         let filtered = budget.holdings.filter { holding in
@@ -500,14 +512,17 @@ struct MarginDashboardView: View {
     private var titleHeader: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.title3)
-                .foregroundStyle(.primary)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(CuanTheme.primary)
+                .frame(width: 34, height: 34)
+                .background(CuanTheme.elevatedCard, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text("Margin Dashboard")
+                Text("Portfolio")
                     .font(.title2.weight(.bold))
-                Text("Portfolio, dividends, margin, and safety.")
+                    .foregroundStyle(CuanTheme.text)
+                Text("Holdings, dividends, margin, and safety.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(CuanTheme.muted)
             }
             Spacer()
             Button {
@@ -515,9 +530,9 @@ struct MarginDashboardView: View {
             } label: {
                 Image(systemName: "gearshape")
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(CuanTheme.text)
                     .frame(width: 36, height: 36)
-                    .background(.thinMaterial, in: Circle())
+                    .background(CuanTheme.elevatedCard, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Margin settings")
@@ -531,34 +546,35 @@ struct MarginDashboardView: View {
         let monthsUntilFreeLimitText = monthsUntilFreeLimit.formatted(.number.precision(.fractionLength(1)))
 
         return VStack(spacing: 14) {
-            GlassCard {
-                VStack(alignment: .leading, spacing: 14) {
+            CuanCard(padding: 14) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label("Projected Portfolio", systemImage: "arrow.up.forward")
-                                .font(.headline)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("Total Portfolio", systemImage: "arrow.up.forward")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(CuanTheme.text)
                             Text("Net value after margin")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.caption2)
+                                .foregroundStyle(CuanTheme.muted)
                         }
                         Spacer()
                         Text(netWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(netWorthDelta >= 0 ? .green : .pink)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background((netWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(netWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background((netWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss).opacity(0.12), in: Capsule())
                     }
 
                     Text(netPortfolioValue, format: .currency(code: "USD"))
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(netPortfolioValue < 0 ? Color.pink : Color.primary)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(CuanTheme.text)
                         .minimumScaleFactor(0.65)
                         .lineLimit(1)
 
                     Text("Gross \(grossText)  Margin \(marginText)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(CuanTheme.muted)
 
                     marginProgressStrip(
                         title: "Personal cap",
@@ -569,15 +585,15 @@ struct MarginDashboardView: View {
                 }
             }
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                 marginInsightTile(title: "Monthly Income", value: monthlyDividends, subtitle: "portfolio dividends", tint: .green, systemImage: "banknote.fill")
                 marginInsightTile(title: "Interest", value: max(monthlyInterest, monthToDateMarginInterest), subtitle: "monthly cost", tint: .orange, systemImage: "percent")
                 marginInsightTile(title: "Free Limit Left", value: interestFreeMarginRemaining, subtitle: "\(monthsUntilFreeLimitText) months", tint: .mint, systemImage: "shield.fill")
                 marginInsightTile(title: "True Spread", value: trueMonthlySpread, subtitle: "dividends - bills - interest", tint: trueMonthlySpread >= 0 ? .green : .pink, systemImage: "arrow.left.arrow.right")
             }
 
-            GlassCard {
-                VStack(alignment: .leading, spacing: 14) {
+            CuanCard(padding: 14) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Label("Income vs Costs", systemImage: "arrow.left.arrow.right")
                             .font(.headline)
@@ -602,11 +618,12 @@ struct MarginDashboardView: View {
     }
 
     private var portfolioSnapshotCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Portfolio Snapshot")
                         .font(.headline)
+                        .foregroundStyle(CuanTheme.text)
                     Spacer()
                     Button("View Details") { showSnapshotDetails = true }
                         .buttonStyle(.bordered)
@@ -623,33 +640,29 @@ struct MarginDashboardView: View {
     }
 
     private var holdingsCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Holdings")
                         .font(.headline)
+                        .foregroundStyle(CuanTheme.text)
                     Spacer()
                     Button("Refresh Price") {
                         Task { await refreshPrices() }
                     }
-                        .buttonStyle(.bordered)
-                        .disabled(isRefreshingPrices)
+                    .buttonStyle(.bordered)
+                    .disabled(isRefreshingPrices)
                 }
 
                 if isRefreshingPrices {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Refreshing \(refreshCurrentTicker)...")
-                            Spacer()
-                            Text("\(refreshProgressCompleted)/\(refreshProgressTotal)")
-                                .fontWeight(.semibold)
-                        }
-                        .font(.caption)
-                        ProgressView(
-                            value: Double(refreshProgressCompleted),
-                            total: Double(max(refreshProgressTotal, 1))
-                        )
+                    VStack(spacing: 4) {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                        Text("Refreshing \(refreshCurrentTicker) (\(refreshProgressCompleted) of \(refreshProgressTotal))...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    .padding(.vertical, 4)
                 }
 
                 Picker("Holdings View", selection: $holdingsViewMode) {
@@ -668,102 +681,244 @@ struct MarginDashboardView: View {
                 }
 
                 if budget.holdings.isEmpty {
-                    Text("No holdings yet. Use + to add investment or manual holding.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        Text("No holdings yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            Button {
+                                showAddInvestment = true
+                            } label: {
+                                Label("Add Investment", systemImage: "plus.circle")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            Button {
+                                showManualHolding = true
+                            } label: {
+                                Label("Manual Holding", systemImage: "plus.circle")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                 } else if displayHoldings.isEmpty {
                     Text("No holdings match the current filter.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    HStack {
-                        Text("Ticker")
-                        Spacer()
-                        Text("Value")
-                        Spacer()
-                        Text("Monthly")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                    ForEach(displayHoldings) { holding in
-                        let marketValue = holding.shares * resolvedPrice(for: holding)
-                        let totalCost = holding.shares * holding.averageCost
-                        let annualIncome = holding.shares * holding.annualDividendPerShare
-                        let monthlyIncome = annualIncome / 12.0
-                        let allocation = allocation(for: holding)
-                        let unrealized = marketValue - totalCost
-                        Button {
-                            selectedHolding = holding
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(holding.ticker)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(color(for: holding.assetType))
-                                    Spacer()
-                                    Text(marketValue, format: .currency(code: "USD"))
-                                        .fontWeight(.semibold)
-                                    Spacer()
-                                    Text(monthlyIncome, format: .currency(code: "USD"))
-                                        .fontWeight(.semibold)
-                                }
-                                HStack {
-                                    Text("\(holding.shares, format: .number.precision(.fractionLength(0...4))) shares")
-                                    Spacer()
-                                    Text(holding.assetType.rawValue)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 2)
-                                        .foregroundStyle(color(for: holding.assetType))
-                                        .background(color(for: holding.assetType).opacity(0.16), in: Capsule())
-                                    Spacer()
-                                    Text("Alloc \(allocation, format: .percent.precision(.fractionLength(1)))")
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                if holdingsViewMode == .full {
-                                    HStack {
-                                        Text("Monthly \(monthlyIncome, format: .currency(code: "USD"))")
-                                        Spacer()
-                                        Text("Yield \(currentYield(for: holding), format: .percent.precision(.fractionLength(2)))")
-                                        Spacer()
-                                        Text("Unrealized \(unrealized, format: .currency(code: "USD"))")
-                                            .foregroundStyle(unrealized >= 0 ? .green : .red)
-                                    }
-                                    .font(.caption)
-                                }
+                    if holdingsViewMode == .cards {
+                        VStack(spacing: 10) {
+                            ForEach(displayHoldings) { holding in
+                                holdingCardRow(holding)
                             }
-                            .padding(8)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                    } else {
+                        classicHoldingsRows
                     }
                 }
 
                 Divider()
-                metricRow("Portfolio Monthly Income", monthlyDividends)
-                metricRow("Portfolio Annual Income", annualDividendsFromHoldings)
+                HStack {
+                    Text("Portfolio Monthly Income")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(monthlyDividends, format: .currency(code: "USD"))
+                        .font(.caption.weight(.semibold))
+                }
+                .padding(.vertical, 2)
+                HStack {
+                    Text("Portfolio Annual Income")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(annualDividendsFromHoldings, format: .currency(code: "USD"))
+                        .font(.caption.weight(.semibold))
+                }
+                .padding(.vertical, 2)
             }
         }
     }
 
+    private var classicHoldingsRows: some View {
+        VStack(spacing: 0) {
+            LazyVGrid(columns: holdingsGridColumns, spacing: 0) {
+                Text("Ticker")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Shares").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                Text("Price").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                Text("Value").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                Text("Alloc").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                Text("Yield").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                Text("P&L").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+
+            Divider()
+
+            ForEach(displayHoldings) { holding in
+                classicHoldingRow(holding)
+                if holding.id != displayHoldings.last?.id {
+                    Divider()
+                }
+            }
+        }
+    }
+
+    private func classicHoldingRow(_ holding: PortfolioHolding) -> some View {
+        let price = resolvedPrice(for: holding)
+        let marketValue = holding.shares * price
+        let totalCost = holding.shares * holding.averageCost
+        let allocationValue = allocation(for: holding)
+        let yieldValue = currentYield(for: holding)
+        let unrealized = marketValue - totalCost
+
+        return Button {
+            selectedHolding = holding
+        } label: {
+            LazyVGrid(columns: holdingsGridColumns, spacing: 0) {
+                Text(holding.ticker)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color(for: holding.assetType))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(holding.shares, format: .number.precision(.fractionLength(2)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(price, format: .currency(code: "USD").precision(.fractionLength(2)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Text(marketValue, format: .currency(code: "USD").precision(.fractionLength(0)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Text(allocationValue, format: .percent.precision(.fractionLength(1)))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(yieldValue, format: .percent.precision(.fractionLength(1)))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(unrealized, format: .currency(code: "USD").precision(.fractionLength(0)))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(unrealized >= 0 ? .green : .red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func holdingCardRow(_ holding: PortfolioHolding) -> some View {
+        let ticker = holding.ticker.uppercased()
+        let price = resolvedPrice(for: holding)
+        let marketValue = holding.shares * price
+        let totalCost = holding.shares * holding.averageCost
+        let allocationValue = allocation(for: holding)
+        let yieldValue = currentYield(for: holding)
+        let unrealized = marketValue - totalCost
+        let snapshot = holdingQuoteSnapshot(for: holding)
+        let change = CuanMarketChangeDisplay(change: snapshot.change, percentChange: snapshot.percentChange)
+        let tint = snapshot.percentChange == 0 ? color(for: holding.assetType) : CuanTheme.changeColor(for: change.direction)
+        let history = holdingPriceHistory[ticker]?.map(\.close) ?? compactSessionPrices(from: snapshot)
+
+        return Button {
+            selectedHolding = holding
+        } label: {
+            VStack(spacing: 10) {
+                HStack(spacing: 11) {
+                    CuanTickerAvatar(symbol: ticker, tint: tint)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ticker)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(CuanTheme.text)
+                        Text(holding.assetType.rawValue)
+                            .font(.caption2)
+                            .foregroundStyle(CuanTheme.muted)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    CuanSparkline(values: history, tint: tint)
+                        .frame(width: 64)
+
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(marketValue, format: .currency(code: "USD").precision(.fractionLength(0)))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(CuanTheme.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text(unrealized, format: .currency(code: "USD").precision(.fractionLength(0)))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(unrealized >= 0 ? CuanTheme.gain : CuanTheme.loss)
+                            .lineLimit(1)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    holdingMiniMetric("Shares", value: holding.shares.formatted(.number.precision(.fractionLength(2))))
+                    holdingMiniMetric("Price", value: price.formatted(.currency(code: "USD").precision(.fractionLength(2))))
+                    holdingMiniMetric("Alloc", value: allocationValue.formatted(.percent.precision(.fractionLength(1))))
+                    holdingMiniMetric("Yield", value: yieldValue.formatted(.percent.precision(.fractionLength(1))))
+                }
+            }
+            .padding(12)
+            .background(CuanTheme.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func holdingMiniMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(CuanTheme.muted)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CuanTheme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var netWorthChartCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "wallet.pass.fill")
                         .font(.headline)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(CuanTheme.primary)
                         .frame(width: 38, height: 38)
-                        .background(Color.purple.opacity(0.16), in: Circle())
+                        .background(CuanTheme.primary.opacity(0.14), in: Circle())
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Portfolio Net Worth")
                             .font(.headline)
+                            .foregroundStyle(CuanTheme.text)
                         Text(netPortfolioValue, format: .currency(code: "USD"))
                             .font(.system(size: 40, weight: .bold, design: .rounded))
-                            .foregroundStyle(netPortfolioValue < 0 ? Color.pink : Color.primary)
+                            .foregroundStyle(netPortfolioValue < 0 ? CuanTheme.loss : CuanTheme.text)
                             .minimumScaleFactor(0.65)
                             .lineLimit(1)
                     }
@@ -771,18 +926,18 @@ struct MarginDashboardView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(netWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(netWorthDelta >= 0 ? .green : .pink)
+                            .foregroundStyle(netWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background((netWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
+                            .background((netWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss).opacity(0.14), in: Capsule())
                         if let latestHoldingsUpdate {
                             Text("Updated \(latestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(CuanTheme.muted)
                         } else {
                             Text("Updated: --")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(CuanTheme.muted)
                         }
                     }
                 }
@@ -791,7 +946,7 @@ struct MarginDashboardView: View {
                 if points.count < 2 {
                     Text("Add more portfolio activity over time to see your trend.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(CuanTheme.muted)
                 } else {
                     Chart(points) { point in
                         AreaMark(
@@ -801,7 +956,7 @@ struct MarginDashboardView: View {
                         .interpolationMethod(.catmullRom)
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [Color.pink.opacity(0.24), Color.pink.opacity(0.02)],
+                                colors: [CuanTheme.primary.opacity(0.24), CuanTheme.primary.opacity(0.02)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -812,7 +967,7 @@ struct MarginDashboardView: View {
                             y: .value("Portfolio Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(CuanTheme.primary)
                         .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
                         LineMark(
@@ -820,7 +975,7 @@ struct MarginDashboardView: View {
                             y: .value("Gross Portfolio", point.grossValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.green.opacity(0.68))
+                        .foregroundStyle(CuanTheme.gain.opacity(0.68))
                         .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
                         if let selectedNetWorthPoint {
@@ -830,9 +985,10 @@ struct MarginDashboardView: View {
                                 x: .value("Date", selectedNetWorthPoint.date),
                                 y: .value("Portfolio Net Worth", selectedNetWorthPoint.netValue)
                             )
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(CuanTheme.primary)
                         }
                     }
+                    .chartPlotStyle { $0.clipped() }
                     .chartYAxis {
                         AxisMarks(position: .leading) { value in
                             AxisGridLine().foregroundStyle(Color.secondary.opacity(0.12))
@@ -918,11 +1074,11 @@ struct MarginDashboardView: View {
 
                     HStack(spacing: 14) {
                         Label("Portfolio Net Worth", systemImage: "line.diagonal")
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(CuanTheme.primary)
                         Label("Gross Portfolio", systemImage: "line.diagonal")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(CuanTheme.gain)
                         Text("\(netWorthDelta >= 0 ? "+" : "")\(netWorthDelta, format: .currency(code: "USD")) in range")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(CuanTheme.muted)
                     }
                     .font(.caption)
                 }
@@ -931,44 +1087,18 @@ struct MarginDashboardView: View {
     }
 
     private var marginNetWorthRangeSelector: some View {
-        HStack(spacing: 8) {
-            ForEach(NetWorthRange.allCases) { range in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        selectedNetWorthRange = range
-                    }
-                } label: {
-                    Text(range.title)
-                        .font(.caption.weight(.bold))
-                        .kerning(0.4)
-                        .textCase(.uppercase)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .foregroundStyle(selectedNetWorthRange == range ? .white : .primary)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(selectedNetWorthRange == range ? Color.accentColor : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
+        CuanSegmentedRange(values: NetWorthRange.allCases, selection: $selectedNetWorthRange) { range in
+            Text(range.title)
+                .frame(maxWidth: .infinity)
         }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-        )
     }
 
     private var dividendForecastCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Dividend Forecast")
                     .font(.headline)
+                    .foregroundStyle(CuanTheme.text)
                 metricRow("Expected dividends this week", expectedDividendsThisWeek)
                 metricRow("Expected dividends this month", expectedDividendsThisMonth)
                 metricRow("Projected annual dividends", annualDividendsFromHoldings)
@@ -1021,11 +1151,12 @@ struct MarginDashboardView: View {
     }
 
     private var billTrackingCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Bill Tracking")
                         .font(.headline)
+                        .foregroundStyle(CuanTheme.text)
                     Spacer()
                     Button("Edit", action: { showElectricBill = true })
                         .buttonStyle(.bordered)
@@ -1039,10 +1170,11 @@ struct MarginDashboardView: View {
     }
 
     private var safetyCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Safety Dashboard")
                     .font(.headline)
+                    .foregroundStyle(CuanTheme.text)
 
                 HStack {
                     Label("Status", systemImage: "shield.lefthalf.filled")
@@ -1486,11 +1618,12 @@ struct MarginDashboardView: View {
     }
 
     private var experimentStatusCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Experiment Status")
                         .font(.headline)
+                        .foregroundStyle(CuanTheme.text)
                     Spacer()
                     Text(experimentStatus.rawValue)
                         .font(.subheadline.weight(.semibold))
@@ -1510,10 +1643,11 @@ struct MarginDashboardView: View {
     }
 
     private var monthlySummaryCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Monthly Summary")
                     .font(.headline)
+                    .foregroundStyle(CuanTheme.text)
                 metricRow("Contributions Added", monthToDateContributions)
                 metricRow("Additional Investments", monthToDateBuys)
                 metricRow("Bills Paid by Margin", monthToDateBills)
@@ -1528,10 +1662,11 @@ struct MarginDashboardView: View {
     }
 
     private var monthlyIncomeVsInterestHistoryCard: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Monthly Dividends vs Margin Interest")
                     .font(.headline)
+                    .foregroundStyle(CuanTheme.text)
 
                 let points = monthlyIncomeCostHistory
                 if points.isEmpty {
@@ -1691,8 +1826,46 @@ private struct HoldingTickerDetailView: View {
     @State private var showEditHolding = false
     @State private var selectedTransaction: PortfolioTransaction?
     @State private var noteDraft = ""
-    @State private var editingNote: TickerNote?
-    @State private var editingNoteText = ""
+    @State private var editingNoteDraft: TickerNoteEditDraft?
+    @State private var notePendingDelete: TickerNote?
+    @State private var showAddNoteSheet = false
+    @State private var addNoteTitle = ""
+    @State private var addNoteText = ""
+    @State private var addNoteURL = ""
+    @State private var addNoteURLTitle = ""
+    @State private var addNoteCategory = ""
+    @State private var noteSortOption: TickerNoteSortOption = .newest
+    @State private var expandedNoteIDs: Set<UUID> = []
+    @State private var summaryText: String?
+    @State private var isSummarizing = false
+
+    private enum TickerNoteSortOption: String, CaseIterable, Identifiable {
+        case newest = "Newest"
+        case oldest = "Oldest"
+        case category = "Category"
+
+        var id: String { rawValue }
+    }
+
+    private struct TickerNoteEditDraft: Identifiable {
+        let id: UUID
+        let ticker: String
+        var title: String
+        var text: String
+        var url: String
+        var urlTitle: String
+        var category: String
+
+        init(note: TickerNote) {
+            id = note.id
+            ticker = note.ticker
+            title = note.title ?? ""
+            text = note.text
+            url = note.url ?? ""
+            urlTitle = note.urlTitle ?? ""
+            category = note.category ?? ""
+        }
+    }
 
     private var holding: PortfolioHolding? {
         budget.holdings.first(where: { $0.id == holdingID })
@@ -1704,6 +1877,24 @@ private struct HoldingTickerDetailView: View {
 
     private var tickerNotes: [TickerNote] {
         budget.notes(for: cleanTicker)
+    }
+
+    private var sortedTickerNotes: [TickerNote] {
+        switch noteSortOption {
+        case .newest:
+            return tickerNotes.sorted { $0.updatedAt > $1.updatedAt }
+        case .oldest:
+            return tickerNotes.sorted { $0.updatedAt < $1.updatedAt }
+        case .category:
+            return tickerNotes.sorted { lhs, rhs in
+                let leftCategory = lhs.category ?? "Uncategorized"
+                let rightCategory = rhs.category ?? "Uncategorized"
+                if leftCategory.localizedCaseInsensitiveCompare(rightCategory) == .orderedSame {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return leftCategory.localizedCaseInsensitiveCompare(rightCategory) == .orderedAscending
+            }
+        }
     }
 
     private var lastUpdated: Date? {
@@ -1885,27 +2076,99 @@ private struct HoldingTickerDetailView: View {
                     transactionID: transaction.id
                 )
             }
-            .sheet(item: $editingNote) { note in
+            .sheet(item: $editingNoteDraft) { draft in
+                TickerNoteEditorView(
+                    initialDraft: draft,
+                    onCancel: {
+                        editingNoteDraft = nil
+                    },
+                    onSave: { updatedDraft in
+                        budget.updateTickerNote(
+                            id: updatedDraft.id,
+                            ticker: updatedDraft.ticker,
+                            title: updatedDraft.title.nilIfEmpty,
+                            text: updatedDraft.text,
+                            url: updatedDraft.url.nilIfEmpty,
+                            urlTitle: updatedDraft.urlTitle.nilIfEmpty,
+                            category: updatedDraft.category.nilIfEmpty
+                        )
+                        editingNoteDraft = nil
+                    }
+                )
+            }
+            .sheet(isPresented: $showAddNoteSheet) {
                 NavigationStack {
                     Form {
-                        TextEditor(text: $editingNoteText)
-                            .frame(minHeight: 160)
+                        TextField("Title", text: $addNoteTitle)
+                        TextEditor(text: $addNoteText)
+                            .frame(minHeight: 140)
+                        TextField("URL (e.g. article link)", text: $addNoteURL)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        TextField("URL Label", text: $addNoteURLTitle)
+                        Picker("Category", selection: $addNoteCategory) {
+                            Text("None").tag("")
+                            ForEach(noteCategories, id: \.self) { category in
+                                Text(category).tag(category)
+                            }
+                        }
                     }
-                    .navigationTitle("Edit Note")
+                    .navigationTitle("Add Note")
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { editingNote = nil }
+                            Button("Cancel") {
+                                showAddNoteSheet = false
+                                resetHoldingAddNoteFields()
+                            }
                         }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") {
-                                budget.updateTickerNote(note, text: editingNoteText)
-                                editingNote = nil
+                            Button("Add") {
+                                budget.addTickerNote(
+                                    ticker: cleanTicker,
+                                    title: addNoteTitle.nilIfEmpty,
+                                    text: addNoteText,
+                                    url: addNoteURL.nilIfEmpty,
+                                    urlTitle: addNoteURLTitle.nilIfEmpty,
+                                    category: addNoteCategory.nilIfEmpty
+                                )
+                                showAddNoteSheet = false
+                                resetHoldingAddNoteFields()
                             }
+                            .disabled(addNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                 }
             }
+            .confirmationDialog(
+                "Delete this note?",
+                isPresented: Binding(
+                    get: { notePendingDelete != nil },
+                    set: { if !$0 { notePendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Note", role: .destructive) {
+                    if let notePendingDelete {
+                        budget.deleteTickerNote(notePendingDelete)
+                    }
+                    notePendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    notePendingDelete = nil
+                }
+            } message: {
+                Text("This removes the note from the ticker.")
+            }
         }
+    }
+
+    private func resetHoldingAddNoteFields() {
+        addNoteTitle = ""
+        addNoteText = ""
+        addNoteURL = ""
+        addNoteURLTitle = ""
+        addNoteCategory = ""
     }
 
     private var holdingNotesSection: some View {
@@ -1914,6 +2177,25 @@ private struct HoldingTickerDetailView: View {
                 Label("Notes", systemImage: "note.text")
                     .font(.headline)
                 Spacer()
+                if !tickerNotes.isEmpty {
+                    Menu {
+                        ForEach(TickerNoteSortOption.allCases) { option in
+                            Button {
+                                noteSortOption = option
+                            } label: {
+                                if noteSortOption == option {
+                                    Label(option.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(option.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(noteSortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Text("\(tickerNotes.count)")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
@@ -1923,7 +2205,7 @@ private struct HoldingTickerDetailView: View {
             }
 
             HStack(alignment: .top, spacing: 8) {
-                TextField("Add note for \(cleanTicker)", text: $noteDraft, axis: .vertical)
+                TextField("Quick note", text: $noteDraft, axis: .vertical)
                     .lineLimit(2...4)
                     .padding(10)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -1939,37 +2221,211 @@ private struct HoldingTickerDetailView: View {
                 .accessibilityLabel("Add note")
             }
 
+            HStack(spacing: 8) {
+                Button {
+                    showAddNoteSheet = true
+                } label: {
+                    Label("Add Detail", systemImage: "plus.square")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+
+                if !tickerNotes.isEmpty {
+                    Button {
+                        Task { await generateHoldingSummary() }
+                    } label: {
+                        if isSummarizing {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Label("Summarize", systemImage: "apple.intelligence")
+                                .font(.caption)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isSummarizing)
+                }
+            }
+
+            if let summaryText {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("AI Summary", systemImage: "apple.intelligence")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    TickerMarkdownText(markdown: summaryText, baseFont: .caption, baseColor: .secondary, spacing: 5)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             if tickerNotes.isEmpty {
                 Text("No notes for \(cleanTicker) yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(tickerNotes) { note in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(note.text)
-                            .font(.subheadline)
-                        HStack {
-                            Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
-                            Spacer()
-                            Button("Edit") {
-                                editingNoteText = note.text
-                                editingNote = note
-                            }
-                            Button(role: .destructive) {
-                                budget.deleteTickerNote(note)
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                        }
+                ForEach(sortedTickerNotes) { note in
+                    noteCard(note)
+                }
+            }
+        }
+    }
+
+    private func noteCard(_ note: TickerNote) -> some View {
+        let isExpanded = expandedNoteIDs.contains(note.id)
+        let isLong = isLongNote(note)
+        return VStack(alignment: .leading, spacing: 8) {
+            if let title = note.title {
+                TickerMarkdownText(markdown: title, spacing: 4, forceHeader1: true)
+            }
+
+            TickerMarkdownText(markdown: note.text, baseFont: .subheadline)
+                .frame(maxHeight: isExpanded || !isLong ? nil : 96, alignment: .top)
+                .clipped()
+
+            if isLong {
+                Button {
+                    toggleNoteExpansion(note.id)
+                } label: {
+                    Text(isExpanded ? "Show Less" : "Show More")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let url = note.url, let destination = noteURL(from: url) {
+                Link(destination: destination) {
+                    Label(note.urlTitle ?? url, systemImage: "link")
                         .font(.caption)
+                        .lineLimit(1)
+                }
+                .tint(.blue)
+            }
+
+            HStack {
+                if let category = note.category {
+                    Text(category)
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+                Spacer()
+                Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    editingNoteDraft = TickerNoteEditDraft(note: note)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.titleAndIcon)
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+
+                Button(role: .destructive) {
+                    notePendingDelete = note
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private func isLongNote(_ note: TickerNote) -> Bool {
+        note.text.count > 220 || note.text.components(separatedBy: .newlines).count > 5
+    }
+
+    private func toggleNoteExpansion(_ id: UUID) {
+        if expandedNoteIDs.contains(id) {
+            expandedNoteIDs.remove(id)
+        } else {
+            expandedNoteIDs.insert(id)
+        }
+    }
+
+    private func noteURL(from text: String) -> URL? {
+        if let url = URL(string: text), url.scheme != nil {
+            return url
+        }
+        return URL(string: "https://\(text)")
+    }
+
+    private func generateHoldingSummary() async {
+        isSummarizing = true
+        summaryText = nil
+        do {
+            if #available(iOS 26.0, *) {
+                summaryText = try await budget.summarizeNotes(for: cleanTicker)
+            } else {
+                summaryText = "Summarization requires iOS 26.0 or later with Apple Intelligence."
+            }
+        } catch {
+            summaryText = "Summary unavailable: \(error.localizedDescription)"
+        }
+        isSummarizing = false
+    }
+
+    private struct TickerNoteEditorView: View {
+        let onCancel: () -> Void
+        let onSave: (TickerNoteEditDraft) -> Void
+        @State private var draft: TickerNoteEditDraft
+
+        init(
+            initialDraft: TickerNoteEditDraft,
+            onCancel: @escaping () -> Void,
+            onSave: @escaping (TickerNoteEditDraft) -> Void
+        ) {
+            self.onCancel = onCancel
+            self.onSave = onSave
+            _draft = State(initialValue: initialDraft)
+        }
+
+        var body: some View {
+            NavigationStack {
+                Form {
+                    TextField("Title", text: $draft.title)
+                    TextEditor(text: $draft.text)
+                        .frame(minHeight: 140)
+                    TextField("URL (e.g. article link)", text: $draft.url)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                    TextField("URL Label", text: $draft.urlTitle)
+                    Picker("Category", selection: $draft.category) {
+                        Text("None").tag("")
+                        ForEach(noteCategories, id: \.self) { category in
+                            Text(category).tag(category)
+                        }
                     }
-                    .padding(10)
-                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                    )
+                }
+                .navigationTitle("Edit Note")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", action: onCancel)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            var cleanDraft = draft
+                            cleanDraft.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            onSave(cleanDraft)
+                        }
+                        .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
             }
         }

@@ -11,6 +11,130 @@ import Charts
 import Combine
 import SafariServices
 
+struct TickerMarkdownText: View {
+    let markdown: String
+    var baseFont: Font = .subheadline
+    var baseColor: Color = .primary
+    var spacing: CGFloat = 6
+    var forceHeader1 = false
+
+    private var lines: [String] {
+        markdown
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                lineView(line, forceHeader: forceHeader1 && index == 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func lineView(_ line: String, forceHeader: Bool) -> some View {
+        if forceHeader {
+            Text(inlineMarkdown(strippedHeading(line)))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(baseColor)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let content = markdownHeading(line, marker: "###") {
+            Text(inlineMarkdown(content))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(baseColor)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let content = markdownHeading(line, marker: "##") {
+            Text(inlineMarkdown(content))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(baseColor)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let content = markdownHeading(line, marker: "#") {
+            Text(inlineMarkdown(content))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(baseColor)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let content = unorderedListContent(line) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•")
+                    .font(baseFont.weight(.semibold))
+                    .foregroundStyle(baseColor)
+                Text(inlineMarkdown(content))
+                    .font(baseFont)
+                    .foregroundStyle(baseColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let item = orderedListContent(line) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(item.marker)
+                    .font(baseFont.weight(.semibold))
+                    .foregroundStyle(baseColor)
+                    .monospacedDigit()
+                Text(inlineMarkdown(item.content))
+                    .font(baseFont)
+                    .foregroundStyle(baseColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if let content = quoteContent(line) {
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.secondary.opacity(0.45))
+                    .frame(width: 3)
+                Text(inlineMarkdown(content))
+                    .font(baseFont.italic())
+                    .foregroundStyle(baseColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text(inlineMarkdown(line))
+                .font(baseFont)
+                .foregroundStyle(baseColor)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func markdownHeading(_ line: String, marker: String) -> String? {
+        let prefix = "\(marker) "
+        guard line.hasPrefix(prefix) else { return nil }
+        return String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func strippedHeading(_ line: String) -> String {
+        for marker in ["### ", "## ", "# "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return line
+    }
+
+    private func unorderedListContent(_ line: String) -> String? {
+        for marker in ["- ", "* "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private func orderedListContent(_ line: String) -> (marker: String, content: String)? {
+        guard let dotIndex = line.firstIndex(of: ".") else { return nil }
+        let number = String(line[..<dotIndex])
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        let contentStart = line.index(after: dotIndex)
+        guard contentStart < line.endIndex, line[contentStart] == " " else { return nil }
+        let content = String(line[line.index(after: contentStart)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return ("\(number).", content)
+    }
+
+    private func quoteContent(_ line: String) -> String? {
+        guard line.hasPrefix("> ") else { return nil }
+        return String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func inlineMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+    }
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var budget = BudgetModel()
@@ -24,6 +148,7 @@ struct ContentView: View {
     @State private var editingSavingsGoal: SavingsGoal?
     @State private var editingExpense: Expense?
     @State private var editingIncome: IncomeEntry?
+    @State private var editingCashTransfer: CashTransfer?
     @State private var editingSavingsEntry: SavingsEntry?
     @State private var showingIncomeHistory = false
     @State private var showingExpenseHistory = false
@@ -40,6 +165,13 @@ struct ContentView: View {
     @State private var summaryExpanded = true
     @State private var logTrendsExpanded = true
     @State private var categorySummaryExpanded = false
+    @State private var planHighlightsExpanded = true
+    @State private var overviewExpanded = true
+    @State private var incomeExpanded = false
+    @State private var budgetBreakdownExpanded = false
+    @State private var recurringChargesExpanded = false
+    @State private var accountBalancesExpanded = false
+    @State private var logTransactionsExpanded = false
     @State private var lastExpenseCategoryId: UUID?
     @State private var lastExpenseSection: BudgetSection = .needs
     @State private var selectedMonth: Date = Date()
@@ -47,13 +179,14 @@ struct ContentView: View {
     @State private var selectedIncomePoint: DailySpend?
     @State private var selectedLogTrend: LogTrend = .spending
     @State private var selectedTrendRange: TrendRange = .monthToDate
-    @State private var budgetPageFocus: BudgetPageFocus = .log
     @State private var selectedCalendarDay: CalendarDaySelection?
+    @State private var selectedCalendarEventList: CalendarDaySelection?
     @State private var visibleCalendarWeekStart: Date?
     @State private var selectedPortfolioTransaction: PortfolioTransaction?
     @State private var editingRecurringPayment: RecurringPayment?
     @State private var showingCreditAccounts = false
     @State private var showingBankAccounts = false
+    @State private var showingAddCashTransfer = false
     @State private var selectedCreditAccount: CreditAccount?
     @State private var showingMarginAddTransaction = false
     @State private var showingMarginAddInvestment = false
@@ -84,8 +217,11 @@ struct ContentView: View {
     @State private var homeWatchlistRows: [HomeWatchlistRow] = []
     @State private var isLoadingHomeWatchlist = false
     @State private var homeWatchlistError: String?
-    @State private var homeWatchlistDraft = ""
     @State private var selectedHomeWatchlistTicker: TickerSelection?
+    @State private var showingWatchlistSearch = false
+    @State private var watchlistSortOption: WatchlistSortOption = .ticker
+    @State private var watchlistSortAscending = true
+    @State private var watchlistFilter: WatchlistFilter = .all
     @State private var selectedWatchlistAlertTicker: TickerSelection?
     @State private var selectedHomeNetWorthRange: HomeNetWorthRange = .threeMonths
     @State private var selectedHomeNetWorthPoint: PortfolioValuePoint?
@@ -131,6 +267,21 @@ struct ContentView: View {
         var id: String { ticker }
     }
 
+    private enum WatchlistSortOption: String, CaseIterable, Identifiable {
+        case ticker = "Ticker"
+        case price = "Price"
+        case changePercent = "Chg %"
+        case changeDollar = "Chg $"
+        var id: String { rawValue }
+    }
+
+    private enum WatchlistFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case gainers = "Gainers"
+        case losers = "Losers"
+        var id: String { rawValue }
+    }
+
     private enum FocusedField: Hashable {
         case income
     }
@@ -163,13 +314,6 @@ struct ContentView: View {
 
     private var appAccent: Color {
         .accentColor
-    }
-
-    private enum BudgetPageFocus: String, CaseIterable, Identifiable {
-        case plan = "Plan"
-        case log = "Log"
-
-        var id: String { rawValue }
     }
 
     private enum HomeNetWorthRange: String, CaseIterable, Identifiable {
@@ -234,6 +378,134 @@ struct ContentView: View {
     private struct CalendarDaySelection: Identifiable {
         let id = UUID()
         let date: Date
+    }
+
+    private struct CalendarDayTransactionsView: View {
+        let date: Date
+        let events: [CalendarEventItem]
+        let onOpen: (CalendarEventItem) -> Void
+        let onMarkPaid: (RecurringPayment, Date) -> Void
+        let onAddTransaction: () -> Void
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(date, format: .dateTime.weekday(.wide).month(.wide).day().year())
+                                .font(.headline)
+                            Text("\(events.count) transaction\(events.count == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 4)
+
+                        if events.isEmpty {
+                            ContentUnavailableView("No Transactions", systemImage: "calendar", description: Text("Nothing is scheduled for this day."))
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 24)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(events) { event in
+                                    calendarTransactionRow(event)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .padding(.bottom, 24)
+                }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .navigationTitle("Transactions")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { dismiss(); onAddTransaction() } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+            }
+        }
+
+        private func calendarTransactionRow(_ event: CalendarEventItem) -> some View {
+            HStack(spacing: 12) {
+                Image(systemName: event.iconName)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(eventColor(event), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(event.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(eventSubtitle(event))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(chipAmountText(for: event))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(event.isIncome ? .green : .primary)
+
+                    if let recurring = event.recurringPayment, !event.isPaid {
+                        Button {
+                            onMarkPaid(recurring, event.date)
+                        } label: {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.green)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Mark \(event.name) paid")
+                    }
+                }
+            }
+            .padding(12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(eventColor(event).opacity(0.22), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture {
+                dismiss()
+                onOpen(event)
+            }
+        }
+
+        private func eventSubtitle(_ event: CalendarEventItem) -> String {
+            if event.isCreditDue { return "Credit card due" }
+            if event.isTransfer { return event.paymentAccount }
+            if event.recurringPayment != nil { return "Recurring" }
+            if !event.paymentAccount.isEmpty { return event.paymentAccount }
+            return event.isIncome ? "Income" : "Expense"
+        }
+
+        private func chipAmountText(for event: CalendarEventItem) -> String {
+            if event.isTransfer {
+                return event.amount.formatted(.currency(code: "USD"))
+            }
+            return "\(event.isIncome ? "+" : "-")\(event.amount.formatted(.currency(code: "USD")))"
+        }
+
+        private func eventColor(_ event: CalendarEventItem) -> Color {
+            if event.isIncome { return .green }
+            if event.isCreditDue { return .orange }
+            return event.tint
+        }
     }
 
     private struct LogTransactionItem: Identifiable {
@@ -444,21 +716,23 @@ struct ContentView: View {
             }
         }
     }
+
+    private var activeTabContent: AnyView {
+        switch selectedTab {
+        case .home:
+            AnyView(homeTab)
+        case .calendar:
+            AnyView(calendarTab)
+        case .budget:
+            AnyView(budgetTab)
+        case .margin:
+            AnyView(marginTab)
+        }
+    }
     
     var body: some View {
         NavigationStack {
-            Group {
-                switch selectedTab {
-                case .home:
-                    homeTab
-                case .calendar:
-                    calendarTab
-                case .budget:
-                    budgetTab
-                case .margin:
-                    marginTab
-                }
-            }
+            activeTabContent
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10)
                     .onChanged { value in
@@ -506,6 +780,8 @@ struct ContentView: View {
                         switch action {
                         case .addCalendarEntry:
                             selectedCalendarDay = CalendarDaySelection(date: visibleCalendarMonth)
+                        case .transferCash:
+                            showingAddCashTransfer = true
                         case .creditCards:
                             showingCreditAccounts = true
                         }
@@ -528,18 +804,18 @@ struct ContentView: View {
                 )
                 .frame(maxWidth: .infinity, alignment: isTabBarMinimized ? .trailing : .center)
                 .padding(.trailing, isTabBarMinimized ? 12 : 0)
-                .padding(.bottom, 8)
+                .padding(.bottom, -16)
             }
             .onAppear {
                 budget.income = budget.income(for: selectedMonth)
                 budget.applyMonthlyAllocations(for: selectedMonth)
                 updateMonthlyData()
                 scheduleBudgetNotifications()
-                BudgetBackgroundRefreshCoordinator.shared.scheduleAppRefresh()
                 if scenePhase == .active {
                     startHoldingsAutoRefreshLoop()
                     startWatchlistAlertLoop()
                 }
+                consumePendingDeepLink()
             }
             .onDisappear {
                 stopHoldingsAutoRefreshLoop()
@@ -554,10 +830,10 @@ struct ContentView: View {
                 if newValue == .active {
                     startHoldingsAutoRefreshLoop()
                     startWatchlistAlertLoop()
+                    consumePendingDeepLink()
                 } else {
                     stopHoldingsAutoRefreshLoop()
                     stopWatchlistAlertLoop()
-                    BudgetBackgroundRefreshCoordinator.shared.scheduleAppRefresh()
                 }
             }
             .onChange(of: budget.income) { _, newValue in
@@ -572,12 +848,6 @@ struct ContentView: View {
             .onChange(of: budget.savingsEntries) { _, _ in
                 updateMonthlyData()
             }
-            .onChange(of: selectedTab) { _, newValue in
-                guard newValue == .home else { return }
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85, blendDuration: 0.1)) {
-                    isTabBarMinimized = false
-                }
-            }
             .onChange(of: budget.watchlistTickers) { _, _ in
                 guard selectedTab == .home else { return }
                 Task { await refreshHomeWatchlist() }
@@ -588,6 +858,9 @@ struct ContentView: View {
             }
             .onReceive(budget.objectWillChange.debounce(for: .milliseconds(800), scheduler: RunLoop.main)) { _ in
                 scheduleBudgetNotifications()
+            }
+            .overlay(alignment: .top) {
+                InAppNotificationOverlay()
             }
         }
         .sheet(isPresented: $showingAddNeedsCategory) {
@@ -619,6 +892,27 @@ struct ContentView: View {
         }
         .sheet(item: $selectedWatchlistAlertTicker) { selection in
             WatchlistAlertSettingsView(budget: budget, ticker: selection.ticker)
+        }
+        .sheet(isPresented: $showingWatchlistSearch) {
+            TickerSearchView(
+                budget: budget,
+                onAdd: { tickers in
+                    for ticker in tickers {
+                        let clean = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        if !budget.watchlistTickers.contains(clean) {
+                            budget.watchlistTickers.append(clean)
+                        }
+                    }
+                    if !tickers.isEmpty {
+                        showingWatchlistSearch = false
+                        Task { await refreshHomeWatchlist() }
+                    }
+                },
+                onSnapshot: { ticker in
+                    showingWatchlistSearch = false
+                    selectedHomeWatchlistTicker = TickerSelection(ticker: ticker.uppercased())
+                }
+            )
         }
         .sheet(isPresented: $showingAddWantsCategory) {
             AddCategoryView(budget: budget, categoryType: .wants, selectedMonth: selectedMonth)
@@ -745,17 +1039,27 @@ struct ContentView: View {
         }
         .sheet(item: $editingIncome) { income in
             EditIncomeView(budget: budget, income: income)
-                .presentationDetents([.large])
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingAddCashTransfer) {
+            CashTransferEditorView(budget: budget, selectedDate: selectedTab == .calendar ? visibleCalendarMonth : selectedMonth)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $editingCashTransfer) { transfer in
+            CashTransferEditorView(budget: budget, selectedDate: transfer.date, existingTransfer: transfer)
+                .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingExpense) { expense in
             EditExpenseView(budget: budget, expense: expense)
-                .presentationDetents([.large])
+                .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $editingSavingsEntry) { entry in
             EditSavingsEntryView(budget: budget, savingsEntry: entry)
-                .presentationDetents([.large])
+                .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedCalendarDay) { selection in
@@ -763,8 +1067,24 @@ struct ContentView: View {
                 budget: budget,
                 selectedDate: selection.date
             )
-            .presentationDetents([.large])
+            .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedCalendarEventList) { selection in
+            CalendarDayTransactionsView(
+                date: selection.date,
+                events: calendarEvents(for: selection.date),
+                onOpen: openCalendarEvent,
+                onMarkPaid: { payment, date in
+                    markRecurringOccurrencePaid(payment, on: date)
+                },
+                onAddTransaction: {
+                    selectedCalendarDay = CalendarDaySelection(date: selection.date)
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.ultraThinMaterial)
         }
         .sheet(item: $editingRecurringPayment) { payment in
             CalendarEntryEditorView(
@@ -902,51 +1222,196 @@ struct ContentView: View {
 
     private var budgetTab: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 12) {
                 pageHeader(
                     title: "Budget Hub",
-                    subtitle: "Plan targets and log activity.",
+                    subtitle: "Snapshot first, details when you need them.",
                     systemImage: "square.grid.2x2"
                 ) {
-                    if budgetPageFocus == .log {
-                        logMonthHeaderSelector
-                    }
+                    logMonthHeaderSelector
                 }
-                Picker("Budget Focus", selection: $budgetPageFocus) {
-                    ForEach(BudgetPageFocus.allCases) { focus in
-                        Text(focus.rawValue).tag(focus)
-                    }
-                }
-                .pickerStyle(.segmented)
 
                 budgetHubSnapshotSection
 
-                if budgetPageFocus == .log {
-                    recurringChargesSection
-                    logTrendsSection
-                    accountBalancesSection
-                    logTransactionsSection
-                } else {
-                    planHighlightsSection
-                    if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
-                        firstTimeTipsSection
-                    }
-                    overviewSection
-                    incomeSection
-                    if budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
-                        nextStepSection
-                    }
-                    budgetBreakdownSection
-                    needsSection
-                    wantsSection
-                    savingsSection
-                    summarySection
+                if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
+                    firstTimeTipsSection
                 }
+
+                budgetSubmenusSection
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 28)
+            .padding(.horizontal, 12)
+            .padding(.top, 22)
             .padding(.bottom, contentBottomPadding)
         }
+    }
+
+    private var budgetSubmenusSection: some View {
+        VStack(spacing: 10) {
+            budgetSubmenuLink(
+                title: "Plan",
+                subtitle: "Income, targets, categories, and savings goals",
+                systemImage: "slider.horizontal.3",
+                tint: .blue,
+                valueLabel: budget.monthlyIncome.formatted(.currency(code: "USD"))
+            ) {
+                budgetPlanSubmenu
+            }
+
+            budgetSubmenuLink(
+                title: "Activity",
+                subtitle: "Recurring charges, trends, and recent transactions",
+                systemImage: "list.bullet.rectangle.portrait",
+                tint: .pink,
+                valueLabel: totalMonthlySpent.formatted(.currency(code: "USD"))
+            ) {
+                budgetActivitySubmenu
+            }
+
+            budgetSubmenuLink(
+                title: "Accounts",
+                subtitle: "Bank balances, credit cards, and portfolio holdings",
+                systemImage: "creditcard.and.123",
+                tint: .cyan,
+                valueLabel: runwayText
+            ) {
+                budgetAccountsSubmenu
+            }
+
+            budgetSubmenuLink(
+                title: "Reports",
+                subtitle: "Breakdowns, category summaries, and month-end totals",
+                systemImage: "chart.pie",
+                tint: .purple,
+                valueLabel: remainingBudgetForMonth.formatted(.currency(code: "USD"))
+            ) {
+                budgetReportsSubmenu
+            }
+        }
+    }
+
+    private func budgetSubmenuLink<Destination: View>(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        tint: Color,
+        valueLabel: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            GlassCard(padding: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: systemImage)
+                        .font(.headline)
+                        .foregroundStyle(tint)
+                        .frame(width: 34, height: 34)
+                        .background(tint.opacity(0.12), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(valueLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: 116, alignment: .trailing)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var budgetPlanSubmenu: some View {
+        budgetSubmenuPage(title: "Plan", subtitle: "Budget setup and monthly targets.", systemImage: "slider.horizontal.3") {
+            planHighlightsSection
+            overviewSection
+            incomeSection
+            if budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
+                nextStepSection
+            }
+            budgetBreakdownSection
+            needsSection
+            wantsSection
+            savingsSection
+        }
+        .onAppear {
+            planHighlightsExpanded = true
+            overviewExpanded = true
+            incomeExpanded = true
+            budgetBreakdownExpanded = true
+        }
+    }
+
+    private var budgetActivitySubmenu: some View {
+        budgetSubmenuPage(title: "Activity", subtitle: "Monthly movement and logged cash flow.", systemImage: "list.bullet.rectangle.portrait") {
+            logMonthHeaderSelector
+            recurringChargesSection
+            logTrendsSection
+            logTransactionsSection
+        }
+        .onAppear {
+            recurringChargesExpanded = true
+            logTrendsExpanded = true
+            logTransactionsExpanded = true
+        }
+    }
+
+    private var budgetAccountsSubmenu: some View {
+        budgetSubmenuPage(title: "Accounts", subtitle: "Balances that feed your budget snapshot.", systemImage: "creditcard.and.123") {
+            accountBalancesSection
+        }
+        .onAppear {
+            accountBalancesExpanded = true
+        }
+    }
+
+    private var budgetReportsSubmenu: some View {
+        budgetSubmenuPage(title: "Reports", subtitle: "Summaries and allocation readouts.", systemImage: "chart.pie") {
+            summarySection
+            categorySummarySection
+            budgetBreakdownSection
+        }
+        .onAppear {
+            summaryExpanded = true
+            categorySummaryExpanded = true
+            budgetBreakdownExpanded = true
+        }
+    }
+
+    private func budgetSubmenuPage<Content: View>(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                pageHeader(title: title, subtitle: subtitle, systemImage: systemImage)
+                content()
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 18)
+            .padding(.bottom, contentBottomPadding)
+        }
+        .background(backgroundView)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var calendarTab: some View {
@@ -957,17 +1422,44 @@ struct ContentView: View {
                     subtitle: "Recurring and one-time cash flow.",
                     systemImage: "calendar"
                 ) {
-                    Button {
-                        showingCreditAccounts = true
-                    } label: {
-                        Image(systemName: "creditcard")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                            .background(.thinMaterial, in: Circle())
+                    HStack(spacing: 8) {
+                        Button {
+                            Haptics.light()
+                            selectedCalendarDay = CalendarDaySelection(date: visibleCalendarMonth)
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(appAccent, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add Calendar Entry")
+
+                        Button {
+                            showingAddCashTransfer = true
+                        } label: {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Transfer Cash")
+
+                        Button {
+                            showingCreditAccounts = true
+                        } label: {
+                            Image(systemName: "creditcard")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Credit Cards")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Credit Cards")
                 }
                 calendarSummarySection
             }
@@ -979,6 +1471,7 @@ struct ContentView: View {
         }
         .padding(.top, 22)
         .padding(.bottom, 0)
+        .background(backgroundView)
     }
 
     private var calendarNetWorth: Double {
@@ -991,16 +1484,44 @@ struct ContentView: View {
 
     private var calendarSummarySection: some View {
         GlassCard(padding: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                calendarSummaryHeader
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
+                    calendarSummaryHeader
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                calendarMetricPill(
-                    title: "Net Worth",
-                    value: calendarNetWorth,
-                    tint: .mint
-                )
+                    calendarMetricPill(
+                        title: "Net Worth",
+                        value: calendarNetWorth,
+                        tint: .mint,
+                        systemImage: "chart.line.uptrend.xyaxis"
+                    )
+                }
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    calendarMetricPill(
+                        title: "Income",
+                        value: calendarVisibleIncome,
+                        tint: .green,
+                        systemImage: "arrow.down.circle.fill"
+                    )
+                    calendarMetricPill(
+                        title: "Outflow",
+                        value: calendarVisibleOutflow,
+                        tint: .red,
+                        systemImage: "arrow.up.circle.fill"
+                    )
+                    calendarMetricPill(
+                        title: "Credit Due",
+                        value: calendarVisibleCreditDue,
+                        tint: .orange,
+                        systemImage: "creditcard.fill"
+                    )
+                }
             }
         }
     }
@@ -1023,15 +1544,15 @@ struct ContentView: View {
         }
     }
 
-    private func calendarMetricPill(title: String, value: Double, tint: Color) -> some View {
+    private func calendarMetricPill(title: String, value: Double, tint: Color, systemImage: String) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
+            Image(systemName: systemImage)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(tint)
                 .frame(width: 24, height: 24)
                 .background(tint.opacity(0.12), in: Circle())
 
-            VStack(alignment: .trailing, spacing: 1) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -1042,8 +1563,9 @@ struct ContentView: View {
                     .minimumScaleFactor(0.68)
                     .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
-        .frame(width: 112, alignment: .trailing)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -1067,7 +1589,7 @@ struct ContentView: View {
     }
 
     private var isLogFocus: Bool {
-        budgetPageFocus == .log
+        true
     }
 
     private var recurringCalendarSection: some View {
@@ -1079,7 +1601,6 @@ struct ContentView: View {
                             ForEach(calendarWeeks) { week in
                                 calendarWeekRow(
                                     week,
-                                    dayCellHeight: dayCellHeight(availableWidth: proxy.size.width),
                                     availableWidth: proxy.size.width
                                 )
                                 .id(week.startDate)
@@ -1130,11 +1651,7 @@ struct ContentView: View {
     }
 
     private var backgroundView: some View {
-        LinearGradient(
-            colors: [Color(.systemGroupedBackground), Color(.secondarySystemGroupedBackground)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        CuanTheme.background
         .ignoresSafeArea()
     }
 
@@ -1145,7 +1662,7 @@ struct ContentView: View {
     }
 
     private var contentBottomPadding: CGFloat {
-        128
+        120
     }
 
     private var remainingBudgetForMonth: Double {
@@ -1531,97 +2048,109 @@ struct ContentView: View {
 
     // MARK: - Overview Section
     private var overviewSection: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    HStack(spacing: 6) {
-                        Button(action: { shiftMonth(by: -1) }) {
-                            Image(systemName: "chevron.left")
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                                .padding(8)
-                                .background(Color.primary.opacity(0.06), in: Circle())
-                                .contentShape(Circle())
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Overview",
+                tint: .blue,
+                isExpanded: $overviewExpanded,
+                onAdd: nil,
+                valueLabel: "Remaining",
+                value: remainingBudgetForMonth
+            )
+
+            if overviewExpanded {
+                GlassCard(padding: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            HStack(spacing: 6) {
+                                Button(action: { shiftMonth(by: -1) }) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .padding(8)
+                                        .background(Color.primary.opacity(0.06), in: Circle())
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+
+                                Text(selectedMonth, format: .dateTime.month(.wide).year())
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+
+                                Button(action: { shiftMonth(by: 1) }) {
+                                    Image(systemName: "chevron.right")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary)
+                                        .padding(8)
+                                        .background(Color.primary.opacity(0.06), in: Circle())
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isCurrentMonth)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(.thinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+
+                            Spacer()
+
+                            Text(budget.payFrequency.rawValue)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.primary.opacity(0.06), in: Capsule())
                         }
-                        .buttonStyle(.plain)
 
-                        Text(selectedMonth, format: .dateTime.month(.wide).year())
-                            .font(.caption)
-                            .fontWeight(.semibold)
-
-                        Button(action: { shiftMonth(by: 1) }) {
-                            Image(systemName: "chevron.right")
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                                .padding(8)
-                                .background(Color.primary.opacity(0.06), in: Circle())
-                                .contentShape(Circle())
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Monthly Income")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(budget.monthlyIncome, format: .currency(code: "USD"))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("Remaining")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(remainingBudgetForMonth, format: .currency(code: "USD"))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(remainingBudgetForMonth >= 0 ? .green : .red)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isCurrentMonth)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(.thinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
 
-                    Spacer()
+                        if budget.income > 0 {
+                            ProgressView(value: spendingProgress) {
+                                Text("\(Int(spendingProgress * 100))% used")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .tint(.blue)
+                        } else {
+                            Text("Add your income to start planning.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    Text(budget.payFrequency.rawValue)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Monthly Income")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(budget.monthlyIncome, format: .currency(code: "USD"))
-                            .font(.title3)
-                            .fontWeight(.semibold)
+                        if budget.income == 0 {
+                            Button("Set Income") {
+                                Haptics.light()
+                                selectedTab = .budget
+                                scrollToIncome = true
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Set income")
+                        }
                     }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Remaining")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(remainingBudgetForMonth, format: .currency(code: "USD"))
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(remainingBudgetForMonth >= 0 ? .green : .red)
-                    }
-                }
-
-                if budget.income > 0 {
-                    ProgressView(value: spendingProgress) {
-                        Text("\(Int(spendingProgress * 100))% used")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .tint(.blue)
-                } else {
-                    Text("Add your income to start planning.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if budget.income == 0 {
-                    Button("Set Income") {
-                        Haptics.light()
-                        selectedTab = .budget
-                        budgetPageFocus = .plan
-                        scrollToIncome = true
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Set income")
                 }
             }
         }
@@ -1744,6 +2273,63 @@ struct ContentView: View {
     private var visibleCalendarMonth: Date {
         guard let visibleCalendarWeekStart else { return currentCalendarMonth }
         return monthForCalendarWeek(startingAt: visibleCalendarWeekStart)
+    }
+
+    private var visibleCalendarMonthInterval: DateInterval? {
+        Calendar.current.dateInterval(of: .month, for: visibleCalendarMonth)
+    }
+
+    private var visibleCalendarMonthDays: [Date] {
+        let calendar = Calendar.current
+        guard let interval = visibleCalendarMonthInterval else { return [] }
+        var days: [Date] = []
+        var cursor = interval.start
+        while cursor < interval.end {
+            days.append(cursor)
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = nextDay
+        }
+        return days
+    }
+
+    private var calendarVisibleIncome: Double {
+        let oneTimeIncome = budget.incomes
+            .filter { isInVisibleCalendarMonth($0.date) }
+            .reduce(0) { $0 + $1.amount }
+        let recurringIncome = visibleCalendarMonthDays
+            .flatMap(recurringOccurrences)
+            .filter { $0.payment.kind == .income && !isRecurringOccurrencePaid($0.payment, on: $0.date) }
+            .reduce(0) { $0 + $1.payment.amount }
+        let investmentIncome = budget.portfolioTransactions
+            .filter { isInVisibleCalendarMonth($0.date) && ($0.type == .sell || $0.type == .dividend) }
+            .reduce(0) { $0 + $1.amount }
+        return oneTimeIncome + recurringIncome + investmentIncome
+    }
+
+    private var calendarVisibleOutflow: Double {
+        let oneTimeExpenses = budget.expenses
+            .filter { isInVisibleCalendarMonth($0.date) && !budget.isCreditCardPayment($0) }
+            .reduce(0) { $0 + $1.amount }
+        let recurringExpenses = visibleCalendarMonthDays
+            .flatMap(recurringOccurrences)
+            .filter { $0.payment.kind == .expense && !isRecurringOccurrencePaid($0.payment, on: $0.date) }
+            .reduce(0) { $0 + $1.payment.amount }
+        return oneTimeExpenses + recurringExpenses
+    }
+
+    private var calendarVisibleCreditDue: Double {
+        budget.creditAccounts
+            .filter { account in
+                account.isActive && visibleCalendarMonthDays.contains { date in
+                    Calendar.current.component(.day, from: date) == recurringOccurrenceDay(in: date, paymentDay: account.dueDay)
+                }
+            }
+            .reduce(0) { $0 + creditAccountActualBalance($1) }
+    }
+
+    private func isInVisibleCalendarMonth(_ date: Date) -> Bool {
+        guard let interval = visibleCalendarMonthInterval else { return false }
+        return date >= interval.start && date < interval.end
     }
 
     private func monthForCalendarWeek(startingAt weekStart: Date) -> Date {
@@ -1976,7 +2562,8 @@ struct ContentView: View {
                 section: section,
                 categoryId: categoryId,
                 paymentAccount: payment.paymentAccount,
-                note: payment.note
+                note: payment.note,
+                creditCardPaymentTarget: payment.creditCardPaymentTarget
             )
         )
     }
@@ -1990,6 +2577,7 @@ struct ContentView: View {
         let recurringPayment: RecurringPayment?
         let expense: Expense?
         let income: IncomeEntry?
+        let cashTransfer: CashTransfer?
         let isPaid: Bool
         let isTransfer: Bool
         let tint: Color
@@ -2014,6 +2602,7 @@ struct ContentView: View {
                 recurringPayment: $0.payment,
                 expense: nil,
                 income: nil,
+                cashTransfer: nil,
                 isPaid: isRecurringOccurrencePaid($0.payment, on: date),
                 isTransfer: false,
                 tint: colorFor(section: $0.payment.section, categoryId: $0.payment.categoryId, isIncome: $0.payment.kind == .income),
@@ -2036,6 +2625,7 @@ struct ContentView: View {
                     recurringPayment: nil,
                     expense: $0,
                     income: nil,
+                    cashTransfer: nil,
                     isPaid: true,
                     isTransfer: false,
                     tint: colorFor(section: $0.section, categoryId: $0.categoryId, isIncome: false),
@@ -2058,6 +2648,7 @@ struct ContentView: View {
                     recurringPayment: nil,
                     expense: nil,
                     income: $0,
+                    cashTransfer: nil,
                     isPaid: true,
                     isTransfer: false,
                     tint: colorFor(section: .needs, categoryId: nil, isIncome: true),
@@ -2080,6 +2671,7 @@ struct ContentView: View {
                     recurringPayment: nil,
                     expense: nil,
                     income: nil,
+                    cashTransfer: nil,
                     isPaid: true,
                     isTransfer: transaction.type == .contribution,
                     tint: portfolioEventColor(transaction),
@@ -2088,6 +2680,29 @@ struct ContentView: View {
                     iconName: portfolioEventIcon(transaction),
                     creditAccount: nil,
                     portfolioTransaction: transaction
+                )
+            }
+        let transferItems = budget.cashTransfers
+            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .map { transfer in
+                CalendarEventItem(
+                    id: transfer.id,
+                    name: transfer.name,
+                    amount: transfer.amount,
+                    isIncome: false,
+                    date: transfer.date,
+                    recurringPayment: nil,
+                    expense: nil,
+                    income: nil,
+                    cashTransfer: transfer,
+                    isPaid: true,
+                    isTransfer: true,
+                    tint: .cyan,
+                    isCreditDue: false,
+                    paymentAccount: "\(transfer.fromAccountName) -> \(transfer.toAccountName)",
+                    iconName: "arrow.left.arrow.right",
+                    creditAccount: nil,
+                    portfolioTransaction: nil
                 )
             }
         let dueItems = budget.creditAccounts.compactMap { account -> CalendarEventItem? in
@@ -2103,6 +2718,7 @@ struct ContentView: View {
                 recurringPayment: nil,
                 expense: nil,
                 income: nil,
+                cashTransfer: nil,
                 isPaid: false,
                 isTransfer: false,
                 tint: colorForCreditAccount(account.id),
@@ -2114,7 +2730,7 @@ struct ContentView: View {
             )
         }
 
-        return (recurring + oneTimeIncome + oneTimeExpenses + portfolioItems + dueItems).sorted { lhs, rhs in
+        return (recurring + oneTimeIncome + oneTimeExpenses + transferItems + portfolioItems + dueItems).sorted { lhs, rhs in
             if lhs.isIncome == rhs.isIncome { return lhs.amount > rhs.amount }
             return lhs.isIncome && !rhs.isIncome
         }
@@ -2164,7 +2780,7 @@ struct ContentView: View {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(from: expense.note),
+            if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
@@ -2292,12 +2908,17 @@ struct ContentView: View {
     }
 
     private var logTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Transactions")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Transactions",
+                tint: .primary,
+                isExpanded: $logTransactionsExpanded,
+                allowCollapse: true,
+                showIndicator: true,
+                onAdd: nil,
+                valueLabel: nil,
+                value: nil
+            ) {
                 Button("Expense History") {
                     showingExpenseHistory = true
                 }
@@ -2306,7 +2927,8 @@ struct ContentView: View {
                 .controlSize(.small)
             }
 
-            if logTransactionItems.isEmpty {
+            if logTransactionsExpanded {
+                if logTransactionItems.isEmpty {
                 GlassCard {
                     EmptyStateView(
                         title: "No transactions yet",
@@ -2361,19 +2983,28 @@ struct ContentView: View {
                             }
                         }
                     }
-                }
             }
         }
     }
+}
+}
 
     private var accountBalancesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Account Balances")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Account Balances",
+                tint: .cyan,
+                isExpanded: $accountBalancesExpanded,
+                allowCollapse: true,
+                showIndicator: true,
+                onAdd: nil,
+                valueLabel: nil,
+                value: nil
+            ) {
                 Menu("Manage") {
+                    Button("Transfer Cash") {
+                        showingAddCashTransfer = true
+                    }
                     Button("Banks") {
                         showingBankAccounts = true
                     }
@@ -2385,7 +3016,8 @@ struct ContentView: View {
                 .controlSize(.small)
             }
 
-            let totalBank = budget.bankAccounts.reduce(0) { $0 + $1.balance }
+            if accountBalancesExpanded {
+                let totalBank = budget.bankAccounts.reduce(0) { $0 + $1.balance }
             let portfolioNet = homePortfolioNetValue
             let totalCredit = budget.creditAccounts
                 .filter(\.isActive)
@@ -2443,13 +3075,15 @@ struct ContentView: View {
                             HStack {
                                 Text(holding.ticker)
                                 Spacer()
-                                Text("\((holding.shares * holding.currentPrice), format: .currency(code: "USD"))")
+                                let price = budget.cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
+                            Text("\((holding.shares * price), format: .currency(code: "USD"))")
                             }
                             .font(.subheadline)
                         }
                     }
                 }
             }
+        }
         }
     }
 
@@ -2470,7 +3104,7 @@ struct ContentView: View {
                     }
 
                     if hiddenEventCount > 0 {
-                        calendarOverflowMenu(events: events, hiddenEventCount: hiddenEventCount)
+                        calendarOverflowButton(date: date, hiddenEventCount: hiddenEventCount)
                     }
                     Spacer(minLength: 0)
                 }
@@ -2494,25 +3128,25 @@ struct ContentView: View {
             .clipped()
             .background(
                 Rectangle()
-                    .fill(isToday ? appAccent.opacity(0.08) : Color.black)
+                    .fill(isToday ? appAccent.opacity(0.10) : Color(.secondarySystemGroupedBackground).opacity(isVisibleMonth ? 0.86 : 0.42))
                     .overlay(
                         Rectangle()
-                            .stroke(isToday ? appAccent.opacity(0.35) : Color.white.opacity(0.16), lineWidth: isToday ? 1.2 : 0.6)
+                            .stroke(isToday ? appAccent.opacity(0.40) : Color.primary.opacity(0.08), lineWidth: isToday ? 1.2 : 0.6)
                     )
             )
             .contentShape(Rectangle())
             .onTapGesture {
-                selectedCalendarDay = CalendarDaySelection(date: date)
+                selectedCalendarEventList = CalendarDaySelection(date: date)
             }
         } else {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     Rectangle()
-                        .fill(Color.black)
+                        .fill(Color(.secondarySystemGroupedBackground).opacity(0.32))
                         .overlay(
                             Rectangle()
-                                .stroke(Color.white.opacity(0.16), lineWidth: 0.6)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 0.6)
                         )
                 )
         }
@@ -2521,7 +3155,7 @@ struct ContentView: View {
     private func calendarEventChip(_ event: CalendarEventItem) -> some View {
         HStack(spacing: 4) {
             Button {
-                openCalendarEvent(event)
+                selectedCalendarEventList = CalendarDaySelection(date: event.date)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 3) {
@@ -2570,23 +3204,9 @@ struct ContentView: View {
         .clipped()
     }
 
-    private func calendarOverflowMenu(events: [CalendarEventItem], hiddenEventCount: Int) -> some View {
-        Menu {
-            ForEach(events) { event in
-                if let recurring = event.recurringPayment, !event.isPaid {
-                    Button {
-                        markRecurringOccurrencePaid(recurring, on: event.date)
-                    } label: {
-                        Label("Mark Paid: \(calendarMenuTitle(for: event))", systemImage: "checkmark.circle")
-                    }
-                }
-
-                Button {
-                    openCalendarEvent(event)
-                } label: {
-                    Label(calendarMenuTitle(for: event), systemImage: event.iconName)
-                }
-            }
+    private func calendarOverflowButton(date: Date, hiddenEventCount: Int) -> some View {
+        Button {
+            selectedCalendarEventList = CalendarDaySelection(date: date)
         } label: {
             Text("+\(hiddenEventCount)")
                 .font(.caption.weight(.bold))
@@ -2599,10 +3219,12 @@ struct ContentView: View {
         .accessibilityLabel("\(hiddenEventCount) more calendar events")
     }
 
-    private func calendarWeekRow(_ week: CalendarWeek, dayCellHeight: CGFloat, availableWidth: CGFloat) -> some View {
-        let maxVisibleEvents = maxVisibleCalendarEvents(for: dayCellHeight)
+    private func calendarWeekRow(_ week: CalendarWeek, availableWidth: CGFloat) -> some View {
         let gridWidth = max(availableWidth, 1)
         let dayCellWidth = max(floor(gridWidth / 7), 1)
+        let busiestDayEventCount = maxCalendarEventCount(in: week)
+        let maxVisibleEvents = maxVisibleCalendarEvents(for: busiestDayEventCount)
+        let dayCellHeight = dayCellHeight(availableWidth: gridWidth, visibleEventSlots: maxVisibleEvents, hasOverflow: busiestDayEventCount > maxVisibleEvents)
 
         return HStack(spacing: 0) {
             ForEach(week.days, id: \.self) { day in
@@ -2626,6 +3248,8 @@ struct ContentView: View {
             editingExpense = expense
         } else if let income = event.income {
             editingIncome = income
+        } else if let transfer = event.cashTransfer {
+            editingCashTransfer = transfer
         }
     }
 
@@ -2654,8 +3278,14 @@ struct ContentView: View {
         return event.tint.opacity(0.68)
     }
 
-    private func maxVisibleCalendarEvents(for dayCellHeight: CGFloat) -> Int {
-        2
+    private func maxCalendarEventCount(in week: CalendarWeek) -> Int {
+        week.days
+            .map { calendarEvents(for: $0).count }
+            .max() ?? 0
+    }
+
+    private func maxVisibleCalendarEvents(for eventCount: Int) -> Int {
+        min(max(eventCount, 1), 5)
     }
 
     private var calendarCellTopInset: CGFloat {
@@ -2682,15 +3312,18 @@ struct ContentView: View {
         31
     }
 
-    private func dayCellHeight(availableWidth: CGFloat) -> CGFloat {
+    private func dayCellHeight(availableWidth: CGFloat, visibleEventSlots: Int, hasOverflow: Bool) -> CGFloat {
         let cellWidth = max(availableWidth / 7, 1)
-        let baseHeight = max(floor(cellWidth * 1.65), 108)
-        let twoEventHeight = calendarTransactionsTopInset
-            + (2 * calendarEventChipHeight)
-            + calendarCellContentSpacing
-            + calendarOverflowMenuHeight
-            + 8
-        return max(baseHeight, twoEventHeight)
+        let baseHeight = max(floor(cellWidth * 1.18), calendarTransactionsTopInset + calendarEventChipHeight + 14)
+        let eventSlots = max(visibleEventSlots, 1)
+        let eventSpacing = CGFloat(max(eventSlots - 1, 0)) * calendarCellContentSpacing
+        let overflowHeight = hasOverflow ? calendarCellContentSpacing + calendarOverflowMenuHeight : 0
+        let contentHeight = calendarTransactionsTopInset
+            + (CGFloat(eventSlots) * calendarEventChipHeight)
+            + eventSpacing
+            + overflowHeight
+            + 10
+        return max(baseHeight, contentHeight)
     }
 
     private static func startOfMonth(for date: Date) -> Date {
@@ -2706,13 +3339,12 @@ struct ContentView: View {
                 message: "Set your income, then add categories and goals for the month.",
                 systemImage: "sparkles",
                 tips: [
-                    "Plan view: set allocations for needs, wants, and savings.",
-                    "Log view: quickly record spending and keep categories updated."
+                    "Set allocations for needs, wants, and savings.",
+                    "Log spending and keep categories updated."
                 ],
                 actionLabel: "Set Income",
                 action: {
                     selectedTab = .budget
-                    budgetPageFocus = .plan
                     scrollToIncome = true
                 }
             )
@@ -2737,47 +3369,54 @@ struct ContentView: View {
     }
 
     private var planHighlightsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Plan Highlights")
-                .font(.title3)
-                .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Plan Highlights",
+                tint: .purple,
+                isExpanded: $planHighlightsExpanded,
+                onAdd: nil,
+                valueLabel: budget.income > 0 ? "Budget" : nil,
+                value: budget.income > 0 ? budget.monthlyIncome : nil
+            )
 
-            if budget.income > 0 {
-                HStack(spacing: 12) {
-                    ForEach(planHighlightItems) { item in
-                        Button {
-                            selectedPlanHighlight = item.section
-                        } label: {
-                            PlanHighlightCard(
-                                title: item.title,
-                                systemImage: item.systemImage,
-                                tint: item.tint,
-                                amount: item.amount,
-                                allocated: item.allocated
-                            )
+            if planHighlightsExpanded {
+                if budget.income > 0 {
+                    HStack(spacing: 8) {
+                        ForEach(planHighlightItems) { item in
+                            Button {
+                                selectedPlanHighlight = item.section
+                            } label: {
+                                PlanHighlightCard(
+                                    title: item.title,
+                                    systemImage: item.systemImage,
+                                    tint: item.tint,
+                                    amount: item.amount,
+                                    allocated: item.allocated
+                                )
+                            }
+                            .buttonStyle(PressableCardButtonStyle())
+                            .frame(maxWidth: .infinity)
+                            .layoutPriority(1)
                         }
-                        .buttonStyle(PressableCardButtonStyle())
-                        .frame(maxWidth: .infinity)
-                        .layoutPriority(1)
                     }
-                }
-            } else {
-                GlassCard {
-                    HStack(spacing: 12) {
-                        Image(systemName: "sparkles")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Unlock your plan targets")
-                                .font(.headline)
-                            Text("Add income to see monthly goals for needs, wants, and savings.")
-                                .font(.caption)
+                } else {
+                    GlassCard(padding: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "sparkles")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Unlock your plan targets")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Add income to see monthly goals for needs, wants, and savings.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
+        }
         }
         .sheet(item: $selectedPlanHighlight) { section in
             PlanHighlightMenuView(
@@ -2832,80 +3471,82 @@ struct ContentView: View {
     
     // MARK: - Income Section
     private var incomeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Income")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Text("Set what you take home and how often it lands.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            
-            GlassCard {
-                VStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Amount")
-                            .font(.headline)
-                        HStack(spacing: 10) {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.green)
-                            TextField("$0", value: $budget.income, format: .currency(code: "USD"))
-                                .keyboardType(.decimalPad)
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .textFieldStyle(.plain)
-                                .focused($focusedField, equals: .income)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Income",
+                tint: .green,
+                isExpanded: $incomeExpanded,
+                onAdd: nil,
+                valueLabel: budget.income > 0 ? "Monthly" : nil,
+                value: budget.income > 0 ? budget.monthlyIncome : nil
+            )
 
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Pay Frequency")
-                                .font(.headline)
-                            Text("This controls your monthly roll-up.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Picker("Pay Frequency", selection: $budget.payFrequency) {
-                            ForEach(PayFrequency.allCases) { frequency in
-                                Text(frequency.rawValue).tag(frequency)
+            if incomeExpanded {
+                GlassCard(padding: 10) {
+                    VStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Amount")
+                                .font(.subheadline.weight(.semibold))
+                            HStack(spacing: 10) {
+                                Image(systemName: "dollarsign.circle.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.green)
+                                TextField("$0", value: $budget.income, format: .currency(code: "USD"))
+                                    .keyboardType(.decimalPad)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .textFieldStyle(.plain)
+                                    .focused($focusedField, equals: .income)
                             }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
                         }
-                        .pickerStyle(.menu)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.thinMaterial, in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
-                    }
 
-                    if budget.income > 0 {
-                        Divider()
                         HStack {
-                            Text("Monthly Income")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Pay Frequency")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("This controls your monthly roll-up.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
-                            Text(budget.monthlyIncome, format: .currency(code: "USD"))
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color.green.opacity(0.12), in: Capsule())
-                                .scaleEffect(highlightMonthlyIncome ? 1.06 : 1.0)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: highlightMonthlyIncome)
+                            Picker("Pay Frequency", selection: $budget.payFrequency) {
+                                ForEach(PayFrequency.allCases) { frequency in
+                                    Text(frequency.rawValue).tag(frequency)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.thinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                        }
+
+                        if budget.income > 0 {
+                            Divider()
+                            HStack {
+                                Text("Monthly Income")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(budget.monthlyIncome, format: .currency(code: "USD"))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.green.opacity(0.12), in: Capsule())
+                                    .scaleEffect(highlightMonthlyIncome ? 1.06 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: highlightMonthlyIncome)
+                            }
                         }
                     }
                 }
@@ -2922,14 +3563,20 @@ struct ContentView: View {
     
     // MARK: - Budget Breakdown Section
     private var budgetBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("50/30/20 Budget Breakdown")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            if budget.income > 0 {
-                GlassCard {
-                    VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "50/30/20 Budget Breakdown",
+                tint: .purple,
+                isExpanded: $budgetBreakdownExpanded,
+                onAdd: nil,
+                valueLabel: nil,
+                value: nil
+            )
+
+            if budgetBreakdownExpanded {
+                if budget.income > 0 {
+                    GlassCard(padding: 10) {
+                        VStack(spacing: 10) {
                         BudgetBarView(
                             title: "Needs (50%)",
                             allocated: budget.totalNeedsAllocated,
@@ -2953,10 +3600,11 @@ struct ContentView: View {
                     }
                 }
             } else {
-                GlassCard {
-                    Text("Enter your income to see budget breakdown")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    GlassCard(padding: 10) {
+                        Text("Enter your income to see budget breakdown")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }
@@ -2964,12 +3612,12 @@ struct ContentView: View {
 
     // MARK: - Log Trends Section
     private var logTrendsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             collapsibleSectionHeader(
                 title: "Trends",
                 tint: .primary,
                 isExpanded: $logTrendsExpanded,
-                allowCollapse: false,
+                allowCollapse: true,
                 showIndicator: false,
                 onAdd: nil,
                 valueLabel: selectedLogTrend == .income ? "Logged this month" : "Month to date",
@@ -3067,37 +3715,10 @@ struct ContentView: View {
     }
 
     private var homeNetWorthRangeSelector: some View {
-        HStack(spacing: 8) {
-            ForEach(HomeNetWorthRange.allCases) { range in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        selectedHomeNetWorthRange = range
-                    }
-                } label: {
-                    Text(range.rawValue)
-                        .font(.caption.weight(.bold))
-                        .kerning(0.4)
-                        .textCase(.uppercase)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .foregroundStyle(selectedHomeNetWorthRange == range ? .white : .primary)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(selectedHomeNetWorthRange == range ? appAccent : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
+        CuanSegmentedRange(values: HomeNetWorthRange.allCases, selection: $selectedHomeNetWorthRange) { range in
+            Text(range.rawValue)
+                .frame(maxWidth: .infinity)
         }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(appAccent.opacity(0.22), lineWidth: 1)
-        )
     }
 
     private func compactTrendMetric(title: String, value: String) -> some View {
@@ -3799,15 +4420,18 @@ struct ContentView: View {
         HStack(alignment: .top, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(.primary)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(CuanTheme.primary)
+                    .frame(width: 34, height: 34)
+                    .background(Color.white, in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.title2)
                         .fontWeight(.bold)
+                        .foregroundStyle(CuanTheme.text)
                     Text(subtitle)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(CuanTheme.muted)
                 }
             }
             Spacer()
@@ -3865,7 +4489,20 @@ struct ContentView: View {
     }
 
     private var recurringChargesSection: some View {
-        RecurringChargesCard(summary: continuousChargeSummary)
+        VStack(alignment: .leading, spacing: 8) {
+            collapsibleSectionHeader(
+                title: "Recurring Charges",
+                tint: .pink,
+                isExpanded: $recurringChargesExpanded,
+                onAdd: nil,
+                valueLabel: "Total",
+                value: continuousChargeSummary.totalDue
+            )
+
+            if recurringChargesExpanded {
+                RecurringChargesCard(summary: continuousChargeSummary)
+            }
+        }
     }
 
     private var homeInsightSummarySection: some View {
@@ -3897,8 +4534,6 @@ struct ContentView: View {
                     Text("Portfolio \(homePortfolioNetValue, format: .currency(code: "USD"))  Cash flow \(homeCashFlowNet, format: .currency(code: "USD"))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    homeMiniTrendChart(points: selectedLogTrend == .income ? dailyIncome : dailySpending, color: homeCashFlowNet >= 0 ? .green : .pink)
                 }
             }
 
@@ -4008,170 +4643,285 @@ struct ContentView: View {
                 Text("Cash Flow")
                     .font(.headline)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Spending")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Text(totalMonthlySpent, format: .currency(code: "USD"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Spending")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text(totalMonthlySpent, format: .currency(code: "USD"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        homeMiniTrendChart(points: dailySpending, color: .red)
                     }
-                    homeMiniTrendChart(points: dailySpending, color: .red)
-                }
+                    .frame(maxWidth: .infinity)
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Income")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Text(totalMonthlyIncomeLogged, format: .currency(code: "USD"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Income")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text(totalMonthlyIncomeLogged, format: .currency(code: "USD"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        homeMiniTrendChart(points: dailyIncome, color: .green)
                     }
-                    homeMiniTrendChart(points: dailyIncome, color: .green)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
     }
 
     private var homeWatchlistSection: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Watchlist")
-                        .font(.headline)
-                    Spacer()
-                    if isLoadingHomeWatchlist {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Button {
-                            Task { await refreshHomeWatchlist() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption.weight(.bold))
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("Refresh watchlist")
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    TextField("Ticker", text: $homeWatchlistDraft)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.subheadline)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    Button {
-                        addHomeWatchlistTicker()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.caption.weight(.bold))
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(sanitizedHomeWatchlistDraft.isEmpty)
-                    .accessibilityLabel("Add ticker")
-                }
-
-                if let homeWatchlistError {
-                    Text(homeWatchlistError)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
+                headerRow
+                searchButtonRow
+                errorRow
                 if budget.watchlistTickers.isEmpty {
                     Text("Add a ticker to start tracking it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    watchlistTickerActions
-                    if !homeWatchlistRows.isEmpty {
-                        homeWatchlistSummary
-                        VStack(spacing: 2) {
-                            ForEach(homeWatchlistRows) { row in
-                                homeWatchlistRowCard(row)
-                                if row.id != homeWatchlistRows.last?.id {
-                                    Divider()
-                                }
-                            }
-                        }
+                    watchlistGridFilterSortControls
+                    if homeWatchlistRows.isEmpty && !isLoadingHomeWatchlist {
+                        Text("Loading...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !homeWatchlistRows.isEmpty {
+                        watchlistGridContent
+                        watchlistGridSummary
                     }
-
-                    TradingViewWatchlistBoard(symbols: budget.watchlistTickers) { ticker in
-                        selectedHomeWatchlistTicker = TickerSelection(ticker: ticker)
-                    }
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
     }
 
-    private var watchlistTickerActions: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(budget.watchlistTickers, id: \.self) { ticker in
-                    HStack(spacing: 6) {
-                        Button {
-                            selectedHomeWatchlistTicker = TickerSelection(ticker: ticker.uppercased())
-                        } label: {
-                            Text(ticker.uppercased())
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Open \(ticker) snapshot")
-
-                        Button {
-                            selectedWatchlistAlertTicker = TickerSelection(ticker: ticker.uppercased())
-                        } label: {
-                            Image(systemName: "bell")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Edit \(ticker) alerts")
-
-                        Button {
-                            removeHomeWatchlistTicker(ticker)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove \(ticker)")
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.secondary.opacity(0.10), in: Capsule())
+    private var headerRow: some View {
+        HStack {
+            Text("Watchlist")
+                .font(.headline)
+                .foregroundStyle(CuanTheme.text)
+            Spacer()
+            if isLoadingHomeWatchlist {
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    Task { await refreshHomeWatchlist() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.bold))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(CuanTheme.primary)
+                .frame(width: 30, height: 30)
+                .background(CuanTheme.background, in: Circle())
+                .accessibilityLabel("Refresh watchlist")
             }
         }
+    }
+
+    private var searchButtonRow: some View {
+        Button {
+            showingWatchlistSearch = true
+        } label: {
+            Label("Search stocks", systemImage: "magnifyingglass")
+                .font(.subheadline)
+                .foregroundStyle(CuanTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(CuanTheme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var errorRow: some View {
+        Group {
+            if let homeWatchlistError {
+                Text(homeWatchlistError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var watchlistGridContent: some View {
+        VStack(spacing: 10) {
+            ForEach(displayWatchlistRows) { row in
+                watchlistGridRow(row)
+            }
+        }
+    }
+
+    private var watchlistGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 50), spacing: 4),
+            GridItem(.fixed(78), spacing: 4, alignment: .trailing),
+            GridItem(.fixed(72), spacing: 4, alignment: .trailing),
+            GridItem(.fixed(66), spacing: 0, alignment: .trailing),
+        ]
+    }
+
+    private var displayWatchlistRows: [HomeWatchlistRow] {
+        let filtered: [HomeWatchlistRow]
+        switch watchlistFilter {
+        case .all:
+            filtered = homeWatchlistRows
+        case .gainers:
+            filtered = homeWatchlistRows.filter { $0.percentChange > 0 }
+        case .losers:
+            filtered = homeWatchlistRows.filter { $0.percentChange < 0 }
+        }
+        return filtered.sorted { a, b in
+            switch watchlistSortOption {
+            case .ticker:
+                return watchlistSortAscending ? a.symbol < b.symbol : a.symbol > b.symbol
+            case .price:
+                return watchlistSortAscending ? a.price < b.price : a.price > b.price
+            case .changePercent:
+                return watchlistSortAscending ? a.percentChange < b.percentChange : a.percentChange > b.percentChange
+            case .changeDollar:
+                return watchlistSortAscending ? a.change < b.change : a.change > b.change
+            }
+        }
+    }
+
+    private var watchlistGridFilterSortControls: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Picker("Filter", selection: $watchlistFilter) {
+                    ForEach(WatchlistFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+            } label: {
+                Label(watchlistFilter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(CuanTheme.primary.opacity(0.86))
+
+            Menu {
+                Picker("Sort", selection: $watchlistSortOption) {
+                    ForEach(WatchlistSortOption.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+            } label: {
+                Label(watchlistSortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(CuanTheme.primary)
+
+            Button {
+                watchlistSortAscending.toggle()
+            } label: {
+                Image(systemName: watchlistSortAscending ? "arrow.up" : "arrow.down")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.bordered)
+            .tint(CuanTheme.primary)
+            .accessibilityLabel(watchlistSortAscending ? "Sort ascending" : "Sort descending")
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func watchlistGridRow(_ row: HomeWatchlistRow) -> some View {
+        Button {
+            selectedHomeWatchlistTicker = TickerSelection(ticker: row.symbol)
+        } label: {
+            let change = CuanMarketChangeDisplay(change: row.change, percentChange: row.percentChange)
+            let tint = CuanTheme.changeColor(for: change.direction)
+
+            HStack(spacing: 11) {
+                CuanTickerAvatar(symbol: row.symbol, tint: tint)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(row.symbol)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(CuanTheme.text)
+                            .lineLimit(1)
+                        if change.direction != .flat {
+                            Image(systemName: change.direction == .gain ? "arrow.up.right" : "arrow.down.right")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(tint)
+                        }
+                    }
+                    if let name = row.companyName, !name.isEmpty {
+                        Text(name)
+                            .font(.caption2)
+                            .foregroundStyle(CuanTheme.muted)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                CuanSparkline(values: row.priceHistory.map(\.close), tint: tint)
+                    .frame(width: 58)
+
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(row.price, format: .currency(code: "USD").precision(.fractionLength(2)))
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(CuanTheme.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(change.percentChangeText)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(tint)
+                }
+            }
+            .padding(10)
+            .background(CuanTheme.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var watchlistGridSummary: some View {
+        let winners = displayWatchlistRows.filter { $0.percentChange > 0 }.count
+        let losers = displayWatchlistRows.filter { $0.percentChange < 0 }.count
+        let averageChange = displayWatchlistRows.isEmpty ? 0 : displayWatchlistRows.reduce(0) { $0 + $1.percentChange } / Double(displayWatchlistRows.count)
+        return HStack(spacing: 10) {
+            Label("\(winners) ▲", systemImage: "arrow.up")
+                .font(.caption)
+                .foregroundStyle(.green)
+            Label("\(losers) ▼", systemImage: "arrow.down")
+                .font(.caption)
+                .foregroundStyle(.red)
+            Spacer()
+            Text("Avg \(averageChange / 100, format: .percent.precision(.fractionLength(2)))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(averageChange >= 0 ? .green : .red)
+        }
+        .padding(.top, 6)
     }
 
     private var homeNetWorthChartSection: some View {
-        GlassCard {
+        CuanCard {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "wallet.pass.fill")
                         .font(.headline)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(CuanTheme.primary)
                         .frame(width: 38, height: 38)
-                        .background(Color.purple.opacity(0.16), in: Circle())
+                        .background(CuanTheme.primary.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Net Worth Over Time")
-                            .font(.headline)
+                        Text("Total Portfolio")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(CuanTheme.muted)
                         Text(homePortfolioNetValue, format: .currency(code: "USD"))
                             .font(.system(size: 40, weight: .bold, design: .rounded))
-                            .foregroundStyle(homePortfolioNetValue < 0 ? Color.pink : Color.primary)
+                            .foregroundStyle(CuanTheme.text)
                             .minimumScaleFactor(0.65)
                             .lineLimit(1)
                     }
@@ -4179,18 +4929,18 @@ struct ContentView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(homeNetWorthDeltaPercent, format: .percent.precision(.fractionLength(1)))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(homeNetWorthDelta >= 0 ? .green : .pink)
+                            .foregroundStyle(homeNetWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background((homeNetWorthDelta >= 0 ? Color.green : Color.pink).opacity(0.14), in: Capsule())
+                            .background((homeNetWorthDelta >= 0 ? CuanTheme.gain : CuanTheme.loss).opacity(0.12), in: Capsule())
                         if let homeLatestHoldingsUpdate {
                             Text("Updated \(homeLatestHoldingsUpdate, format: .dateTime.month().day().year().hour().minute())")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(CuanTheme.muted)
                         } else {
                             Text("Updated: --")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(CuanTheme.muted)
                         }
                     }
                 }
@@ -4209,7 +4959,7 @@ struct ContentView: View {
                         .interpolationMethod(.catmullRom)
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [Color.pink.opacity(0.24), Color.pink.opacity(0.02)],
+                                colors: [CuanTheme.gain.opacity(0.28), CuanTheme.gain.opacity(0.02)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -4220,7 +4970,7 @@ struct ContentView: View {
                             y: .value("Net Worth", point.netValue)
                         )
                         .interpolationMethod(.catmullRom)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(CuanTheme.gain)
                         .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
                         if let selectedHomeNetWorthPoint {
@@ -4230,7 +4980,7 @@ struct ContentView: View {
                                 x: .value("Date", selectedHomeNetWorthPoint.date),
                                 y: .value("Net Worth", selectedHomeNetWorthPoint.netValue)
                             )
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(CuanTheme.gain)
                         }
                     }
                     .chartYAxis {
@@ -4317,9 +5067,9 @@ struct ContentView: View {
 
                     HStack(spacing: 14) {
                         Label("Net Worth", systemImage: "line.diagonal")
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(CuanTheme.gain)
                         Text("\(homeNetWorthDelta >= 0 ? "+" : "")\(homeNetWorthDelta, format: .currency(code: "USD")) in range")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(CuanTheme.muted)
                     }
                     .font(.caption)
                 }
@@ -4382,6 +5132,23 @@ struct ContentView: View {
         }
     }
 
+    private func consumePendingDeepLink() {
+        guard let action = PendingDeepLink.action else { return }
+        PendingDeepLink.action = nil
+        switch action {
+        case .ticker(let symbol):
+            selectedHomeWatchlistTicker = TickerSelection(ticker: symbol)
+        case .tab(let mode):
+            selectedTab = mode
+        case .addIncome:
+            showingAddIncome = true
+        case .addExpense:
+            expenseDraftSection = lastExpenseSection
+            expenseDraftCategoryId = lastExpenseCategoryId ?? budget.needsCategories.first?.id ?? budget.wantsCategories.first?.id
+            expenseDraft = ExpenseDraft(section: expenseDraftSection, categoryId: expenseDraftCategoryId)
+        }
+    }
+
     @MainActor
     private func refreshHoldingsQuotes() async {
         guard !isRefreshingHoldingsQuotes else { return }
@@ -4390,6 +5157,7 @@ struct ContentView: View {
         guard !tickers.isEmpty else { return }
 
         isRefreshingHoldingsQuotes = true
+        let previousNW = BudgetNotificationService.netWorth(for: budget)
         defer { isRefreshingHoldingsQuotes = false }
 
         let isAlphaVantage = budget.marketDataSettings.provider == .alphaVantage
@@ -4417,6 +5185,13 @@ struct ContentView: View {
                 continue
             }
         }
+
+        let currentNW = BudgetNotificationService.netWorth(for: budget)
+        await BudgetNotificationService.shared.sendPortfolioUpdateIfNeeded(
+            previousNetWorth: previousNW,
+            updatedNetWorth: currentNW,
+            budget: budget
+        )
     }
 
     private func homeMetricTile(_ title: String, value: Double, tint: Color) -> some View {
@@ -4624,8 +5399,11 @@ struct ContentView: View {
                     .interpolationMethod(.catmullRom)
                     .foregroundStyle(color)
                 }
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks(values: .automatic) { _ in
+                        AxisValueLabel(format: Date.FormatStyle().month(.twoDigits).day(.twoDigits))
+                    }
+                }
                 .frame(height: 90)
             }
         }
@@ -4800,6 +5578,11 @@ struct ContentView: View {
                     ticker: symbol,
                     settings: budget.marketDataSettings
                 )
+                budget.cachedQuotes[symbol.uppercased()] = CachedQuote(
+                    ticker: symbol.uppercased(),
+                    price: quote.price,
+                    updatedAt: Date()
+                )
                 let profile = apiKey.isEmpty ? nil : try? await marketDataService.fetchCompanyProfile(
                     ticker: symbol,
                     provider: .finnhub,
@@ -4881,183 +5664,10 @@ struct ContentView: View {
         }
     }
 
-    private var homeWatchlistSummary: some View {
-        let winners = homeWatchlistRows.filter { $0.percentChange > 0 }.count
-        let losers = homeWatchlistRows.filter { $0.percentChange < 0 }.count
-        let averageChange = homeWatchlistRows.isEmpty ? 0 : homeWatchlistRows.reduce(0) { $0 + $1.percentChange } / Double(homeWatchlistRows.count)
-        let strongest = homeWatchlistRows.max(by: { $0.percentChange < $1.percentChange })
-        let weakest = homeWatchlistRows.min(by: { $0.percentChange < $1.percentChange })
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Label("\(winners) up", systemImage: "arrow.up")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                Label("\(losers) down", systemImage: "arrow.down")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                Spacer()
-                Text("Avg \(averageChange / 100, format: .percent.precision(.fractionLength(2)))")
-                    .font(.caption)
-                    .foregroundStyle(averageChange >= 0 ? .green : .red)
-            }
-            if let strongest, let weakest {
-                Text("Strongest: \(strongest.symbol) (\((strongest.percentChange / 100), format: .percent.precision(.fractionLength(2)))) • Weakest: \(weakest.symbol) (\((weakest.percentChange / 100), format: .percent.precision(.fractionLength(2))))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func homeWatchlistRowCard(_ row: HomeWatchlistRow) -> some View {
-        Button {
-            selectedHomeWatchlistTicker = TickerSelection(ticker: row.symbol)
-        } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.symbol)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.primary)
-                    if let companyName = row.companyName, !companyName.isEmpty {
-                        Text(companyName)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    } else if let exchange = row.exchange, !exchange.isEmpty {
-                        Text(exchange)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                Text(row.price, format: .currency(code: "USD"))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(row.percentChange / 100, format: .percent.precision(.fractionLength(2)))
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(row.percentChange >= 0 ? .green : .red)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background((row.percentChange >= 0 ? Color.green : Color.red).opacity(0.12), in: Capsule())
-                Button {
-                    selectedWatchlistAlertTicker = TickerSelection(ticker: row.symbol)
-                } label: {
-                    Image(systemName: "bell")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Edit \(row.symbol) alerts")
-                Button {
-                    removeHomeWatchlistTicker(row.symbol)
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove \(row.symbol)")
-            }
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var sanitizedHomeWatchlistDraft: String {
-        homeWatchlistDraft
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-    }
-
-    private func addHomeWatchlistTicker() {
-        let ticker = sanitizedHomeWatchlistDraft
-        guard !ticker.isEmpty else { return }
-        if !budget.watchlistTickers.contains(ticker) {
-            budget.watchlistTickers.append(ticker)
-        }
-        homeWatchlistDraft = ""
-        Task { await refreshHomeWatchlist() }
-    }
-
     private func removeHomeWatchlistTicker(_ ticker: String) {
         budget.watchlistTickers.removeAll { $0.uppercased() == ticker.uppercased() }
         budget.watchlistAlertSettings.removeValue(forKey: ticker.uppercased())
         homeWatchlistRows.removeAll { $0.symbol.uppercased() == ticker.uppercased() }
-    }
-
-    private func homeWatchlistDetailPreview(_ row: HomeWatchlistRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(row.change, format: .currency(code: "USD"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let rsi = row.rsi14 {
-                    Text("RSI14 \(rsi, format: .number.precision(.fractionLength(1)))")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(rsi > 70 ? .red : (rsi < 30 ? .green : .secondary))
-                }
-            }
-
-            HStack(spacing: 10) {
-                watchlistIndicatorPill("SMA20", value: row.sma20)
-                watchlistIndicatorPill("SMA50", value: row.sma50)
-                watchlistIndicatorPill("EMA20", value: row.ema20)
-                watchlistIndicatorPill("Open", value: row.open)
-            }
-
-            if let dayLow = row.dayLow, let dayHigh = row.dayHigh, dayHigh > dayLow {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Day range")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(dayLow, format: .currency(code: "USD")) - \(dayHigh, format: .currency(code: "USD"))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    ProgressView(value: min(max((row.price - dayLow) / (dayHigh - dayLow), 0), 1))
-                        .tint(.blue)
-                }
-            }
-
-            if row.priceHistory.count >= 2 || !row.symbol.isEmpty {
-                TickerPriceHistoryChart(
-                    points: row.priceHistory,
-                    trendIsPositive: row.percentChange >= 0,
-                    style: .compact,
-                    symbol: row.symbol
-                )
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func watchlistIndicatorPill(_ label: String, value: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            if let value {
-                Text(value, format: .currency(code: "USD"))
-                    .font(.caption)
-                    .fontWeight(.medium)
-            } else {
-                Text("N/A")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -5333,15 +5943,23 @@ struct TickerSnapshotDetailView: View {
     @State private var snapshot: MarketQuoteSnapshot?
     @State private var priceHistory: [TickerPricePoint]
     @State private var noteDraft = ""
-    @State private var editingNote: TickerNote?
-    @State private var editingNoteText = ""
+    @State private var editingNoteDraft: TickerNoteEditDraft?
+    @State private var notePendingDelete: TickerNote?
+    @State private var showAddNoteSheet = false
+    @State private var addNoteTitle = ""
+    @State private var addNoteText = ""
+    @State private var addNoteURL = ""
+    @State private var addNoteURLTitle = ""
+    @State private var addNoteCategory = ""
+    @State private var noteSortOption: TickerNoteSortOption = .newest
+    @State private var expandedNoteIDs: Set<UUID> = []
+    @State private var summaryText: String?
+    @State private var isSummarizing = false
     @State private var isRefreshing = false
     @State private var selectedArticleURL: ArticleURL?
     @State private var refreshError: String?
     @State private var companyProfile: MarketCompanyProfile?
-    @State private var annualDividendPerShare: Double?
-    @State private var stockFinancials: StockFinancials?
-
+    @State private var showAlertSettings = false
     private let marketDataService = MarketDataService()
 
     init(
@@ -5370,6 +5988,23 @@ struct TickerSnapshotDetailView: View {
     private var cleanTicker: String { ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
     private var research: TickerResearch { budget.tickerResearch[cleanTicker] ?? TickerResearch() }
     private var notes: [TickerNote] { budget.notes(for: cleanTicker) }
+    private var sortedNotes: [TickerNote] {
+        switch noteSortOption {
+        case .newest:
+            return notes.sorted { $0.updatedAt > $1.updatedAt }
+        case .oldest:
+            return notes.sorted { $0.updatedAt < $1.updatedAt }
+        case .category:
+            return notes.sorted { lhs, rhs in
+                let leftCategory = lhs.category ?? "Uncategorized"
+                let rightCategory = rhs.category ?? "Uncategorized"
+                if leftCategory.localizedCaseInsensitiveCompare(rightCategory) == .orderedSame {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return leftCategory.localizedCaseInsensitiveCompare(rightCategory) == .orderedAscending
+            }
+        }
+    }
     private var latestPrice: Double { snapshot?.price ?? budget.cachedQuotes[cleanTicker]?.price ?? closes.last ?? 0 }
     private var priceChangeTint: Color { (snapshot?.percentChange ?? 0) >= 0 ? .green : .red }
 
@@ -5379,16 +6014,32 @@ struct TickerSnapshotDetailView: View {
     private var rsi14: Double? { TickerIndicators.rsi(indicatorCloses, period: 14) }
     private var macd: MACDResult? { TickerIndicators.macd(indicatorCloses) }
 
-    private struct FinancialDisplayRow: Identifiable {
-        let id = UUID()
-        let label: String
-        let value: String
+    private enum TickerNoteSortOption: String, CaseIterable, Identifiable {
+        case newest = "Newest"
+        case oldest = "Oldest"
+        case category = "Category"
+
+        var id: String { rawValue }
     }
 
-    private struct FinancialDisplaySection: Identifiable {
-        let id = UUID()
-        let title: String
-        let rows: [FinancialDisplayRow]
+    private struct TickerNoteEditDraft: Identifiable {
+        let id: UUID
+        let ticker: String
+        var title: String
+        var text: String
+        var url: String
+        var urlTitle: String
+        var category: String
+
+        init(note: TickerNote) {
+            id = note.id
+            ticker = note.ticker
+            title = note.title ?? ""
+            text = note.text
+            url = note.url ?? ""
+            urlTitle = note.urlTitle ?? ""
+            category = note.category ?? ""
+        }
     }
 
     var body: some View {
@@ -5421,12 +6072,21 @@ struct TickerSnapshotDetailView: View {
                     .disabled(isRefreshing)
                     .accessibilityLabel("Refresh ticker")
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showAlertSettings = true
+                    } label: {
+                        let settings = budget.watchlistAlertSettings(for: ticker)
+                        Image(systemName: settings.isEnabled ? "bell.badge.fill" : "bell.badge")
+                    }
+                    .accessibilityLabel("Alert settings")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
             .task {
-                if snapshot == nil || priceHistory.count < 2 || research.articles.isEmpty || stockFinancials == nil {
+                if snapshot == nil || priceHistory.count < 2 || research.articles.isEmpty {
                     await refreshTickerData()
                 }
             }
@@ -5434,25 +6094,92 @@ struct TickerSnapshotDetailView: View {
                 SafariView(url: item.url)
                     .ignoresSafeArea()
             }
-            .sheet(item: $editingNote) { note in
+            .sheet(isPresented: $showAlertSettings) {
+                WatchlistAlertSettingsView(budget: budget, ticker: ticker)
+            }
+            .sheet(item: $editingNoteDraft) { draft in
+                TickerSnapshotNoteEditorView(
+                    initialDraft: draft,
+                    onCancel: {
+                        editingNoteDraft = nil
+                    },
+                    onSave: { updatedDraft in
+                        budget.updateTickerNote(
+                            id: updatedDraft.id,
+                            ticker: updatedDraft.ticker,
+                            title: updatedDraft.title.nilIfEmpty,
+                            text: updatedDraft.text,
+                            url: updatedDraft.url.nilIfEmpty,
+                            urlTitle: updatedDraft.urlTitle.nilIfEmpty,
+                            category: updatedDraft.category.nilIfEmpty
+                        )
+                        editingNoteDraft = nil
+                    }
+                )
+            }
+            .sheet(isPresented: $showAddNoteSheet) {
                 NavigationStack {
                     Form {
-                        TextEditor(text: $editingNoteText)
-                            .frame(minHeight: 160)
-                    }
-                    .navigationTitle("Edit Note")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { editingNote = nil }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") {
-                                budget.updateTickerNote(note, text: editingNoteText)
-                                editingNote = nil
+                        TextField("Title", text: $addNoteTitle)
+                        TextEditor(text: $addNoteText)
+                            .frame(minHeight: 140)
+                        TextField("URL (e.g. article link)", text: $addNoteURL)
+                            .keyboardType(.URL)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        TextField("URL Label", text: $addNoteURLTitle)
+                        Picker("Category", selection: $addNoteCategory) {
+                            Text("None").tag("")
+                            ForEach(noteCategories, id: \.self) { category in
+                                Text(category).tag(category)
                             }
                         }
                     }
+                    .navigationTitle("Add Note")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") {
+                                showAddNoteSheet = false
+                                resetAddNoteFields()
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Add") {
+                                budget.addTickerNote(
+                                    ticker: cleanTicker,
+                                    title: addNoteTitle.nilIfEmpty,
+                                    text: addNoteText,
+                                    url: addNoteURL.nilIfEmpty,
+                                    urlTitle: addNoteURLTitle.nilIfEmpty,
+                                    category: addNoteCategory.nilIfEmpty
+                                )
+                                showAddNoteSheet = false
+                                resetAddNoteFields()
+                            }
+                            .disabled(addNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
                 }
+            }
+            .confirmationDialog(
+                "Delete this note?",
+                isPresented: Binding(
+                    get: { notePendingDelete != nil },
+                    set: { if !$0 { notePendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Note", role: .destructive) {
+                    if let notePendingDelete {
+                        budget.deleteTickerNote(notePendingDelete)
+                    }
+                    notePendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    notePendingDelete = nil
+                }
+            } message: {
+                Text("This removes the note from the ticker.")
             }
         }
     }
@@ -5516,258 +6243,43 @@ struct TickerSnapshotDetailView: View {
 
     private var financialsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let stockFinancials {
-                financialsPanel(stockFinancials)
-            } else {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(cleanTicker) Financials")
-                            .font(.headline)
-                        Text("Financial metrics will appear after the next Finnhub refresh.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            TradingViewWidgetContainer(
+                kind: .fundamentalData(symbol: cleanTicker),
+                height: 825,
+                isUserInteractionEnabled: true,
+                isScrollEnabled: true
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .padding(.horizontal)
-    }
-
-    private func financialsPanel(_ financials: StockFinancials) -> some View {
-        let sections = financialDisplaySections(for: financials)
-        return VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .top) {
-                Text(cleanTicker)
-                    .foregroundStyle(.blue)
-                Text("Financials")
-                    .foregroundStyle(.primary)
-                Spacer()
-                Text("TradingView")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.12), in: Capsule())
-            }
-            .font(.system(size: 32, weight: .bold, design: .rounded))
-            .minimumScaleFactor(0.55)
-            .lineLimit(1)
-
-            fiscalSummary(financials)
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 22, alignment: .top),
-                    GridItem(.flexible(), spacing: 22, alignment: .top)
-                ],
-                alignment: .leading,
-                spacing: 26
-            ) {
-                ForEach(sections) { section in
-                    financialSection(section)
-                }
-            }
-        }
-        .padding(24)
-        .background(Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .environment(\.colorScheme, .dark)
-    }
-
-    private func fiscalSummary(_ financials: StockFinancials) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            financialRow("Fiscal year end", value: financials.fiscalYearEnd ?? "--")
-            financialRow("Last fiscal period", value: financials.lastFiscalPeriod ?? "--")
-            financialRow("Last fiscal period end date", value: financials.lastFiscalPeriodEndDate ?? "--")
-        }
-    }
-
-    private func financialSection(_ section: FinancialDisplaySection) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(section.title)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(.primary)
-                .padding(.top, 2)
-            ForEach(section.rows) { row in
-                financialRow(row.label, value: row.value)
-            }
-        }
-    }
-
-    private func financialRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 10)
-            Text(value)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-    }
-
-    private func financialDisplaySections(for financials: StockFinancials) -> [FinancialDisplaySection] {
-        [
-            FinancialDisplaySection(
-                title: "Valuation",
-                rows: [
-                    row("Market capitalization", formatFinancialMillions(financials.marketCapitalization)),
-                    row("Enterprise value", formatFinancialMillions(financials.enterpriseValue)),
-                    row("Enterprise value/EBITDA (TTM)", formatNumber(financials.enterpriseValueToEBITDA)),
-                    row("P/E ratio", formatNumber(financials.peRatio)),
-                    row("P/S ratio", formatNumber(financials.psRatio)),
-                    row("P/B ratio", formatNumber(financials.pbRatio)),
-                    row("P/CF ratio", formatNumber(financials.pcfRatio)),
-                    row("P/FCF ratio", formatNumber(financials.pfcfRatio))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Cash Flow",
-                rows: [
-                    row("Operating cash flow (TTM)", formatFinancialMillions(financials.operatingCashFlow)),
-                    row("Investing cash flow (TTM)", formatFinancialMillions(financials.investingCashFlow)),
-                    row("Financing cash flow (TTM)", formatFinancialMillions(financials.financingCashFlow)),
-                    row("Free cash flow (TTM)", formatFinancialMillions(financials.freeCashFlow)),
-                    row("CapEx (TTM)", formatFinancialMillions(financials.capex))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Income Statement",
-                rows: [
-                    row("Total revenue (TTM)", formatFinancialMillions(financials.totalRevenue)),
-                    row("Revenue per share (TTM)", formatNumber(financials.revenuePerShare)),
-                    row("Gross profit (TTM)", formatFinancialMillions(financials.grossProfit)),
-                    row("Operating income (TTM)", formatFinancialMillions(financials.operatingIncome)),
-                    row("Net income (TTM)", formatFinancialMillions(financials.netIncome)),
-                    row("EPS diluted (TTM)", formatNumber(financials.epsDilutedTTM)),
-                    row("EPS diluted (FQ)", formatNumber(financials.epsDilutedFQ)),
-                    row("Total shares outstanding", formatFinancialMillions(financials.totalSharesOutstanding)),
-                    row("Shares float", formatFinancialMillions(financials.sharesFloat))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Profitability",
-                rows: [
-                    row("Gross margin (TTM)", formatPercent(financials.grossMargin)),
-                    row("Operating margin (TTM)", formatPercent(financials.operatingMargin)),
-                    row("Pretax margin (TTM)", formatPercent(financials.pretaxMargin)),
-                    row("Net margin (TTM)", formatPercent(financials.netMargin))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Balance Sheet",
-                rows: [
-                    row("Total assets (FQ)", formatFinancialMillions(financials.totalAssets)),
-                    row("Total liabilities (FQ)", formatFinancialMillions(financials.totalLiabilities)),
-                    row("Total equity (FQ)", formatFinancialMillions(financials.totalEquity)),
-                    row("Total debt (FQ)", formatFinancialMillions(financials.totalDebt))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Efficiency",
-                rows: [
-                    row("Return on assets (TTM)", formatPercent(financials.returnOnAssets)),
-                    row("Return on equity (TTM)", formatPercent(financials.returnOnEquity)),
-                    row("Return on invested capital (TTM)", formatPercent(financials.returnOnInvestedCapital)),
-                    row("Revenue per employee (FY)", formatAbbreviated(financials.revenuePerEmployee)),
-                    row("Net income per employee (FY)", formatAbbreviated(financials.netIncomePerEmployee))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Price History",
-                rows: [
-                    row("Average volume (10 day)", formatVolumeMillions(financials.averageVolume10Day)),
-                    row("1-Year beta", formatNumber(financials.betaOneYear)),
-                    row("52 Week high", formatNumber(financials.week52High)),
-                    row("52 Week low", formatNumber(financials.week52Low)),
-                    row("1 year price target", formatNumber(financials.oneYearPriceTarget))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Dividends",
-                rows: [
-                    row("Dividend yield indicated", formatPercent(financials.dividendYieldIndicated ?? dividendYieldPercent)),
-                    row("Dividends per share (FY)", formatNumber(financials.dividendsPerShareFY ?? annualDividendPerShare)),
-                    row("Last payment amount", formatNumber(financials.lastDividendAmount)),
-                    row("Last ex-dividend date", financials.lastDividendExDate ?? "--")
-                ]
-            )
-        ]
-    }
-
-    private func row(_ label: String, _ value: String) -> FinancialDisplayRow {
-        FinancialDisplayRow(label: label, value: value)
-    }
-
-    private func formatFinancialMillions(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let absValue = abs(value)
-        if absValue >= 1_000_000 {
-            return "\(formatCompact(value / 1_000_000))T"
-        }
-        if absValue >= 1_000 {
-            return "\(formatCompact(value / 1_000))B"
-        }
-        return "\(formatCompact(value))M"
-    }
-
-    private func formatVolumeMillions(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(formatCompact(value))M"
-    }
-
-    private func formatAbbreviated(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let absValue = abs(value)
-        if absValue >= 1_000_000_000_000 {
-            return "\(formatCompact(value / 1_000_000_000_000))T"
-        }
-        if absValue >= 1_000_000_000 {
-            return "\(formatCompact(value / 1_000_000_000))B"
-        }
-        if absValue >= 1_000_000 {
-            return "\(formatCompact(value / 1_000_000))M"
-        }
-        if absValue >= 1_000 {
-            return "\(formatCompact(value / 1_000))K"
-        }
-        return formatCompact(value)
-    }
-
-    private func formatPercent(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(formatCompact(value))%"
-    }
-
-    private func formatNumber(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return formatCompact(value)
-    }
-
-    private func formatCompact(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = abs(value) >= 100 ? 1 : 2
-        formatter.usesGroupingSeparator = true
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
     }
 
     private var notesSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                HStack(alignment: .center) {
                     Label("Notes", systemImage: "note.text")
                         .font(.headline)
                     Spacer()
+                    if !notes.isEmpty {
+                        Menu {
+                            ForEach(TickerNoteSortOption.allCases) { option in
+                                Button {
+                                    noteSortOption = option
+                                } label: {
+                                    if noteSortOption == option {
+                                        Label(option.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.rawValue)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(noteSortOption.rawValue, systemImage: "arrow.up.arrow.down")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     Text("\(notes.count)")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
@@ -5776,7 +6288,7 @@ struct TickerSnapshotDetailView: View {
                         .background(Color.secondary.opacity(0.10), in: Capsule())
                 }
                 HStack(alignment: .top, spacing: 8) {
-                    TextField("Add note", text: $noteDraft, axis: .vertical)
+                    TextField("Quick note", text: $noteDraft, axis: .vertical)
                         .lineLimit(2...4)
                         .padding(10)
                         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -5789,43 +6301,227 @@ struct TickerSnapshotDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(noteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Add note")
                 }
+
+                HStack(spacing: 8) {
+                    Button {
+                        showAddNoteSheet = true
+                    } label: {
+                        Label("Add Detail", systemImage: "plus.square")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+
+                    if !notes.isEmpty {
+                        Button {
+                            Task { await generateNotesSummary() }
+                        } label: {
+                            if isSummarizing {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else {
+                                Label("Summarize", systemImage: "apple.intelligence")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isSummarizing)
+                    }
+                }
+
+                if let summaryText {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("AI Summary", systemImage: "apple.intelligence")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.blue)
+                        TickerMarkdownText(markdown: summaryText, baseFont: .caption, baseColor: .secondary, spacing: 5)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
                 if notes.isEmpty {
                     Text("No notes for \(cleanTicker) yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(notes) { note in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(note.text)
-                                .font(.subheadline)
-                            HStack {
-                                Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
-                                Spacer()
-                                Button("Edit") {
-                                    editingNoteText = note.text
-                                    editingNote = note
-                                }
-                                Button(role: .destructive) {
-                                    budget.deleteTickerNote(note)
-                                } label: {
-                                    Image(systemName: "trash")
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        .padding(10)
-                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                        )
+                    ForEach(sortedNotes) { note in
+                        noteCard(note)
                     }
                 }
             }
         }
         .padding(.horizontal)
+    }
+
+    private func noteCard(_ note: TickerNote) -> some View {
+        let isExpanded = expandedNoteIDs.contains(note.id)
+        let isLong = isLongNote(note)
+        return VStack(alignment: .leading, spacing: 8) {
+            if let title = note.title {
+                TickerMarkdownText(markdown: title, spacing: 4, forceHeader1: true)
+            }
+
+            TickerMarkdownText(markdown: note.text, baseFont: .subheadline)
+                .frame(maxHeight: isExpanded || !isLong ? nil : 96, alignment: .top)
+                .clipped()
+
+            if isLong {
+                Button {
+                    toggleNoteExpansion(note.id)
+                } label: {
+                    Text(isExpanded ? "Show Less" : "Show More")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let url = note.url, let destination = noteURL(from: url) {
+                Link(destination: destination) {
+                    Label(note.urlTitle ?? url, systemImage: "link")
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .tint(.blue)
+            }
+
+            HStack {
+                if let category = note.category {
+                    Text(category)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+                Spacer()
+                Text(note.updatedAt, format: .dateTime.month().day().year().hour().minute())
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    editingNoteDraft = TickerNoteEditDraft(note: note)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.titleAndIcon)
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+
+                Button(role: .destructive) {
+                    notePendingDelete = note
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private func isLongNote(_ note: TickerNote) -> Bool {
+        note.text.count > 220 || note.text.components(separatedBy: .newlines).count > 5
+    }
+
+    private func toggleNoteExpansion(_ id: UUID) {
+        if expandedNoteIDs.contains(id) {
+            expandedNoteIDs.remove(id)
+        } else {
+            expandedNoteIDs.insert(id)
+        }
+    }
+
+    private func noteURL(from text: String) -> URL? {
+        if let url = URL(string: text), url.scheme != nil {
+            return url
+        }
+        return URL(string: "https://\(text)")
+    }
+
+    private func resetAddNoteFields() {
+        addNoteTitle = ""
+        addNoteText = ""
+        addNoteURL = ""
+        addNoteURLTitle = ""
+        addNoteCategory = ""
+    }
+
+    private func generateNotesSummary() async {
+        isSummarizing = true
+        summaryText = nil
+        do {
+            if #available(iOS 26.0, *) {
+                summaryText = try await budget.summarizeNotes(for: cleanTicker)
+            } else {
+                summaryText = "Summarization requires iOS 26.0 or later with Apple Intelligence."
+            }
+        } catch {
+            summaryText = "Summary unavailable: \(error.localizedDescription)"
+        }
+        isSummarizing = false
+    }
+
+    private struct TickerSnapshotNoteEditorView: View {
+        let onCancel: () -> Void
+        let onSave: (TickerNoteEditDraft) -> Void
+        @State private var draft: TickerNoteEditDraft
+
+        init(
+            initialDraft: TickerNoteEditDraft,
+            onCancel: @escaping () -> Void,
+            onSave: @escaping (TickerNoteEditDraft) -> Void
+        ) {
+            self.onCancel = onCancel
+            self.onSave = onSave
+            _draft = State(initialValue: initialDraft)
+        }
+
+        var body: some View {
+            NavigationStack {
+                Form {
+                    TextField("Title", text: $draft.title)
+                    TextEditor(text: $draft.text)
+                        .frame(minHeight: 140)
+                    TextField("URL (e.g. article link)", text: $draft.url)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                    TextField("URL Label", text: $draft.urlTitle)
+                    Picker("Category", selection: $draft.category) {
+                        Text("None").tag("")
+                        ForEach(noteCategories, id: \.self) { category in
+                            Text(category).tag(category)
+                        }
+                    }
+                }
+                .navigationTitle("Edit Note")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel", action: onCancel)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            var cleanDraft = draft
+                            cleanDraft.text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            onSave(cleanDraft)
+                        }
+                        .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+        }
     }
 
     private var aiCaseSection: some View {
@@ -5963,10 +6659,6 @@ struct TickerSnapshotDetailView: View {
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var dividendYieldPercent: Double? {
-        guard let annualDividendPerShare, latestPrice > 0 else { return nil }
-        return (annualDividendPerShare / latestPrice) * 100
-    }
 
     @MainActor
     private func refreshTickerData() async {
@@ -5993,14 +6685,6 @@ struct TickerSnapshotDetailView: View {
             priceHistory = fetchedHistory
         } else if priceHistory.count < 2, let snapshot {
             priceHistory = TickerPricePoint.estimated(from: compactTickerSessionPrices(from: snapshot))
-        }
-
-        if let details = try? await marketDataService.fetchQuoteDetails(ticker: cleanTicker, settings: budget.marketDataSettings) {
-            annualDividendPerShare = details.annualDividendPerShare
-        }
-
-        if let financials = try? await marketDataService.fetchStockFinancials(ticker: cleanTicker, settings: budget.marketDataSettings) {
-            stockFinancials = financials
         }
 
         let apiKey = budget.marketDataSettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6066,6 +6750,458 @@ struct TickerSnapshotDetailView: View {
 private struct ArticleURL: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
+}
+
+private struct TickerSearchView: View {
+    @ObservedObject var budget: BudgetModel
+    let onAdd: ([String]) -> Void
+    let onSnapshot: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var searchText = ""
+    @State private var results: [SymbolLookupResult] = []
+    @State private var isSearching = false
+    @State private var selectedTickers: Set<String> = []
+    @State private var searchError: String?
+    @State private var quoteSnapshots: [String: MarketQuoteSnapshot] = [:]
+    @State private var marketOverview: [MarketOverviewItem] = []
+    @State private var sectorQuotes: [String: MarketQuoteSnapshot] = [:]
+    @State private var isLoadingOverview = false
+
+    private let marketDataService = MarketDataService()
+
+    private static let overviewSymbols: [(symbol: String, name: String)] = [
+        ("SPY", "S&P 500"),
+        ("GLD", "Gold"),
+        ("USO", "Crude Oil"),
+    ]
+
+    private static let sectorSymbols: [(symbol: String, name: String)] = [
+        ("XLK", "Technology"),
+        ("XLF", "Financials"),
+        ("XLV", "Healthcare"),
+        ("XLE", "Energy"),
+        ("XLI", "Industrials"),
+        ("XLP", "Consumer Staples"),
+        ("XLY", "Consumer Disc."),
+        ("XLB", "Materials"),
+        ("XLRE", "Real Estate"),
+        ("XLU", "Utilities"),
+        ("XLC", "Communication"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if searchText.isEmpty {
+                    emptyStateContent
+                } else if isSearching {
+                    loadingContent
+                } else if let error = searchError {
+                    errorContent(error)
+                } else if results.isEmpty {
+                    noResultsContent
+                } else {
+                    searchResultsContent
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search ticker...")
+            .autocapitalization(.none)
+            .disableAutocorrection(true)
+            .navigationTitle("Add to Watchlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add (\(selectedTickers.count))") {
+                        onAdd(Array(selectedTickers))
+                        dismiss()
+                    }
+                    .disabled(selectedTickers.isEmpty)
+                }
+            }
+            .task {
+                await loadMarketData()
+            }
+            .onChange(of: searchText) { _, newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else {
+                    results = []
+                    quoteSnapshots = [:]
+                    searchError = nil
+                    return
+                }
+                isSearching = true
+                searchError = nil
+                quoteSnapshots = [:]
+                Task {
+                    do {
+                        let fetched = try await marketDataService.fetchSymbolLookup(
+                            query: trimmed,
+                            settings: budget.marketDataSettings
+                        )
+                        let topResults = Array(fetched.prefix(20))
+                        await MainActor.run {
+                            results = topResults
+                            isSearching = false
+                        }
+                        await fetchQuotes(for: topResults)
+                    } catch {
+                        await MainActor.run {
+                            searchError = error.localizedDescription
+                            isSearching = false
+                            results = []
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Empty State
+
+    @ViewBuilder
+    private var emptyStateContent: some View {
+        if isLoadingOverview {
+            VStack(spacing: 16) {
+                Spacer().frame(height: 80)
+                ProgressView()
+                Text("Loading market data...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                marketOverviewSection
+                sectorsSection
+                hintText
+            }
+            .padding()
+        }
+    }
+
+    private var loadingContent: some View {
+        VStack(spacing: 8) {
+            Spacer().frame(height: 60)
+            ProgressView()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func errorContent(_ error: String) -> some View {
+        VStack(spacing: 8) {
+            Spacer().frame(height: 60)
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var noResultsContent: some View {
+        VStack(spacing: 8) {
+            Spacer().frame(height: 60)
+            Text("No results found.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var marketOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Market Overview")
+                .font(.headline)
+            HStack(spacing: 10) {
+                ForEach(marketOverview) { item in
+                    marketOverviewCard(item)
+                }
+            }
+        }
+    }
+
+    private func marketOverviewCard(_ item: MarketOverviewItem) -> some View {
+        let isUp = item.quote?.percentChange ?? 0 >= 0
+        return Button {
+            onSnapshot(item.symbol)
+            dismiss()
+        } label: {
+            VStack(spacing: 8) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.symbol)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(item.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let history = item.priceHistory, history.count >= 2 {
+                    TickerPriceHistoryChart(
+                        points: history,
+                        trendIsPositive: isUp,
+                        style: .compact
+                    )
+                    .frame(height: 52)
+                }
+
+                if let quote = item.quote {
+                    Text(quote.price, format: .currency(code: "USD").precision(.fractionLength(2)))
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: isUp ? "arrow.up" : "arrow.down")
+                            .font(.caption.weight(.bold))
+                        Text(quote.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(isUp ? .green : .red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(14)
+            .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Sectors
+
+    private var sectorsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sectors")
+                .font(.headline)
+
+            LazyVGrid(columns: [
+                GridItem(.adaptive(minimum: 68), spacing: 8)
+            ], spacing: 8) {
+                ForEach(Self.sectorSymbols, id: \.symbol) { entry in
+                    sectorTile(symbol: entry.symbol, name: entry.name, quote: sectorQuotes[entry.symbol])
+                }
+            }
+        }
+    }
+
+    private func sectorTile(symbol: String, name: String, quote: MarketQuoteSnapshot?) -> some View {
+        let pct = quote?.percentChange ?? 0
+        let isUp = pct >= 0
+        return Button {
+            onSnapshot(symbol)
+            dismiss()
+        } label: {
+            VStack(spacing: 4) {
+                Text(symbol)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if let quote {
+                    HStack(spacing: 2) {
+                        Image(systemName: isUp ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 8))
+                        Text(quote.percentChange / 100, format: .percent.precision(.fractionLength(1)))
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(isUp ? .green : .red)
+                } else {
+                    Text("--")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Text(name)
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill((isUp ? Color.green : Color.red).opacity(quote != nil ? 0.08 : 0.03))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 58)
+    }
+
+    // MARK: - Hint
+
+    private var hintText: some View {
+        Text("Type above to search for any stock symbol.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+    }
+
+    // MARK: - Search Results
+
+    private var searchResultsContent: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(results) { result in
+                Button {
+                    if selectedTickers.contains(result.symbol) {
+                        selectedTickers.remove(result.symbol)
+                    } else {
+                        selectedTickers.insert(result.symbol)
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.symbol)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(result.description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if let quote = quoteSnapshots[result.symbol] {
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(quote.price, format: .currency(code: "USD").precision(.fractionLength(2)))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                HStack(spacing: 3) {
+                                    Image(systemName: quote.percentChange >= 0 ? "arrow.up" : "arrow.down")
+                                        .font(.caption2.weight(.bold))
+                                    Text(quote.percentChange / 100, format: .percent.precision(.fractionLength(2)))
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(quote.percentChange >= 0 ? .green : .red)
+                            }
+                            .frame(minWidth: 80, alignment: .trailing)
+                        }
+                        if selectedTickers.contains(result.symbol) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.blue)
+                                .font(.title3)
+                        } else {
+                            Image(systemName: "circle")
+                                .foregroundStyle(.secondary)
+                                .font(.title3)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if result.id != results.last?.id {
+                    Divider().padding(.leading, 20)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Data Loading
+
+    private func loadMarketData() async {
+        guard budget.marketDataSettings.canFetchMarketData else { return }
+        isLoadingOverview = true
+        defer { isLoadingOverview = false }
+
+        // Load overview (SPY, GLD, USO) sequentially since it's just 3
+        var items: [MarketOverviewItem] = []
+        for entry in Self.overviewSymbols {
+            let quote = try? await marketDataService.fetchQuoteSnapshot(
+                ticker: entry.symbol,
+                settings: budget.marketDataSettings
+            )
+            let history = try? await marketDataService.fetchCompositeRecentPriceHistory(
+                ticker: entry.symbol,
+                settings: budget.marketDataSettings,
+                days: 30
+            )
+            items.append(MarketOverviewItem(
+                symbol: entry.symbol,
+                name: entry.name,
+                quote: quote,
+                priceHistory: history
+            ))
+        }
+
+        // Load sector quotes in parallel
+        var sectors: [String: MarketQuoteSnapshot] = [:]
+        await withTaskGroup(of: (String, MarketQuoteSnapshot?).self) { group in
+            for entry in Self.sectorSymbols {
+                group.addTask {
+                    do {
+                        let quote = try await marketDataService.fetchQuoteSnapshot(
+                            ticker: entry.symbol,
+                            settings: budget.marketDataSettings
+                        )
+                        return (entry.symbol, quote)
+                    } catch {
+                        return (entry.symbol, nil)
+                    }
+                }
+            }
+            for await (symbol, quote) in group {
+                if let quote {
+                    sectors[symbol] = quote
+                }
+            }
+        }
+
+        await MainActor.run {
+            marketOverview = items
+            sectorQuotes = sectors
+        }
+    }
+
+    private func fetchQuotes(for symbols: [SymbolLookupResult]) async {
+        await withTaskGroup(of: (String, MarketQuoteSnapshot?).self) { group in
+            for result in symbols {
+                group.addTask {
+                    do {
+                        let quote = try await marketDataService.fetchQuoteSnapshot(
+                            ticker: result.symbol,
+                            settings: budget.marketDataSettings
+                        )
+                        return (result.symbol, quote)
+                    } catch {
+                        return (result.symbol, nil)
+                    }
+                }
+            }
+            var snapshots: [String: MarketQuoteSnapshot] = [:]
+            for await (symbol, quote) in group {
+                if let quote {
+                    snapshots[symbol] = quote
+                }
+            }
+            await MainActor.run {
+                quoteSnapshots = snapshots
+            }
+        }
+    }
+}
+
+private struct MarketOverviewItem: Identifiable {
+    let id = UUID()
+    let symbol: String
+    let name: String
+    let quote: MarketQuoteSnapshot?
+    let priceHistory: [TickerPricePoint]?
 }
 
 struct TickerPriceHistoryChart: View {
@@ -6937,6 +8073,7 @@ struct CategorySummaryItem: Identifiable {
 struct CustomTabBar: View {
     enum CalendarQuickAction {
         case addCalendarEntry
+        case transferCash
         case creditCards
     }
 
@@ -6951,88 +8088,80 @@ struct CustomTabBar: View {
     var body: some View {
         HStack {
             if minimized {
-                Menu {
-                    if selectedTab == .margin {
-                        Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
-                        Button("Add Investment") { onMarginQuickAction(.addInvestment) }
-                        Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
-                        Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
-                        Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
-                    } else if selectedTab == .calendar {
-                        Button("Add Calendar Entry") { onCalendarQuickAction(.addCalendarEntry) }
-                        Button("Credit Cards") { onCalendarQuickAction(.creditCards) }
-                    } else {
-                        Button(action: onAddExpense) {
-                            Label("Add Expense", systemImage: "minus.circle")
-                        }
-                        Button(action: onAddIncome) {
-                            Label("Add Income", systemImage: "plus.circle")
-                        }
-                    }
-                    Button("Show Tabs", action: onExpand)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .frame(width: 36, height: 36)
-                }
-                .accessibilityLabel("Quick add menu")
+                quickActionMenu(size: 38, includeShowTabs: true)
             } else {
                 tabButton(.home, systemImage: "house.fill")
                 Spacer()
-                tabButton(.margin, systemImage: "shield.lefthalf.filled")
+                tabButton(.margin, systemImage: "chart.line.uptrend.xyaxis")
                 Spacer()
-                Menu {
-                    if selectedTab == .margin {
-                        Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
-                        Button("Add Investment") { onMarginQuickAction(.addInvestment) }
-                        Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
-                        Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
-                        Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
-                    } else if selectedTab == .calendar {
-                        Button("Add Calendar Entry") { onCalendarQuickAction(.addCalendarEntry) }
-                        Button("Credit Cards") { onCalendarQuickAction(.creditCards) }
-                    } else {
-                        Button(action: onAddExpense) {
-                            Label("Add Expense", systemImage: "minus.circle")
-                        }
-                        Button(action: onAddIncome) {
-                            Label("Add Income", systemImage: "plus.circle")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                        )
-                        .padding(.bottom, 10)
-                }
-                .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 6)
-                .accessibilityLabel("Quick add menu")
+                quickActionMenu(size: 42, includeShowTabs: false)
                 Spacer()
                 tabButton(.calendar, systemImage: "calendar")
                 Spacer()
-                tabButton(.budget, systemImage: "square.grid.2x2")
+                tabButton(.budget, systemImage: "dollarsign")
             }
         }
-        .padding(.horizontal, minimized ? 10 : 20)
+        .padding(.horizontal, minimized ? 8 : 12)
         .padding(.vertical, minimized ? 8 : 8)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: minimized ? 18 : 24, style: .continuous)
+                .fill(CuanTheme.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: minimized ? 18 : 24, style: .continuous)
+                .stroke(CuanTheme.border, lineWidth: 1)
         )
-        .frame(maxWidth: minimized ? 80 : 460)
-        .padding(.horizontal, minimized ? 8 : 16)
+        .shadow(color: Color.black.opacity(0.10), radius: 20, x: 0, y: 10)
+        .frame(maxWidth: minimized ? 56 : 356)
+        .padding(.horizontal, 12)
         .padding(.bottom, 4)
+    }
+
+    private func quickActionMenu(size: CGFloat, includeShowTabs: Bool) -> some View {
+        Menu {
+            if selectedTab == .margin {
+                Button("Add Transaction") { onMarginQuickAction(.addTransaction) }
+                Button("Add Investment") { onMarginQuickAction(.addInvestment) }
+                Button("Add Manual Holding") { onMarginQuickAction(.addManualHolding) }
+                Button("Margin Settings") { onMarginQuickAction(.marginSettings) }
+                Button("Activity Ledger") { onMarginQuickAction(.ledgerHistory) }
+            } else if selectedTab == .calendar {
+                Button("Add Calendar Entry") { onCalendarQuickAction(.addCalendarEntry) }
+                Button("Transfer Cash") { onCalendarQuickAction(.transferCash) }
+                Button("Credit Cards") { onCalendarQuickAction(.creditCards) }
+            } else {
+                Button(action: onAddExpense) {
+                    Label("Add Expense", systemImage: "minus.circle")
+                }
+                Button(action: onAddIncome) {
+                    Label("Add Income", systemImage: "plus.circle")
+                }
+                if selectedTab == .budget {
+                    Button("Transfer Cash") { onCalendarQuickAction(.transferCash) }
+                }
+            }
+            if includeShowTabs {
+                Button("Show Tabs", action: onExpand)
+            }
+        } label: {
+            Image(systemName: minimized ? "plus" : "plus")
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(CuanTheme.primary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.bottom, minimized ? 0 : 8)
+        }
+        .shadow(color: CuanTheme.primary.opacity(0.28), radius: minimized ? 0 : 10, x: 0, y: minimized ? 0 : 6)
+        .accessibilityLabel("Quick add menu")
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                if minimized {
+                    onExpand()
+                } else {
+                    onExpand()
+                }
+            }
+        )
     }
 
     private func tabButton(_ mode: BudgetMode, systemImage: String) -> some View {
@@ -7041,14 +8170,17 @@ struct CustomTabBar: View {
                 selectedTab = mode
             }
         }) {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Image(systemName: systemImage)
-                    .font(.subheadline)
+                    .font(.caption.weight(.bold))
                 Text(mode.title)
-                    .font(.footnote)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .foregroundStyle(selectedTab == mode ? Color.primary : Color.secondary)
-            .frame(width: 72, height: 48)
+            .foregroundStyle(selectedTab == mode ? CuanTheme.primary : CuanTheme.muted)
+            .frame(width: 56, height: 42)
+            .background(selectedTab == mode ? CuanTheme.primary.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(mode.title) tab")
@@ -7885,6 +9017,8 @@ struct AddExpenseView: View {
     @State private var customCategoryName: String = ""
     @State private var paymentAccount: String = ""
     @State private var note: String = ""
+    @State private var isCreditCardPayment = false
+    @State private var targetCreditAccountName = ""
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
@@ -7895,6 +9029,31 @@ struct AddExpenseView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return Array(Set(names)).sorted()
+    }
+
+    private var bankPaymentAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
+    private var creditCardOptions: [String] {
+        budget.creditAccounts
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    private func creditCardPaymentCategoryId() -> UUID {
+        let paymentCategoryName = "Credit Card Payment"
+        if let existing = budget.needsCategories.first(where: { $0.name.caseInsensitiveCompare(paymentCategoryName) == .orderedSame }) {
+            return existing.id
+        }
+        let newCategory = Category(name: paymentCategoryName, allocatedAmount: 0)
+        budget.needsCategories.append(newCategory)
+        return newCategory.id
     }
 
     private let preselectedSection: BudgetSection
@@ -7945,24 +9104,39 @@ struct AddExpenseView: View {
                         }
                     }
 
-                    Toggle("Other category", isOn: $useCustomCategory)
-
-                    if useCustomCategory {
-                        TextField("Custom category", text: $customCategoryName)
-                    } else if categories.isEmpty {
-                        Text("Add a category in Plan Mode first.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                    if isCreditCardPayment {
+                        if creditCardOptions.isEmpty {
+                            Text("Add a credit card in Credit Accounts first.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Apply to card", selection: $targetCreditAccountName) {
+                                ForEach(creditCardOptions, id: \.self) { accountName in
+                                    Text(accountName).tag(accountName)
+                                }
+                            }
+                        }
                     } else {
-                        Picker("Category", selection: $categoryId) {
-                            ForEach(categories) { category in
-                                Text(category.name).tag(Optional(category.id))
+                        Toggle("Other category", isOn: $useCustomCategory)
+
+                        if useCustomCategory {
+                            TextField("Custom category", text: $customCategoryName)
+                        } else if categories.isEmpty {
+                            Text("Add a category in Plan Mode first.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Category", selection: $categoryId) {
+                                ForEach(categories) { category in
+                                    Text(category.name).tag(Optional(category.id))
+                                }
                             }
                         }
                     }
-                    Picker("Paid with", selection: $paymentAccount) {
+                    Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
                         Text("None").tag("")
-                        ForEach(paymentAccountOptions, id: \.self) { accountName in
+                        ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
                             Text(accountName).tag(accountName)
                         }
                     }
@@ -7983,6 +9157,9 @@ struct AddExpenseView: View {
                 } else {
                     categoryId = categories.first?.id
                 }
+                if targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
             }
             .onChange(of: section) { _, _ in
                 if let categoryId, categories.contains(where: { $0.id == categoryId }) {
@@ -7992,6 +9169,11 @@ struct AddExpenseView: View {
                 useCustomCategory = false
                 customCategoryName = ""
             }
+            .onChange(of: isCreditCardPayment) { _, newValue in
+                if newValue && targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -7999,7 +9181,10 @@ struct AddExpenseView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let resolvedCategoryId: UUID?
-                        if useCustomCategory {
+                        if isCreditCardPayment {
+                            guard !targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                            resolvedCategoryId = creditCardPaymentCategoryId()
+                        } else if useCustomCategory {
                             let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !trimmed.isEmpty else { return }
                             let newCategory = Category(name: trimmed, allocatedAmount: 0)
@@ -8015,14 +9200,15 @@ struct AddExpenseView: View {
 
                         guard let categoryId = resolvedCategoryId else { return }
                         let expense = Expense(
-                            name: name,
-                            amount: amount,
-                            date: date,
-                            section: section,
-                            categoryId: categoryId,
-                            paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
+	                            name: name,
+	                            amount: amount,
+	                            date: date,
+	                            section: isCreditCardPayment ? .needs : section,
+	                            categoryId: categoryId,
+	                            paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+	                            note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+	                            creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+	                        )
                         withAnimation(.easeInOut) {
                             budget.addExpense(expense)
                         }
@@ -8030,7 +9216,7 @@ struct AddExpenseView: View {
                         Haptics.success()
                         dismiss()
                     }
-                    .disabled(name.isEmpty || amount <= 0 || (!useCustomCategory && categoryId == nil))
+                    .disabled(name.isEmpty || amount <= 0 || (!isCreditCardPayment && !useCustomCategory && categoryId == nil) || (isCreditCardPayment && targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 }
             }
         }
@@ -8306,6 +9492,8 @@ struct EditExpenseView: View {
     @State private var customCategoryName: String = ""
     @State private var paymentAccount: String
     @State private var note: String
+    @State private var isCreditCardPayment: Bool
+    @State private var targetCreditAccountName: String
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
@@ -8318,6 +9506,31 @@ struct EditExpenseView: View {
         return Array(Set(names)).sorted()
     }
 
+    private var bankPaymentAccountOptions: [String] {
+        let names = (budget.bankAccounts.map(\.name) + [paymentAccount])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(names)).sorted()
+    }
+
+    private var creditCardOptions: [String] {
+        budget.creditAccounts
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    private func creditCardPaymentCategoryId() -> UUID {
+        let paymentCategoryName = "Credit Card Payment"
+        if let existing = budget.needsCategories.first(where: { $0.name.caseInsensitiveCompare(paymentCategoryName) == .orderedSame }) {
+            return existing.id
+        }
+        let newCategory = Category(name: paymentCategoryName, allocatedAmount: 0)
+        budget.needsCategories.append(newCategory)
+        return newCategory.id
+    }
+
     init(budget: BudgetModel, expense: Expense) {
         self.budget = budget
         self.expense = expense
@@ -8328,6 +9541,9 @@ struct EditExpenseView: View {
         _categoryId = State(initialValue: expense.categoryId)
         _paymentAccount = State(initialValue: expense.paymentAccount)
         _note = State(initialValue: expense.note)
+        let target = budget.creditCardPaymentTarget(for: expense) ?? ""
+        _isCreditCardPayment = State(initialValue: !target.isEmpty)
+        _targetCreditAccountName = State(initialValue: target)
     }
 
     private var entryTitle: String {
@@ -8348,24 +9564,39 @@ struct EditExpenseView: View {
                             Text(item.title).tag(item)
                         }
                     }
-                    Toggle("Other category", isOn: $useCustomCategory)
-
-                    if useCustomCategory {
-                        TextField("Custom category", text: $customCategoryName)
-                    } else if categories.isEmpty {
-                        Text("Add a category in Plan Mode first.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                    if isCreditCardPayment {
+                        if creditCardOptions.isEmpty {
+                            Text("Add a credit card in Credit Accounts first.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Apply to card", selection: $targetCreditAccountName) {
+                                ForEach(creditCardOptions, id: \.self) { accountName in
+                                    Text(accountName).tag(accountName)
+                                }
+                            }
+                        }
                     } else {
-                        Picker("Category", selection: $categoryId) {
-                            ForEach(categories) { category in
-                                Text(category.name).tag(Optional(category.id))
+                        Toggle("Other category", isOn: $useCustomCategory)
+
+                        if useCustomCategory {
+                            TextField("Custom category", text: $customCategoryName)
+                        } else if categories.isEmpty {
+                            Text("Add a category in Plan Mode first.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Category", selection: $categoryId) {
+                                ForEach(categories) { category in
+                                    Text(category.name).tag(Optional(category.id))
+                                }
                             }
                         }
                     }
-                    Picker("Paid with", selection: $paymentAccount) {
+                    Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
                         Text("None").tag("")
-                        ForEach(paymentAccountOptions, id: \.self) { accountName in
+                        ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
                             Text(accountName).tag(accountName)
                         }
                     }
@@ -8382,6 +9613,16 @@ struct EditExpenseView: View {
                 useCustomCategory = false
                 customCategoryName = ""
             }
+            .onAppear {
+                if isCreditCardPayment && targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
+            }
+            .onChange(of: isCreditCardPayment) { _, newValue in
+                if newValue && targetCreditAccountName.isEmpty {
+                    targetCreditAccountName = creditCardOptions.first ?? ""
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -8389,7 +9630,10 @@ struct EditExpenseView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let resolvedCategoryId: UUID?
-                        if useCustomCategory {
+                        if isCreditCardPayment {
+                            guard !targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                            resolvedCategoryId = creditCardPaymentCategoryId()
+                        } else if useCustomCategory {
                             let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !trimmed.isEmpty else { return }
                             let newCategory = Category(name: trimmed, allocatedAmount: 0)
@@ -8410,16 +9654,17 @@ struct EditExpenseView: View {
                                 name: name,
                                 amount: amount,
                                 date: date,
-                                section: section,
+                                section: isCreditCardPayment ? .needs : section,
                                 categoryId: categoryId,
                                 paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                                note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                                creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
                             )
                         )
                         Haptics.success()
                         dismiss()
                     }
-                    .disabled(name.isEmpty || amount <= 0 || (!useCustomCategory && categoryId == nil))
+                    .disabled(name.isEmpty || amount <= 0 || (!isCreditCardPayment && !useCustomCategory && categoryId == nil) || (isCreditCardPayment && targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 }
             }
         }
@@ -8559,6 +9804,18 @@ struct CalendarEntryEditorView: View {
         return String(trimmed[afterMarker...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func creditCardPaymentTarget(from note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[CC_PAYMENT:"),
+              let endIndex = trimmed.firstIndex(of: "]") else {
+            return nil
+        }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 12)
+        guard startIndex < endIndex else { return nil }
+        let accountName = String(trimmed[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return accountName.isEmpty ? nil : accountName
+    }
+
     private func markedCreditCardPaymentNote(targetCard: String) -> String {
         let prefix = "[CC_PAYMENT:\(targetCard.trimmingCharacters(in: .whitespacesAndNewlines))]"
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -8574,7 +9831,9 @@ struct CalendarEntryEditorView: View {
         self.selectedDate = selectedDate
         self.existingRecurringPayment = existingRecurringPayment
         let existingNote = existingRecurringPayment?.note ?? ""
-        let existingTargetCard = existingNote.isEmpty ? "" : budget.creditCardPaymentTarget(from: existingNote) ?? ""
+        let existingTargetCard = existingRecurringPayment?.creditCardPaymentTarget
+            ?? (existingNote.isEmpty ? nil : Self.creditCardPaymentTarget(from: existingNote))
+            ?? ""
         _name = State(initialValue: existingRecurringPayment?.name ?? "")
         _amount = State(initialValue: existingRecurringPayment?.amount ?? 0)
         _date = State(initialValue: existingRecurringPayment?.startDate ?? selectedDate)
@@ -8592,7 +9851,7 @@ struct CalendarEntryEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Entry Type") {
+                Section("Type") {
                     if existingRecurringPayment == nil {
                         Picker("Mode", selection: $mode) {
                             ForEach(EntryMode.allCases) { item in
@@ -8600,29 +9859,29 @@ struct CalendarEntryEditorView: View {
                             }
                         }
                         .pickerStyle(.segmented)
-                    } else {
-                        Text("Recurring")
-                            .foregroundStyle(.secondary)
                     }
                     Picker("Kind", selection: $kind) {
                         Text("Expense").tag(RecurringPaymentKind.expense)
                         Text("Income").tag(RecurringPaymentKind.income)
                     }
+                    .pickerStyle(.segmented)
                 }
 
                 Section("Details") {
                     TextField("Name", text: $name)
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
-
                     DatePicker(
                         mode == .recurring || existingRecurringPayment != nil ? "Start date" : "Date",
                         selection: $date,
-                        displayedComponents: (mode == .oneTime ? [.date] : [.date])
+                        displayedComponents: .date
                     )
+                }
 
+                Section(kind == .expense ? "Payment" : "Account") {
                     if kind == .expense {
-                        Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                        Toggle("Credit card payment", isOn: $isCreditCardPayment)
+
                         if isCreditCardPayment {
                             if creditCardOptions.isEmpty {
                                 Text("Add a credit card in Credit Accounts first.")
@@ -8635,35 +9894,41 @@ struct CalendarEntryEditorView: View {
                                     }
                                 }
                             }
-                        }
-                        if !isCreditCardPayment {
+                            Picker("Pay from", selection: $paymentAccount) {
+                                Text("None").tag("")
+                                ForEach(bankPaymentAccountOptions, id: \.self) { accountName in
+                                    Text(accountName).tag(accountName)
+                                }
+                            }
+                        } else {
                             Picker("Section", selection: $section) {
                                 ForEach(BudgetSection.allCases) { item in
                                     Text(item.title).tag(item)
                                 }
                             }
-                            Toggle("Other category", isOn: $useCustomCategory)
-                            if useCustomCategory {
-                                TextField("Custom category", text: $customCategoryName)
-                            } else if categories.isEmpty {
+
+                            if categories.isEmpty {
                                 Text("Add a category in Plan first.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                TextField("Category name", text: $customCategoryName)
                             } else {
                                 Picker("Category", selection: $categoryId) {
                                     ForEach(categories) { category in
                                         Text(category.name).tag(Optional(category.id))
                                     }
                                 }
+                                Toggle("Custom category", isOn: $useCustomCategory)
+                                if useCustomCategory {
+                                    TextField("Category name", text: $customCategoryName)
+                                }
                             }
-                        }
-                    }
 
-                    if kind == .expense {
-                        Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
-                            Text("None").tag("")
-                            ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
-                                Text(accountName).tag(accountName)
+                            Picker("Paid with", selection: $paymentAccount) {
+                                Text("None").tag("")
+                                ForEach(paymentAccountOptions, id: \.self) { accountName in
+                                    Text(accountName).tag(accountName)
+                                }
                             }
                         }
                     } else {
@@ -8674,9 +9939,14 @@ struct CalendarEntryEditorView: View {
                             }
                         }
                     }
-                    TextField("Note", text: $note, axis: .vertical)
+                }
 
-                    if mode == .recurring || existingRecurringPayment != nil {
+                Section("Note") {
+                    TextField("Note", text: $note, axis: .vertical)
+                }
+
+                if mode == .recurring || existingRecurringPayment != nil {
+                    Section {
                         Toggle("Active", isOn: $isActive)
                     }
                 }
@@ -8740,13 +10010,6 @@ struct CalendarEntryEditorView: View {
                                 resolvedRecurringCategoryId = nil
                             }
 
-                            let markerNote: String
-                            if kind == .expense && isCreditCardPayment {
-                                markerNote = markedCreditCardPaymentNote(targetCard: targetCreditAccountName)
-                            } else {
-                                markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
-
                             let payment = RecurringPayment(
                                 id: existingRecurringPayment?.id ?? UUID(),
                                 name: trimmedName,
@@ -8760,7 +10023,8 @@ struct CalendarEntryEditorView: View {
                                 section: (kind == .expense && isCreditCardPayment) ? .needs : section,
                                 categoryId: resolvedRecurringCategoryId,
                                 paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                                note: markerNote
+                                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                                creditCardPaymentTarget: (kind == .expense && isCreditCardPayment) ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
                             )
                             if let index = budget.recurringPayments.firstIndex(where: { $0.id == payment.id }) {
                                 budget.recurringPayments[index] = payment
@@ -8803,12 +10067,6 @@ struct CalendarEntryEditorView: View {
                                 resolvedCategoryId = categoryId
                             }
                             guard let resolvedCategoryId else { return }
-                            let markerNote: String
-                            if isCreditCardPayment {
-                                markerNote = markedCreditCardPaymentNote(targetCard: targetCreditAccountName)
-                            } else {
-                                markerNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
                             budget.addExpense(
                                 Expense(
                                     name: trimmedName,
@@ -8818,7 +10076,8 @@ struct CalendarEntryEditorView: View {
                                     categoryId: resolvedCategoryId
                                     ,
                                     paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    note: markerNote
+                                    note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
                                 )
                             )
                         }
@@ -8848,7 +10107,7 @@ struct CreditAccountsView: View {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(from: expense.note),
+            if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
@@ -9088,7 +10347,7 @@ struct CreditAccountDetailView: View {
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(from: expense.note),
+            if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
@@ -9124,7 +10383,7 @@ struct CreditAccountDetailView: View {
         }
 
         entries.append(contentsOf: budget.expenses.compactMap { expense in
-            guard let paidCard = creditCardPaymentTarget(from: expense.note),
+            guard let paidCard = budget.creditCardPaymentTarget(for: expense),
                   paidCard.caseInsensitiveCompare(account.name) == .orderedSame else {
                 return nil
             }
@@ -9308,6 +10567,154 @@ struct PortfolioTransactionDetailView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+}
+
+struct CashTransferEditorView: View {
+    @ObservedObject var budget: BudgetModel
+    let selectedDate: Date
+    var existingTransfer: CashTransfer?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String
+    @State private var amount: Double
+    @State private var date: Date
+    @State private var fromAccountName: String
+    @State private var toAccountName: String
+    @State private var note: String
+
+    private var accountOptions: [String] {
+        budget.bankAccounts
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    private var canSave: Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let from = fromAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let to = toAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedName.isEmpty && amount > 0 && !from.isEmpty && !to.isEmpty && from.caseInsensitiveCompare(to) != .orderedSame
+    }
+
+    init(budget: BudgetModel, selectedDate: Date, existingTransfer: CashTransfer? = nil) {
+        self.budget = budget
+        self.selectedDate = selectedDate
+        self.existingTransfer = existingTransfer
+        let accounts = budget.bankAccounts
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+        _name = State(initialValue: existingTransfer?.name ?? "Cash Transfer")
+        _amount = State(initialValue: existingTransfer?.amount ?? 0)
+        _date = State(initialValue: existingTransfer?.date ?? selectedDate)
+        _fromAccountName = State(initialValue: existingTransfer?.fromAccountName ?? accounts.first ?? "")
+        _toAccountName = State(initialValue: existingTransfer?.toAccountName ?? accounts.dropFirst().first ?? "")
+        _note = State(initialValue: existingTransfer?.note ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if accountOptions.count < 2 {
+                    Section {
+                        Text("Add at least two bank accounts before transferring cash.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Transfer Details") {
+                    TextField("Name", text: $name)
+                    TextField("Amount", value: $amount, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                }
+
+                Section("Accounts") {
+                    Picker("From", selection: $fromAccountName) {
+                        ForEach(accountOptions, id: \.self) { accountName in
+                            Text(accountName).tag(accountName)
+                        }
+                    }
+
+                    Picker("To", selection: $toAccountName) {
+                        ForEach(accountOptions, id: \.self) { accountName in
+                            Text(accountName).tag(accountName)
+                        }
+                    }
+
+                    if !fromAccountName.isEmpty,
+                       !toAccountName.isEmpty,
+                       fromAccountName.caseInsensitiveCompare(toAccountName) == .orderedSame {
+                        Text("Choose two different accounts.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Note") {
+                    TextField("Optional note", text: $note, axis: .vertical)
+                }
+
+                if existingTransfer != nil {
+                    Section {
+                        Button("Delete Transfer", role: .destructive) {
+                            if let existingTransfer {
+                                budget.deleteCashTransfer(id: existingTransfer.id)
+                            }
+                            Haptics.warning()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle(existingTransfer == nil ? "Transfer Cash" : "Edit Transfer")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                normalizeAccountSelections()
+            }
+            .onChange(of: budget.bankAccounts) { _, _ in
+                normalizeAccountSelections()
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let transfer = CashTransfer(
+                            id: existingTransfer?.id ?? UUID(),
+                            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                            amount: amount,
+                            date: date,
+                            fromAccountName: fromAccountName.trimmingCharacters(in: .whitespacesAndNewlines),
+                            toAccountName: toAccountName.trimmingCharacters(in: .whitespacesAndNewlines),
+                            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        if existingTransfer == nil {
+                            budget.addCashTransfer(transfer)
+                        } else {
+                            budget.updateCashTransfer(transfer)
+                        }
+                        Haptics.success()
+                        dismiss()
+                    }
+                    .disabled(accountOptions.count < 2 || !canSave)
+                }
+            }
+        }
+    }
+
+    private func normalizeAccountSelections() {
+        guard accountOptions.count >= 2 else { return }
+        if !accountOptions.contains(fromAccountName) {
+            fromAccountName = accountOptions.first ?? ""
+        }
+        if !accountOptions.contains(toAccountName) || fromAccountName.caseInsensitiveCompare(toAccountName) == .orderedSame {
+            toAccountName = accountOptions.first(where: { $0.caseInsensitiveCompare(fromAccountName) != .orderedSame }) ?? ""
         }
     }
 }

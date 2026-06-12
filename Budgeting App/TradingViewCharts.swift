@@ -42,7 +42,9 @@ enum TradingViewWidgetKind: Equatable {
     case advancedChart(symbol: String, style: Int = 1)
     case baselineChart(symbol: String)
     case technicalAnalysis(symbol: String)
-    case miniSymbolChart(symbol: String)
+    case miniSymbolChart(symbol: String, height: Int = 72)
+    case timeline
+    case fundamentalData(symbol: String)
 
     var scriptURL: String {
         let base = "https://s3.tradingview.com/external-embedding/embed-widget-"
@@ -57,6 +59,10 @@ enum TradingViewWidgetKind: Equatable {
             return base + "advanced-chart.js"
         case .technicalAnalysis:
             return base + "technical-analysis.js"
+        case .timeline:
+            return base + "timeline.js"
+        case .fundamentalData:
+            return base + "financials.js"
         }
     }
 
@@ -182,7 +188,7 @@ enum TradingViewWidgetKind: Equatable {
                 "showIntervalTabs": true
             ]
 
-        case let .miniSymbolChart(symbol):
+        case let .miniSymbolChart(symbol, widgetHeight):
             let tvSymbol = TradingViewSymbol.format(symbol)
             return [
                 "allow_symbol_change": false,
@@ -207,7 +213,31 @@ enum TradingViewWidgetKind: Equatable {
                 "compareSymbols": [] as [String],
                 "studies": [] as [String],
                 "width": "100%",
-                "height": 72
+                "height": widgetHeight
+            ]
+
+        case .timeline:
+            return [
+                "feedMode": "market",
+                "market": "stock",
+                "isTransparent": true,
+                "displayMode": "regular",
+                "width": "100%",
+                "height": 1200,
+                "colorTheme": theme,
+                "locale": "en"
+            ]
+
+        case let .fundamentalData(symbol):
+            return [
+                "symbol": TradingViewSymbol.format(symbol),
+                "colorTheme": theme,
+                "isTransparent": true,
+                "largeChartUrl": "",
+                "displayMode": "regular",
+                "width": "100%",
+                "height": 825,
+                "locale": "en"
             ]
         }
     }
@@ -219,10 +249,12 @@ private struct TradingViewEmbedWebView: UIViewRepresentable {
     let kind: TradingViewWidgetKind
     let colorScheme: ColorScheme
     var isUserInteractionEnabled = true
+    var isScrollEnabled = false
     @Binding var didFailToLoad: Bool
+    var onNavigate: ((URL) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(didFailToLoad: $didFailToLoad)
+        Coordinator(didFailToLoad: $didFailToLoad, onNavigate: onNavigate)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -231,19 +263,23 @@ private struct TradingViewEmbedWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isOpaque = false
         webView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.bounces = false
+        webView.scrollView.isScrollEnabled = isScrollEnabled
+        webView.scrollView.bounces = isScrollEnabled
         webView.isUserInteractionEnabled = isUserInteractionEnabled
         webView.navigationDelegate = context.coordinator
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        let signature = context.coordinator.signature(for: kind, colorScheme: colorScheme)
-        guard context.coordinator.lastSignature != signature else { return }
-        context.coordinator.lastSignature = signature
-        didFailToLoad = false
         webView.isUserInteractionEnabled = isUserInteractionEnabled
+        webView.scrollView.isScrollEnabled = isScrollEnabled
+        webView.scrollView.bounces = isScrollEnabled
+        context.coordinator.onNavigate = onNavigate
+
+        let contentSignature = context.coordinator.contentSignature(for: kind, colorScheme: colorScheme)
+        guard context.coordinator.lastContentSignature != contentSignature else { return }
+        context.coordinator.lastContentSignature = contentSignature
+        didFailToLoad = false
 
         guard let html = Self.html(for: kind, colorScheme: colorScheme) else {
             didFailToLoad = true
@@ -260,14 +296,26 @@ private struct TradingViewEmbedWebView: UIViewRepresentable {
 
         let escapedConfig = configJSON
             .replacingOccurrences(of: "</", with: "<\\/")
-        let extraCSS: String
+
+        let baseCSS: String
+        let containerCSS: String
         switch kind {
+        case .timeline:
+            baseCSS = """
+              html, body { margin: 0; padding: 0; background: transparent; }
+            """
+            containerCSS = ""
         case .symbolInfo:
-            extraCSS = """
+            baseCSS = """
+              html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; height: 100%; width: 100%; }
               body { transform: scale(0.72); transform-origin: top left; width: 138.9%; height: 138.9%; }
             """
+            containerCSS = "height: 100%; width: 100%;"
         default:
-            extraCSS = ""
+            baseCSS = """
+              html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; height: 100%; width: 100%; }
+            """
+            containerCSS = "height: 100%; width: 100%;"
         }
 
         return """
@@ -277,12 +325,11 @@ private struct TradingViewEmbedWebView: UIViewRepresentable {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
         <style>
-          html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; height: 100%; width: 100%; }
-          .tradingview-widget-container { height: 100%; width: 100%; }
-          .tradingview-widget-container__widget { height: 100%; width: 100%; }
+          \(baseCSS)
+          .tradingview-widget-container { \(containerCSS) }
+          .tradingview-widget-container__widget { \(containerCSS) }
           .tv-widget-market-quotes__symbol-cell,
           .tv-widget-market-quotes__symbol { width: 1%; white-space: nowrap; }
-          \(extraCSS)
         </style>
         </head>
         <body>
@@ -299,16 +346,29 @@ private struct TradingViewEmbedWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding var didFailToLoad: Bool
-        var lastSignature: String?
+        var lastContentSignature: String?
+        var onNavigate: ((URL) -> Void)?
 
-        init(didFailToLoad: Binding<Bool>) {
+        init(didFailToLoad: Binding<Bool>, onNavigate: ((URL) -> Void)?) {
             _didFailToLoad = didFailToLoad
+            self.onNavigate = onNavigate
         }
 
-        func signature(for kind: TradingViewWidgetKind, colorScheme: ColorScheme) -> String {
+        func contentSignature(for kind: TradingViewWidgetKind, colorScheme: ColorScheme) -> String {
             let config = kind.configuration(colorScheme: colorScheme)
             let data = (try? JSONSerialization.data(withJSONObject: config)) ?? Data()
-            return "\(kind.scriptURL)-\(colorScheme)-\(data.base64EncodedString())"
+            return "\(kind.scriptURL)-\(data.base64EncodedString())"
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if let url = navigationAction.request.url,
+               let onNavigate,
+               navigationAction.navigationType == .linkActivated {
+                onNavigate(url)
+                decisionHandler(.cancel)
+            } else {
+                decisionHandler(.allow)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -327,7 +387,9 @@ struct TradingViewWidgetContainer: View {
     let kind: TradingViewWidgetKind
     var height: CGFloat
     var isUserInteractionEnabled = true
+    var isScrollEnabled = false
     var fallback: (() -> AnyView)?
+    var onNavigate: ((URL) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var didFailToLoad = false
@@ -341,7 +403,9 @@ struct TradingViewWidgetContainer: View {
                     kind: kind,
                     colorScheme: colorScheme,
                     isUserInteractionEnabled: isUserInteractionEnabled,
-                    didFailToLoad: $didFailToLoad
+                    isScrollEnabled: isScrollEnabled,
+                    didFailToLoad: $didFailToLoad,
+                    onNavigate: onNavigate
                 )
                     .frame(height: height)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -475,7 +539,7 @@ struct TradingViewCompactTickerChart: View {
 
     var body: some View {
         TradingViewWidgetContainer(
-            kind: .miniSymbolChart(symbol: symbol),
+            kind: .miniSymbolChart(symbol: symbol, height: Int(height)),
             height: height,
             fallback: {
                 AnyView(
@@ -495,12 +559,6 @@ struct TradingViewHoldingChartDetailView: View {
     let symbol: String
     let fallbackPoints: [TickerPricePoint]
     let trendIsPositive: Bool
-    let marketDataSettings: MarketDataSettings?
-
-    @State private var stockFinancials: StockFinancials?
-    @State private var financialsError: String?
-
-    private let marketDataService = MarketDataService()
 
     init(
         symbol: String,
@@ -511,7 +569,6 @@ struct TradingViewHoldingChartDetailView: View {
         self.symbol = symbol
         self.fallbackPoints = fallbackPoints
         self.trendIsPositive = trendIsPositive
-        self.marketDataSettings = marketDataSettings
     }
 
     var body: some View {
@@ -524,292 +581,37 @@ struct TradingViewHoldingChartDetailView: View {
                     trendIsPositive: trendIsPositive
                 )
 
-                if let stockFinancials {
-                    StockFinancialsPanel(symbol: symbol, financials: stockFinancials)
-                } else if let financialsError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(symbol.uppercased()) Financials")
-                            .font(.headline)
-                        Text(financialsError)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
+                TradingViewWidgetContainer(
+                    kind: .fundamentalData(symbol: symbol),
+                    height: 825,
+                    isUserInteractionEnabled: true,
+                    isScrollEnabled: true
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .padding()
         }
         .background(Color(.systemGroupedBackground))
-        .task {
-            await refreshFinancials()
-        }
         .navigationTitle("TradingView")
         .navigationBarTitleDisplayMode(.inline)
     }
-
-    @MainActor
-    private func refreshFinancials() async {
-        guard stockFinancials == nil else { return }
-        guard let marketDataSettings, marketDataSettings.canFetchMarketData else {
-            financialsError = "Financial metrics need Finnhub market data settings."
-            return
-        }
-        do {
-            stockFinancials = try await marketDataService.fetchStockFinancials(
-                ticker: symbol.uppercased(),
-                settings: marketDataSettings
-            )
-            financialsError = nil
-        } catch {
-            financialsError = "Financial metrics are unavailable for this ticker."
-        }
-    }
 }
 
-struct StockFinancialsPanel: View {
-    let symbol: String
-    let financials: StockFinancials
-    var annualDividendPerShare: Double?
-
-    private struct FinancialDisplayRow: Identifiable {
-        let id = UUID()
-        let label: String
-        let value: String
-    }
-
-    private struct FinancialDisplaySection: Identifiable {
-        let id = UUID()
-        let title: String
-        let rows: [FinancialDisplayRow]
-    }
+struct TradingViewTimelineNews: View {
+    var onNavigate: ((URL) -> Void)?
 
     var body: some View {
-        let sections = financialDisplaySections(for: financials)
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .top) {
-                Text(symbol.uppercased())
-                    .foregroundStyle(.blue)
-                Text("Financials")
-                    .foregroundStyle(.primary)
-                Spacer()
-                Text("TradingView")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.12), in: Capsule())
-            }
-            .font(.system(size: 32, weight: .bold, design: .rounded))
-            .minimumScaleFactor(0.55)
-            .lineLimit(1)
-
-            fiscalSummary
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 22, alignment: .top),
-                    GridItem(.flexible(), spacing: 22, alignment: .top)
-                ],
-                alignment: .leading,
-                spacing: 26
-            ) {
-                ForEach(sections) { section in
-                    financialSection(section)
-                }
-            }
-        }
-        .padding(24)
-        .background(Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        TradingViewWidgetContainer(
+            kind: .timeline,
+            height: 600,
+            isUserInteractionEnabled: true,
+            isScrollEnabled: true,
+            onNavigate: onNavigate
         )
-        .environment(\.colorScheme, .dark)
-    }
-
-    private var fiscalSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            financialRow("Fiscal year end", value: financials.fiscalYearEnd ?? "--")
-            financialRow("Last fiscal period", value: financials.lastFiscalPeriod ?? "--")
-            financialRow("Last fiscal period end date", value: financials.lastFiscalPeriodEndDate ?? "--")
-        }
-    }
-
-    private func financialSection(_ section: FinancialDisplaySection) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(section.title)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(.primary)
-                .padding(.top, 2)
-            ForEach(section.rows) { row in
-                financialRow(row.label, value: row.value)
-            }
-        }
-    }
-
-    private func financialRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 10)
-            Text(value)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-    }
-
-    private func financialDisplaySections(for financials: StockFinancials) -> [FinancialDisplaySection] {
-        [
-            FinancialDisplaySection(
-                title: "Valuation",
-                rows: [
-                    row("Market capitalization", formatFinancialMillions(financials.marketCapitalization)),
-                    row("Enterprise value", formatFinancialMillions(financials.enterpriseValue)),
-                    row("Enterprise value/EBITDA (TTM)", formatNumber(financials.enterpriseValueToEBITDA)),
-                    row("P/E ratio", formatNumber(financials.peRatio)),
-                    row("P/S ratio", formatNumber(financials.psRatio)),
-                    row("P/B ratio", formatNumber(financials.pbRatio)),
-                    row("P/CF ratio", formatNumber(financials.pcfRatio)),
-                    row("P/FCF ratio", formatNumber(financials.pfcfRatio))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Cash Flow",
-                rows: [
-                    row("Operating cash flow (TTM)", formatFinancialMillions(financials.operatingCashFlow)),
-                    row("Investing cash flow (TTM)", formatFinancialMillions(financials.investingCashFlow)),
-                    row("Financing cash flow (TTM)", formatFinancialMillions(financials.financingCashFlow)),
-                    row("Free cash flow (TTM)", formatFinancialMillions(financials.freeCashFlow)),
-                    row("CapEx (TTM)", formatFinancialMillions(financials.capex))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Income Statement",
-                rows: [
-                    row("Total revenue (TTM)", formatFinancialMillions(financials.totalRevenue)),
-                    row("Revenue per share (TTM)", formatNumber(financials.revenuePerShare)),
-                    row("Gross profit (TTM)", formatFinancialMillions(financials.grossProfit)),
-                    row("Operating income (TTM)", formatFinancialMillions(financials.operatingIncome)),
-                    row("Net income (TTM)", formatFinancialMillions(financials.netIncome)),
-                    row("EPS diluted (TTM)", formatNumber(financials.epsDilutedTTM)),
-                    row("EPS diluted (FQ)", formatNumber(financials.epsDilutedFQ)),
-                    row("Total shares outstanding", formatFinancialMillions(financials.totalSharesOutstanding)),
-                    row("Shares float", formatFinancialMillions(financials.sharesFloat))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Profitability",
-                rows: [
-                    row("Gross margin (TTM)", formatPercent(financials.grossMargin)),
-                    row("Operating margin (TTM)", formatPercent(financials.operatingMargin)),
-                    row("Pretax margin (TTM)", formatPercent(financials.pretaxMargin)),
-                    row("Net margin (TTM)", formatPercent(financials.netMargin))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Balance Sheet",
-                rows: [
-                    row("Total assets (FQ)", formatFinancialMillions(financials.totalAssets)),
-                    row("Total liabilities (FQ)", formatFinancialMillions(financials.totalLiabilities)),
-                    row("Total equity (FQ)", formatFinancialMillions(financials.totalEquity)),
-                    row("Total debt (FQ)", formatFinancialMillions(financials.totalDebt))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Efficiency",
-                rows: [
-                    row("Return on assets (TTM)", formatPercent(financials.returnOnAssets)),
-                    row("Return on equity (TTM)", formatPercent(financials.returnOnEquity)),
-                    row("Return on invested capital (TTM)", formatPercent(financials.returnOnInvestedCapital)),
-                    row("Revenue per employee (FY)", formatAbbreviated(financials.revenuePerEmployee)),
-                    row("Net income per employee (FY)", formatAbbreviated(financials.netIncomePerEmployee))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Price History",
-                rows: [
-                    row("Average volume (10 day)", formatVolumeMillions(financials.averageVolume10Day)),
-                    row("1-Year beta", formatNumber(financials.betaOneYear)),
-                    row("52 Week high", formatNumber(financials.week52High)),
-                    row("52 Week low", formatNumber(financials.week52Low)),
-                    row("1 year price target", formatNumber(financials.oneYearPriceTarget))
-                ]
-            ),
-            FinancialDisplaySection(
-                title: "Dividends",
-                rows: [
-                    row("Dividend yield indicated", formatPercent(financials.dividendYieldIndicated)),
-                    row("Dividends per share (FY)", formatNumber(financials.dividendsPerShareFY ?? annualDividendPerShare)),
-                    row("Last payment amount", formatNumber(financials.lastDividendAmount)),
-                    row("Last ex-dividend date", financials.lastDividendExDate ?? "--")
-                ]
-            )
-        ]
-    }
-
-    private func row(_ label: String, _ value: String) -> FinancialDisplayRow {
-        FinancialDisplayRow(label: label, value: value)
-    }
-
-    private func formatFinancialMillions(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let absValue = abs(value)
-        if absValue >= 1_000_000 {
-            return "\(formatCompact(value / 1_000_000))T"
-        }
-        if absValue >= 1_000 {
-            return "\(formatCompact(value / 1_000))B"
-        }
-        return "\(formatCompact(value))M"
-    }
-
-    private func formatVolumeMillions(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(formatCompact(value))M"
-    }
-
-    private func formatAbbreviated(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let absValue = abs(value)
-        if absValue >= 1_000_000_000_000 {
-            return "\(formatCompact(value / 1_000_000_000_000))T"
-        }
-        if absValue >= 1_000_000_000 {
-            return "\(formatCompact(value / 1_000_000_000))B"
-        }
-        if absValue >= 1_000_000 {
-            return "\(formatCompact(value / 1_000_000))M"
-        }
-        if absValue >= 1_000 {
-            return "\(formatCompact(value / 1_000))K"
-        }
-        return formatCompact(value)
-    }
-
-    private func formatPercent(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(formatCompact(value))%"
-    }
-
-    private func formatNumber(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return formatCompact(value)
-    }
-
-    private func formatCompact(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = abs(value) >= 100 ? 1 : 2
-        formatter.usesGroupingSeparator = true
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
+
+
+
+

@@ -320,6 +320,25 @@ struct MarketDataService {
         return close
     }
 
+    func fetchSymbolLookup(query: String, settings: MarketDataSettings) async throws -> [SymbolLookupResult] {
+        try await fetchWithAlpacaFallback(settings: settings) {
+            let cleanKey = settings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanKey.isEmpty else { throw MarketDataServiceError.missingAPIKey }
+            switch settings.provider {
+            case .finnhub:
+                return try await fetchFinnhubSymbolLookup(query: query, apiKey: cleanKey)
+            case .alphaVantage:
+                return try await fetchAlphaVantageSymbolLookup(query: query, apiKey: cleanKey)
+            }
+        } fallback: {
+            try await fetchAlpacaSymbolLookup(
+                query: query,
+                keyId: settings.alpacaAPIKeyId,
+                secretKey: settings.alpacaSecretKey
+            )
+        }
+    }
+
     func fetchCompanyProfile(ticker: String, provider: MarketDataProvider, apiKey: String) async throws -> MarketCompanyProfile? {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else {
@@ -672,6 +691,98 @@ struct MarketDataService {
 
     private func fetchAlphaVantageRecentCloses(ticker: String, apiKey: String, days: Int) async throws -> [Double] {
         try await fetchAlphaVantageRecentPriceHistory(ticker: ticker, apiKey: apiKey, days: days).map(\.close)
+    }
+
+    private func fetchAlphaVantageSymbolLookup(query: String, apiKey: String) async throws -> [SymbolLookupResult] {
+        var components = URLComponents(string: "https://www.alphavantage.co/query")
+        components?.queryItems = [
+            URLQueryItem(name: "function", value: "SYMBOL_SEARCH"),
+            URLQueryItem(name: "keywords", value: query),
+            URLQueryItem(name: "apikey", value: apiKey)
+        ]
+        guard let url = components?.url else { throw MarketDataServiceError.invalidResponse }
+
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MarketDataServiceError.invalidResponse
+        }
+
+        let decoded = try JSONDecoder().decode(AlphaVantageSymbolSearchResponse.self, from: data)
+        if let note = decoded.note, note.localizedCaseInsensitiveContains("frequency") {
+            throw MarketDataServiceError.rateLimited
+        }
+        guard let matches = decoded.bestMatches, !matches.isEmpty else {
+            throw MarketDataServiceError.invalidResponse
+        }
+        return matches.map { match in
+            SymbolLookupResult(
+                description: match.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                displaySymbol: match.symbol.trimmingCharacters(in: .whitespacesAndNewlines),
+                symbol: match.symbol.trimmingCharacters(in: .whitespacesAndNewlines),
+                type: match.type?.trimmingCharacters(in: .whitespacesAndNewlines),
+                primaryExchange: match.region.map { "\($0)" }
+            )
+        }
+    }
+
+    private func fetchAlpacaSymbolLookup(query: String, keyId: String, secretKey: String) async throws -> [SymbolLookupResult] {
+        let cleanKeyId = keyId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSecretKey = secretKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKeyId.isEmpty, !cleanSecretKey.isEmpty else {
+            throw MarketDataServiceError.missingAPIKey
+        }
+
+        var components = URLComponents(string: "https://paper-api.alpaca.markets/v2/assets")
+        components?.queryItems = [
+            URLQueryItem(name: "status", value: "active")
+        ]
+        guard let url = components?.url else { throw MarketDataServiceError.invalidResponse }
+
+        var request = URLRequest(url: url)
+        request.addValue(cleanKeyId, forHTTPHeaderField: "APCA-API-KEY-ID")
+        request.addValue(cleanSecretKey, forHTTPHeaderField: "APCA-API-SECRET-KEY")
+        request.addValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MarketDataServiceError.invalidResponse
+        }
+
+        let decoded = try JSONDecoder().decode([AlpacaAssetResponse].self, from: data)
+        let upperQuery = query.uppercased()
+        let filtered = decoded.filter { asset in
+            guard asset.status == "active" else { return false }
+            let symbolMatch = asset.symbol.uppercased().contains(upperQuery)
+            let nameMatch = asset.name.uppercased().contains(upperQuery)
+            return symbolMatch || nameMatch
+        }
+        guard !filtered.isEmpty else {
+            throw MarketDataServiceError.invalidResponse
+        }
+        return filtered.prefix(20).map { asset in
+            SymbolLookupResult(
+                description: asset.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                displaySymbol: asset.symbol.trimmingCharacters(in: .whitespacesAndNewlines),
+                symbol: asset.symbol.trimmingCharacters(in: .whitespacesAndNewlines),
+                type: nil,
+                primaryExchange: asset.exchange?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+    }
+
+    private func fetchFinnhubSymbolLookup(query: String, apiKey: String) async throws -> [SymbolLookupResult] {
+        var components = URLComponents(string: "https://finnhub.io/api/v1/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "token", value: apiKey)
+        ]
+        guard let url = components?.url else { throw MarketDataServiceError.invalidResponse }
+
+        let (data, response) = try await session.data(from: url)
+        try validateFinnhubResponse(data: data, response: response)
+
+        let decoded = try JSONDecoder().decode(FinnhubSymbolLookupResponse.self, from: data)
+        return decoded.result
     }
 
     private func fetchFinnhubCompanyProfile(ticker: String, apiKey: String) async throws -> MarketCompanyProfile? {
@@ -1214,6 +1325,54 @@ private struct FinnhubDividendSummary {
     let annualDividendPerShare: Double
     let lastAmount: Double?
     let lastExDate: String?
+}
+
+struct SymbolLookupResult: Decodable, Identifiable, Sendable {
+    let description: String
+    let displaySymbol: String
+    let symbol: String
+    let type: String?
+    let primaryExchange: String?
+
+    var id: String { symbol }
+}
+
+private struct FinnhubSymbolLookupResponse: Decodable {
+    let count: Int
+    let result: [SymbolLookupResult]
+}
+
+private struct AlphaVantageSymbolSearchResponse: Decodable {
+    struct Match: Decodable {
+        let symbol: String
+        let name: String
+        let type: String?
+        let region: String?
+
+        enum CodingKeys: String, CodingKey {
+            case symbol = "1. symbol"
+            case name = "2. name"
+            case type = "3. type"
+            case region = "4. region"
+        }
+    }
+
+    let bestMatches: [Match]?
+    let note: String?
+    let information: String?
+
+    enum CodingKeys: String, CodingKey {
+        case bestMatches = "bestMatches"
+        case note = "Note"
+        case information = "Information"
+    }
+}
+
+private struct AlpacaAssetResponse: Decodable {
+    let symbol: String
+    let name: String
+    let exchange: String?
+    let status: String?
 }
 
 private struct FinnhubCompanyProfileResponse: Decodable {
