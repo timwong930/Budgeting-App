@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>4AD01146-AAC5-43EA-B9A7-C553A8AD7058</key>
+		<key>F09EE8A6-8A04-4799-88A5-276DAF839F1F</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,49 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>4AD01146-AAC5-43EA-B9A7-C553A8AD7058.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>S</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>0</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>0</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>Budgeting App project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>Budgeting App</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>802223976.076159</real>
-			<key>timeStoppedRecording</key>
-			<real>802224010.04160297</real>
-			<key>title</key>
-			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>4AD01146-AAC5-43EA-B9A7-C553A8AD7058</string>
-		</dict>
-		<key>4EA05C3E-6628-4D11-9665-F79ACDD29344</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>4EA05C3E-6628-4D11-9665-F79ACDD29344.xcactivitylog</string>
+			<string>F09EE8A6-8A04-4799-88A5-276DAF839F1F.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -80,15 +38,15 @@
 			<key>schemeIdentifier-sharedScheme</key>
 			<integer>1</integer>
 			<key>signature</key>
-			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
+			<string>Building project Budgeting App with scheme Budgeting App</string>
 			<key>timeStartedRecording</key>
-			<real>802164793.35646498</real>
+			<real>802841841.57841396</real>
 			<key>timeStoppedRecording</key>
-			<real>802164816.46470404</real>
+			<real>802841855.550753</real>
 			<key>title</key>
-			<string>Building project Budgeting App with scheme Budgeting App and configuration Debug</string>
+			<string>Building project Budgeting App with scheme Budgeting App</string>
 			<key>uniqueIdentifier</key>
-			<string>4EA05C3E-6628-4D11-9665-F79ACDD29344</string>
+			<string>F09EE8A6-8A04-4799-88A5-276DAF839F1F</string>
 		</dict>
 	</dict>
 </dict>

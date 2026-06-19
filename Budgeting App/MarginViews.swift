@@ -135,7 +135,9 @@ struct MarginDashboardView: View {
     }
 
     private var displayHoldings: [PortfolioHolding] {
-        let filtered = budget.holdings.filter { holding in
+        let consolidatedHoldings = budget.consolidatedHoldings
+        let portfolioValue = holdingsMarketValue(for: consolidatedHoldings)
+        let filtered = consolidatedHoldings.filter { holding in
             guard let assetType = holdingsAssetFilter.assetType else { return true }
             return holding.assetType == assetType
         }
@@ -150,7 +152,7 @@ struct MarginDashboardView: View {
             case .monthlyIncome:
                 return sort((lhs.shares * lhs.annualDividendPerShare) / 12.0, (rhs.shares * rhs.annualDividendPerShare) / 12.0)
             case .allocation:
-                return sort(allocation(for: lhs), allocation(for: rhs))
+                return sort(allocation(for: lhs, totalMarketValue: portfolioValue), allocation(for: rhs, totalMarketValue: portfolioValue))
             case .yield:
                 return sort(currentYield(for: lhs), currentYield(for: rhs))
             case .unrealized:
@@ -161,10 +163,6 @@ struct MarginDashboardView: View {
                 return sort(resolvedPrice(for: lhs), resolvedPrice(for: rhs))
             }
         }
-    }
-
-    private var sortedHoldings: [PortfolioHolding] {
-        budget.holdings.sorted { $0.ticker.uppercased() < $1.ticker.uppercased() }
     }
 
     private func color(for assetType: PortfolioAssetType) -> Color {
@@ -194,7 +192,7 @@ struct MarginDashboardView: View {
     }
 
     private var totalMarketValue: Double {
-        sortedHoldings.reduce(0) { $0 + ($1.shares * resolvedPrice(for: $1)) }
+        holdingsMarketValue(for: budget.holdings)
     }
 
     private var grossPortfolioValue: Double {
@@ -210,7 +208,7 @@ struct MarginDashboardView: View {
     }
 
     private var annualDividendsFromHoldings: Double {
-        sortedHoldings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }
+        budget.holdings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }
     }
 
     private var monthlyDividendsFromHoldings: Double {
@@ -431,7 +429,7 @@ struct MarginDashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            LazyVStack(spacing: 16) {
                 titleHeader
                 marginInsightSummarySection
                 experimentStatusCard
@@ -460,9 +458,6 @@ struct MarginDashboardView: View {
         .onAppear {
             budget.synchronizeLegacyMarginStateFromLedger()
             syncPortfolioSnapshotAndHistory()
-        }
-        .task {
-            await runHoldingsAutoRefreshLoop()
         }
         .onChange(of: budget.portfolioTransactions) { _, _ in
             budget.synchronizeLegacyMarginStateFromLedger()
@@ -640,7 +635,10 @@ struct MarginDashboardView: View {
     }
 
     private var holdingsCard: some View {
-        CuanCard {
+        let holdings = displayHoldings
+        let portfolioMarketValue = totalMarketValue
+
+        return CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Holdings")
@@ -680,7 +678,7 @@ struct MarginDashboardView: View {
                         .foregroundStyle(.yellow)
                 }
 
-                if budget.holdings.isEmpty {
+                if budget.consolidatedHoldings.isEmpty {
                     VStack(spacing: 8) {
                         Text("No holdings yet.")
                             .font(.caption)
@@ -702,19 +700,19 @@ struct MarginDashboardView: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                } else if displayHoldings.isEmpty {
+                } else if holdings.isEmpty {
                     Text("No holdings match the current filter.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     if holdingsViewMode == .cards {
-                        VStack(spacing: 10) {
-                            ForEach(displayHoldings) { holding in
-                                holdingCardRow(holding)
+                        LazyVStack(spacing: 10) {
+                            ForEach(holdings) { holding in
+                                holdingCardRow(holding, totalMarketValue: portfolioMarketValue)
                             }
                         }
                     } else {
-                        classicHoldingsRows
+                        classicHoldingsRows(holdings, totalMarketValue: portfolioMarketValue)
                     }
                 }
 
@@ -741,7 +739,7 @@ struct MarginDashboardView: View {
         }
     }
 
-    private var classicHoldingsRows: some View {
+    private func classicHoldingsRows(_ holdings: [PortfolioHolding], totalMarketValue: Double) -> some View {
         VStack(spacing: 0) {
             LazyVGrid(columns: holdingsGridColumns, spacing: 0) {
                 Text("Ticker")
@@ -759,20 +757,20 @@ struct MarginDashboardView: View {
 
             Divider()
 
-            ForEach(displayHoldings) { holding in
-                classicHoldingRow(holding)
-                if holding.id != displayHoldings.last?.id {
+            ForEach(holdings) { holding in
+                classicHoldingRow(holding, totalMarketValue: totalMarketValue)
+                if holding.id != holdings.last?.id {
                     Divider()
                 }
             }
         }
     }
 
-    private func classicHoldingRow(_ holding: PortfolioHolding) -> some View {
+    private func classicHoldingRow(_ holding: PortfolioHolding, totalMarketValue: Double) -> some View {
         let price = resolvedPrice(for: holding)
         let marketValue = holding.shares * price
         let totalCost = holding.shares * holding.averageCost
-        let allocationValue = allocation(for: holding)
+        let allocationValue = allocation(for: holding, totalMarketValue: totalMarketValue)
         let yieldValue = currentYield(for: holding)
         let unrealized = marketValue - totalCost
 
@@ -826,12 +824,12 @@ struct MarginDashboardView: View {
         .buttonStyle(.plain)
     }
 
-    private func holdingCardRow(_ holding: PortfolioHolding) -> some View {
+    private func holdingCardRow(_ holding: PortfolioHolding, totalMarketValue: Double) -> some View {
         let ticker = holding.ticker.uppercased()
         let price = resolvedPrice(for: holding)
         let marketValue = holding.shares * price
         let totalCost = holding.shares * holding.averageCost
-        let allocationValue = allocation(for: holding)
+        let allocationValue = allocation(for: holding, totalMarketValue: totalMarketValue)
         let yieldValue = currentYield(for: holding)
         let unrealized = marketValue - totalCost
         let snapshot = holdingQuoteSnapshot(for: holding)
@@ -1461,9 +1459,13 @@ struct MarginDashboardView: View {
         return holding.annualDividendPerShare / price
     }
 
-    private func allocation(for holding: PortfolioHolding) -> Double {
+    private func allocation(for holding: PortfolioHolding, totalMarketValue: Double) -> Double {
         guard totalMarketValue > 0 else { return 0 }
         return (holding.shares * resolvedPrice(for: holding)) / totalMarketValue
+    }
+
+    private func holdingsMarketValue(for holdings: [PortfolioHolding]) -> Double {
+        holdings.reduce(0) { $0 + ($1.shares * resolvedPrice(for: $1)) }
     }
 
     private func unrealizedGain(for holding: PortfolioHolding) -> Double {
@@ -1719,15 +1721,6 @@ struct MarginDashboardView: View {
         }
     }
 
-    private func runHoldingsAutoRefreshLoop() async {
-        await refreshPrices()
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 300_000_000_000)
-            if Task.isCancelled { break }
-            await refreshPrices()
-        }
-    }
-
     @MainActor
     private func refreshPrices() async {
         guard !isRefreshingPrices else { return }
@@ -1868,7 +1861,9 @@ private struct HoldingTickerDetailView: View {
     }
 
     private var holding: PortfolioHolding? {
-        budget.holdings.first(where: { $0.id == holdingID })
+        guard let original = budget.holdings.first(where: { $0.id == holdingID }) else { return nil }
+        let ticker = original.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return budget.consolidatedHoldings.first { $0.ticker == ticker }
     }
 
     private var cleanTicker: String {

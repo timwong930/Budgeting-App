@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/.well-known/apple-app-site-association",
+      "destination": "/api/apple-app-site-association"
+    },
+    {
+      "source": "/plaid/oauth",
+      "destination": "/api/plaid/oauth"
+    }
+  ]
+}

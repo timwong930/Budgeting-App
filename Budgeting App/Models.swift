@@ -75,6 +75,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var paymentAccount: String
     var note: String
     var creditCardPaymentTarget: String?
+    var plaidMetadata: PlaidSourceMetadata?
 
     init(
         id: UUID = UUID(),
@@ -85,7 +86,8 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         categoryId: UUID,
         paymentAccount: String = "",
         note: String = "",
-        creditCardPaymentTarget: String? = nil
+        creditCardPaymentTarget: String? = nil,
+        plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
         self.name = name
@@ -96,6 +98,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.paymentAccount = paymentAccount
         self.note = note
         self.creditCardPaymentTarget = creditCardPaymentTarget
+        self.plaidMetadata = plaidMetadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -108,6 +111,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case paymentAccount
         case note
         case creditCardPaymentTarget
+        case plaidMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +125,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
         creditCardPaymentTarget = try container.decodeIfPresent(String.self, forKey: .creditCardPaymentTarget)
+        plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
         if creditCardPaymentTarget == nil {
             creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
         }
@@ -152,6 +157,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
     var creditLimit: Double
     var isActive: Bool
     var note: String
+    var plaidMetadata: PlaidSourceMetadata?
 
     init(
         id: UUID = UUID(),
@@ -162,7 +168,8 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         expectedAmount: Double = 0,
         creditLimit: Double = 0,
         isActive: Bool = true,
-        note: String = ""
+        note: String = "",
+        plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
         self.name = name
@@ -173,6 +180,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         self.creditLimit = max(creditLimit, 0)
         self.isActive = isActive
         self.note = note
+        self.plaidMetadata = plaidMetadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -185,6 +193,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         case creditLimit
         case isActive
         case note
+        case plaidMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -198,6 +207,7 @@ struct CreditAccount: Identifiable, Codable, Sendable, Equatable {
         creditLimit = max(try container.decodeIfPresent(Double.self, forKey: .creditLimit) ?? 0, 0)
         isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 }
 
@@ -206,12 +216,86 @@ struct BankAccount: Identifiable, Codable, Sendable, Equatable {
     var name: String
     var balance: Double
     var note: String
+    var plaidMetadata: PlaidSourceMetadata?
 
-    init(id: UUID = UUID(), name: String, balance: Double = 0, note: String = "") {
+    init(id: UUID = UUID(), name: String, balance: Double = 0, note: String = "", plaidMetadata: PlaidSourceMetadata? = nil) {
         self.id = id
         self.name = name
         self.balance = balance
         self.note = note
+        self.plaidMetadata = plaidMetadata
+    }
+}
+
+enum FinancialAccountSource: String, Codable, Sendable, Equatable {
+    case manual
+    case plaid
+}
+
+enum FinancialAccountKind: String, Codable, Sendable, Equatable {
+    case depository
+    case credit
+    case investment
+    case loan
+    case other
+}
+
+struct FinancialAccount: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var name: String
+    var institutionName: String?
+    var kind: FinancialAccountKind
+    var source: FinancialAccountSource
+    var externalAccountId: String?
+    var externalItemId: String?
+    var isActive: Bool
+    var lastSyncedAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        institutionName: String? = nil,
+        kind: FinancialAccountKind,
+        source: FinancialAccountSource = .manual,
+        externalAccountId: String? = nil,
+        externalItemId: String? = nil,
+        isActive: Bool = true,
+        lastSyncedAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.institutionName = institutionName
+        self.kind = kind
+        self.source = source
+        self.externalAccountId = externalAccountId
+        self.externalItemId = externalItemId
+        self.isActive = isActive
+        self.lastSyncedAt = lastSyncedAt
+    }
+}
+
+struct PortfolioAccount: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var financialAccountId: UUID?
+    var name: String
+    var cashBalance: Double
+    var marginBalance: Double
+    var isActive: Bool
+
+    init(
+        id: UUID = UUID(),
+        financialAccountId: UUID? = nil,
+        name: String,
+        cashBalance: Double = 0,
+        marginBalance: Double = 0,
+        isActive: Bool = true
+    ) {
+        self.id = id
+        self.financialAccountId = financialAccountId
+        self.name = name
+        self.cashBalance = cashBalance
+        self.marginBalance = marginBalance
+        self.isActive = isActive
     }
 }
 
@@ -284,13 +368,15 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
     var amount: Double
     var date: Date
     var bankName: String
+    var plaidMetadata: PlaidSourceMetadata?
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "") {
+    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", plaidMetadata: PlaidSourceMetadata? = nil) {
         self.id = id
         self.name = name
         self.amount = amount
         self.date = date
         self.bankName = bankName
+        self.plaidMetadata = plaidMetadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -299,6 +385,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         case amount
         case date
         case bankName
+        case plaidMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -308,6 +395,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         amount = try container.decode(Double.self, forKey: .amount)
         date = try container.decode(Date.self, forKey: .date)
         bankName = try container.decodeIfPresent(String.self, forKey: .bankName) ?? ""
+        plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -317,6 +405,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         try container.encode(amount, forKey: .amount)
         try container.encode(date, forKey: .date)
         try container.encode(bankName, forKey: .bankName)
+        try container.encodeIfPresent(plaidMetadata, forKey: .plaidMetadata)
     }
 }
 
@@ -580,6 +669,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
     var amount: Double
     var notes: String?
     var fundingBankAccount: String?
+    var plaidMetadata: PlaidSourceMetadata?
 
     init(
         id: UUID = UUID(),
@@ -590,7 +680,8 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         pricePerShare: Double? = nil,
         amount: Double,
         notes: String? = nil,
-        fundingBankAccount: String? = nil
+        fundingBankAccount: String? = nil,
+        plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
         self.date = date
@@ -601,6 +692,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         self.amount = amount
         self.notes = notes
         self.fundingBankAccount = fundingBankAccount
+        self.plaidMetadata = plaidMetadata
     }
 
     enum CodingKeys: String, CodingKey {
@@ -613,6 +705,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         case amount
         case notes
         case fundingBankAccount
+        case plaidMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -626,6 +719,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         amount = try container.decode(Double.self, forKey: .amount)
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         fundingBankAccount = try container.decodeIfPresent(String.self, forKey: .fundingBankAccount)
+        plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -639,6 +733,7 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         try container.encode(amount, forKey: .amount)
         try container.encodeIfPresent(notes, forKey: .notes)
         try container.encodeIfPresent(fundingBankAccount, forKey: .fundingBankAccount)
+        try container.encodeIfPresent(plaidMetadata, forKey: .plaidMetadata)
     }
 }
 
@@ -744,6 +839,7 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
     var notes: String
     var nextExDividendDate: Date?
     var nextPayDate: Date?
+    var plaidMetadata: PlaidSourceMetadata?
 
     init(
         id: UUID = UUID(),
@@ -757,7 +853,8 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
         dividendReliability: DividendReliability = .medium,
         notes: String = "",
         nextExDividendDate: Date? = nil,
-        nextPayDate: Date? = nil
+        nextPayDate: Date? = nil,
+        plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
         self.ticker = ticker
@@ -771,6 +868,7 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
         self.notes = notes
         self.nextExDividendDate = nextExDividendDate
         self.nextPayDate = nextPayDate
+        self.plaidMetadata = plaidMetadata
     }
 }
 
@@ -1138,6 +1236,10 @@ private struct BudgetSnapshotStore: Codable, Sendable {
     let creditAccounts: [CreditAccount]?
     let bankAccounts: [BankAccount]?
     let cashTransfers: [CashTransfer]?
+    let plaidConnectionStatuses: [PlaidConnectionStatus]?
+    let plaidReviewItems: [PlaidReviewItem]?
+    let financialAccounts: [FinancialAccount]?
+    let portfolioAccounts: [PortfolioAccount]?
 
     enum CodingKeys: String, CodingKey {
         case income
@@ -1169,6 +1271,10 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         case creditAccounts
         case bankAccounts
         case cashTransfers
+        case plaidConnectionStatuses
+        case plaidReviewItems
+        case financialAccounts
+        case portfolioAccounts
     }
 
     init(
@@ -1200,7 +1306,11 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         recurringPayments: [RecurringPayment],
         creditAccounts: [CreditAccount],
         bankAccounts: [BankAccount],
-        cashTransfers: [CashTransfer]
+        cashTransfers: [CashTransfer],
+        plaidConnectionStatuses: [PlaidConnectionStatus],
+        plaidReviewItems: [PlaidReviewItem],
+        financialAccounts: [FinancialAccount],
+        portfolioAccounts: [PortfolioAccount]
     ) {
         self.income = income
         self.incomeByMonth = incomeByMonth
@@ -1231,6 +1341,10 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         self.creditAccounts = creditAccounts
         self.bankAccounts = bankAccounts
         self.cashTransfers = cashTransfers
+        self.plaidConnectionStatuses = plaidConnectionStatuses
+        self.plaidReviewItems = plaidReviewItems
+        self.financialAccounts = financialAccounts
+        self.portfolioAccounts = portfolioAccounts
     }
 
     init(from decoder: Decoder) throws {
@@ -1264,6 +1378,10 @@ private struct BudgetSnapshotStore: Codable, Sendable {
         creditAccounts = try container.decodeIfPresent([CreditAccount].self, forKey: .creditAccounts)
         bankAccounts = try container.decodeIfPresent([BankAccount].self, forKey: .bankAccounts)
         cashTransfers = try container.decodeIfPresent([CashTransfer].self, forKey: .cashTransfers)
+        plaidConnectionStatuses = try container.decodeIfPresent([PlaidConnectionStatus].self, forKey: .plaidConnectionStatuses)
+        plaidReviewItems = try container.decodeIfPresent([PlaidReviewItem].self, forKey: .plaidReviewItems)
+        financialAccounts = try container.decodeIfPresent([FinancialAccount].self, forKey: .financialAccounts)
+        portfolioAccounts = try container.decodeIfPresent([PortfolioAccount].self, forKey: .portfolioAccounts)
     }
 }
 
@@ -1303,6 +1421,10 @@ class BudgetModel: ObservableObject {
     @Published var creditAccounts: [CreditAccount] = []
     @Published var bankAccounts: [BankAccount] = []
     @Published var cashTransfers: [CashTransfer] = []
+    @Published var plaidConnectionStatuses: [PlaidConnectionStatus] = []
+    @Published var plaidReviewItems: [PlaidReviewItem] = []
+    @Published var financialAccounts: [FinancialAccount] = []
+    @Published var portfolioAccounts: [PortfolioAccount] = []
 
     private static let saveFileName = "budget.json"
     private let localSaveURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -1325,6 +1447,32 @@ class BudgetModel: ObservableObject {
     
     var annualIncome: Double {
         income * payFrequency.multiplier
+    }
+
+    var consolidatedHoldings: [PortfolioHolding] {
+        let grouped = Dictionary(grouping: holdings) { holding in
+            holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+
+        return grouped.compactMap { ticker, tickerHoldings in
+            guard !ticker.isEmpty, var combined = tickerHoldings.first else { return nil }
+            let totalShares = tickerHoldings.reduce(0) { $0 + $1.shares }
+            let totalCost = tickerHoldings.reduce(0) { $0 + ($1.shares * $1.averageCost) }
+            combined.ticker = ticker
+            combined.shares = totalShares
+            combined.averageCost = totalShares != 0 ? totalCost / totalShares : 0
+            combined.currentPrice = cachedQuotes[ticker]?.price
+                ?? tickerHoldings.first(where: { $0.currentPrice > 0 })?.currentPrice
+                ?? combined.currentPrice
+            combined.annualDividendPerShare = tickerHoldings.first(where: { $0.annualDividendPerShare > 0 })?.annualDividendPerShare
+                ?? combined.annualDividendPerShare
+            combined.notes = tickerHoldings.first(where: { !$0.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.notes
+                ?? combined.notes
+            combined.plaidMetadata = tickerHoldings.first(where: { $0.plaidMetadata != nil })?.plaidMetadata
+                ?? combined.plaidMetadata
+            return combined
+        }
+        .sorted { $0.ticker < $1.ticker }
     }
     
     var monthlyIncome: Double {
@@ -1391,7 +1539,23 @@ class BudgetModel: ObservableObject {
         saveToDisk(async: false)
     }
 
+    private var hasUserData: Bool {
+        income > 0 || !incomes.isEmpty || !expenses.isEmpty ||
+        !savingsGoals.isEmpty || !portfolioTransactions.isEmpty ||
+        !holdings.isEmpty || !marginBills.isEmpty ||
+        !creditAccounts.isEmpty || !bankAccounts.isEmpty ||
+        !cashTransfers.isEmpty || !recurringPayments.isEmpty ||
+        !plaidConnectionStatuses.isEmpty || !plaidReviewItems.isEmpty ||
+        needsCategories.contains { $0.allocatedAmount > 0 } ||
+        wantsCategories.contains { $0.allocatedAmount > 0 }
+    }
+
     private func saveToDisk(async: Bool) {
+        guard hasUserData else {
+            logger.notice("Skipping save — no user data exists yet (protecting iCloud data)")
+            return
+        }
+
         let snapshot = BudgetSnapshotStore(
             income: income,
             incomeByMonth: incomeByMonth,
@@ -1421,7 +1585,11 @@ class BudgetModel: ObservableObject {
             recurringPayments: recurringPayments,
             creditAccounts: creditAccounts,
             bankAccounts: bankAccounts,
-            cashTransfers: cashTransfers
+            cashTransfers: cashTransfers,
+            plaidConnectionStatuses: plaidConnectionStatuses,
+            plaidReviewItems: plaidReviewItems,
+            financialAccounts: financialAccounts,
+            portfolioAccounts: portfolioAccounts
         )
 
         let localSaveURL = localSaveURL
@@ -1527,6 +1695,11 @@ class BudgetModel: ObservableObject {
         creditAccounts = snapshot.creditAccounts ?? []
         bankAccounts = snapshot.bankAccounts ?? []
         cashTransfers = snapshot.cashTransfers ?? []
+        plaidConnectionStatuses = snapshot.plaidConnectionStatuses ?? []
+        plaidReviewItems = snapshot.plaidReviewItems ?? []
+        financialAccounts = snapshot.financialAccounts ?? []
+        portfolioAccounts = snapshot.portfolioAccounts ?? []
+        migrateLegacyAccountsIfNeeded()
 
         if expenses.isEmpty {
             let importedNeeds = needsCategories.compactMap { category -> Expense? in
@@ -1545,6 +1718,73 @@ class BudgetModel: ObservableObject {
         recalculateSpent()
         synchronizeLegacyMarginStateFromLedger()
         migratePortfolioValueHistory()
+    }
+
+    func migrateLegacyAccountsIfNeeded() {
+        for bankAccount in bankAccounts where !hasFinancialAccount(id: bankAccount.id, metadata: bankAccount.plaidMetadata) {
+            financialAccounts.append(
+                FinancialAccount(
+                    id: bankAccount.id,
+                    name: bankAccount.name,
+                    institutionName: bankAccount.plaidMetadata?.institutionName,
+                    kind: .depository,
+                    source: bankAccount.plaidMetadata == nil ? .manual : .plaid,
+                    externalAccountId: bankAccount.plaidMetadata?.accountId,
+                    externalItemId: bankAccount.plaidMetadata?.itemId,
+                    lastSyncedAt: bankAccount.plaidMetadata?.lastSyncedAt
+                )
+            )
+        }
+
+        for creditAccount in creditAccounts where !hasFinancialAccount(id: creditAccount.id, metadata: creditAccount.plaidMetadata) {
+            financialAccounts.append(
+                FinancialAccount(
+                    id: creditAccount.id,
+                    name: creditAccount.name,
+                    institutionName: creditAccount.plaidMetadata?.institutionName,
+                    kind: .credit,
+                    source: creditAccount.plaidMetadata == nil ? .manual : .plaid,
+                    externalAccountId: creditAccount.plaidMetadata?.accountId,
+                    externalItemId: creditAccount.plaidMetadata?.itemId,
+                    isActive: creditAccount.isActive,
+                    lastSyncedAt: creditAccount.plaidMetadata?.lastSyncedAt
+                )
+            )
+        }
+
+        let hasLegacyPortfolio = !holdings.isEmpty || !portfolioTransactions.isEmpty ||
+            portfolioSnapshot.cashBalance != 0 || portfolioSnapshot.marginUsed != 0
+        if hasLegacyPortfolio, portfolioAccounts.isEmpty {
+            let plaidMetadata = holdings.compactMap(\.plaidMetadata).first
+            let source: FinancialAccountSource = plaidMetadata == nil ? .manual : .plaid
+            let financialAccount = FinancialAccount(
+                name: "Main Portfolio",
+                kind: .investment,
+                source: source,
+                externalAccountId: plaidMetadata?.accountId,
+                externalItemId: plaidMetadata?.itemId,
+                lastSyncedAt: plaidMetadata?.lastSyncedAt
+            )
+            financialAccounts.append(financialAccount)
+            portfolioAccounts.append(
+                PortfolioAccount(
+                    financialAccountId: financialAccount.id,
+                    name: financialAccount.name,
+                    cashBalance: portfolioSnapshot.cashBalance,
+                    marginBalance: portfolioSnapshot.marginUsed
+                )
+            )
+        }
+    }
+
+    private func hasFinancialAccount(id: UUID, metadata: PlaidSourceMetadata?) -> Bool {
+        if financialAccounts.contains(where: { $0.id == id }) {
+            return true
+        }
+        if let externalAccountId = metadata?.accountId {
+            return financialAccounts.contains { $0.externalAccountId == externalAccountId }
+        }
+        return false
     }
 
     private func migratePortfolioValueHistory() {
@@ -2124,6 +2364,9 @@ class BudgetModel: ObservableObject {
     }
 
     func creditAccountActualBalance(_ account: CreditAccount) -> Double {
+        if account.plaidMetadata != nil {
+            return account.startingBalance
+        }
         let normalizedName = normalizedAccountName(account.name)
         guard !normalizedName.isEmpty else { return 0 }
         return expenses.reduce(account.startingBalance) { partial, expense in

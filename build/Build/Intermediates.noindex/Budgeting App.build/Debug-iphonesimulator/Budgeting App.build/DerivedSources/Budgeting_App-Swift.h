@@ -349,6 +349,7 @@ extern "C" {
 @import Foundation;
 @import ObjectiveC;
 @import UIKit;
+@import UserNotifications;
 #endif
 
 #endif // defined(__OBJC__)
@@ -372,10 +373,15 @@ extern "C" {
 #if defined(__OBJC__)
 
 @class UIApplication;
+@class UNUserNotificationCenter;
+@class UNNotification;
+@class UNNotificationResponse;
 SWIFT_CLASS("_TtC13Budgeting_App17BudgetAppDelegate")
-@interface BudgetAppDelegate : NSObject <UIApplicationDelegate>
+@interface BudgetAppDelegate : NSObject <UIApplicationDelegate, UNUserNotificationCenterDelegate>
 - (BOOL)application:(UIApplication * _Nonnull)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> * _Nullable)launchOptions SWIFT_WARN_UNUSED_RESULT;
 - (void)applicationDidEnterBackground:(UIApplication * _Nonnull)application;
+- (void)userNotificationCenter:(UNUserNotificationCenter * _Nonnull)center willPresentNotification:(UNNotification * _Nonnull)notification withCompletionHandler:(void (^ _Nonnull)(UNNotificationPresentationOptions))completionHandler;
+- (void)userNotificationCenter:(UNUserNotificationCenter * _Nonnull)center didReceiveNotificationResponse:(UNNotificationResponse * _Nonnull)response withCompletionHandler:(void (^ _Nonnull)(void))completionHandler;
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 @end
 
@@ -738,6 +744,7 @@ extern "C" {
 @import Foundation;
 @import ObjectiveC;
 @import UIKit;
+@import UserNotifications;
 #endif
 
 #endif // defined(__OBJC__)
@@ -761,10 +768,15 @@ extern "C" {
 #if defined(__OBJC__)
 
 @class UIApplication;
+@class UNUserNotificationCenter;
+@class UNNotification;
+@class UNNotificationResponse;
 SWIFT_CLASS("_TtC13Budgeting_App17BudgetAppDelegate")
-@interface BudgetAppDelegate : NSObject <UIApplicationDelegate>
+@interface BudgetAppDelegate : NSObject <UIApplicationDelegate, UNUserNotificationCenterDelegate>
 - (BOOL)application:(UIApplication * _Nonnull)application didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> * _Nullable)launchOptions SWIFT_WARN_UNUSED_RESULT;
 - (void)applicationDidEnterBackground:(UIApplication * _Nonnull)application;
+- (void)userNotificationCenter:(UNUserNotificationCenter * _Nonnull)center willPresentNotification:(UNNotification * _Nonnull)notification withCompletionHandler:(void (^ _Nonnull)(UNNotificationPresentationOptions))completionHandler;
+- (void)userNotificationCenter:(UNUserNotificationCenter * _Nonnull)center didReceiveNotificationResponse:(UNNotificationResponse * _Nonnull)response withCompletionHandler:(void (^ _Nonnull)(void))completionHandler;
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 @end
 

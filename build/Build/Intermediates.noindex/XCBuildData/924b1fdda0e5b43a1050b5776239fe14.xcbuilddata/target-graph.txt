@@ -1,4 +1,0 @@
-Target dependency graph (2 targets)
-Target 'Budgeting App' in project 'Budgeting App'
-➜ Explicit dependency on target 'BudgetingWidgets' in project 'Budgeting App'
-Target 'BudgetingWidgets' in project 'Budgeting App' (no dependencies)

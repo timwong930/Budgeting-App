@@ -4,34 +4,98 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "Budget Left",
-        "location": {
-          "startingColumn": 18,
-          "startingLine": 146
-        }
-      },
-      {
-        "comment": "",
-        "key": "Income: %@",
-        "location": {
-          "startingColumn": 18,
-          "startingLine": 156
-        }
-      },
-      {
-        "comment": "",
-        "key": "This Month",
-        "location": {
-          "startingColumn": 18,
-          "startingLine": 165
-        }
-      },
-      {
-        "comment": "",
-        "key": "%@/%@",
+        "key": "%@ / %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 181
+          "startingLine": 365
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget Left",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 449
+        }
+      },
+      {
+        "comment": "",
+        "key": "mo",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 471
+        }
+      },
+      {
+        "comment": "",
+        "key": "Details",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 494
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cash",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 554
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 563
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total Value",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 584
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cash",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 594
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld holding%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 641
+        }
+      },
+      {
+        "comment": "",
+        "key": "+%lld more",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 692
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tickers",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 703
+        }
+      },
+      {
+        "comment": "",
+        "key": "No watchlist tickers added",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 725
         }
       },
       {
@@ -39,15 +103,47 @@
         "key": "Budget Summary",
         "location": {
           "startingColumn": 35,
-          "startingLine": 199
+          "startingLine": 780
         }
       },
       {
         "comment": "",
-        "key": "Quick look at remaining budget and section progress.",
+        "key": "Remaining budget, section progress, and quick-add buttons for income & expenses.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 200
+          "startingLine": 781
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio Snapshot",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 793
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio value, cash balance, margin used, and top holdings.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 794
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 806
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick view of watchlist ticker prices.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 807
         }
       }
     ]

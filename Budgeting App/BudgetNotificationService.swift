@@ -111,7 +111,9 @@ final class BudgetBackgroundRefreshCoordinator {
 
         let budget = BudgetModel()
         let previousNetWorth = BudgetNotificationService.netWorth(for: budget)
-        let refreshed = await refreshPortfolioQuotes(for: budget)
+        let plaidRefreshed = (try? await PlaidSyncCoordinator.shared.sync(budget: budget)) != nil
+        let quoteRefreshed = await refreshPortfolioQuotes(for: budget)
+        let refreshed = plaidRefreshed || quoteRefreshed
         await BudgetNotificationService.shared.sendWatchlistAlertsIfNeeded(
             budget: budget,
             marketDataService: marketDataService
@@ -944,7 +946,7 @@ final class BudgetNotificationService {
 
     private func portfolioSnapshotExpandedBody(budget: BudgetModel) -> String {
         let portfolio = Self.grossPortfolioValue(for: budget)
-        let positions = budget.holdings.prefix(5).map { holding in
+        let positions = budget.consolidatedHoldings.prefix(5).map { holding in
             let val = holding.shares * holding.currentPrice
             return "\(holding.ticker.uppercased()): \(Self.currency(val))"
         }

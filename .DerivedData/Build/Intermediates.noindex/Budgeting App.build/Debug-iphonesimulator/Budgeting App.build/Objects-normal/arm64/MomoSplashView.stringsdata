@@ -1,0 +1,32 @@
+{
+  "source": "/Users/timothywong/Documents/XCode/Budgeting App/Budgeting App/MomoSplashView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Momo's Money is loading",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Momo's Money",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 52
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget loading",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 56
+        }
+      }
+    ]
+  },
+  "version": 1
+}

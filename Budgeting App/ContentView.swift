@@ -182,6 +182,7 @@ struct ContentView: View {
     @State private var selectedCalendarDay: CalendarDaySelection?
     @State private var selectedCalendarEventList: CalendarDaySelection?
     @State private var visibleCalendarWeekStart: Date?
+    @State private var calendarEventCache: [Date: [CalendarEventItem]] = [:]
     @State private var selectedPortfolioTransaction: PortfolioTransaction?
     @State private var editingRecurringPayment: RecurringPayment?
     @State private var showingCreditAccounts = false
@@ -810,10 +811,12 @@ struct ContentView: View {
                 budget.income = budget.income(for: selectedMonth)
                 budget.applyMonthlyAllocations(for: selectedMonth)
                 updateMonthlyData()
+                rebuildCalendarEventCache()
                 scheduleBudgetNotifications()
                 if scenePhase == .active {
                     startHoldingsAutoRefreshLoop()
                     startWatchlistAlertLoop()
+                    Task { try? await PlaidSyncCoordinator.shared.sync(budget: budget) }
                 }
                 consumePendingDeepLink()
             }
@@ -830,6 +833,7 @@ struct ContentView: View {
                 if newValue == .active {
                     startHoldingsAutoRefreshLoop()
                     startWatchlistAlertLoop()
+                    Task { try? await PlaidSyncCoordinator.shared.sync(budget: budget) }
                     consumePendingDeepLink()
                 } else {
                     stopHoldingsAutoRefreshLoop()
@@ -841,12 +845,26 @@ struct ContentView: View {
             }
             .onChange(of: budget.expenses) { _, _ in
                 updateMonthlyData()
+                rebuildCalendarEventCache()
             }
             .onChange(of: budget.incomes) { _, _ in
                 updateMonthlyData()
+                rebuildCalendarEventCache()
             }
             .onChange(of: budget.savingsEntries) { _, _ in
                 updateMonthlyData()
+            }
+            .onChange(of: budget.creditAccounts) { _, _ in
+                rebuildCalendarEventCache()
+            }
+            .onChange(of: budget.portfolioTransactions) { _, _ in
+                rebuildCalendarEventCache()
+            }
+            .onChange(of: budget.cashTransfers) { _, _ in
+                rebuildCalendarEventCache()
+            }
+            .onChange(of: budget.recurringPayments) { _, _ in
+                rebuildCalendarEventCache()
             }
             .onChange(of: budget.watchlistTickers) { _, _ in
                 guard selectedTab == .home else { return }
@@ -1073,7 +1091,7 @@ struct ContentView: View {
         .sheet(item: $selectedCalendarEventList) { selection in
             CalendarDayTransactionsView(
                 date: selection.date,
-                events: calendarEvents(for: selection.date),
+                events: cachedCalendarEvents(for: selection.date),
                 onOpen: openCalendarEvent,
                 onMarkPaid: { payment, date in
                     markRecurringOccurrencePaid(payment, on: date)
@@ -2586,6 +2604,29 @@ struct ContentView: View {
         let iconName: String
         let creditAccount: CreditAccount?
         let portfolioTransaction: PortfolioTransaction?
+
+        var isPlaidSynced: Bool {
+            expense?.plaidMetadata != nil ||
+            income?.plaidMetadata != nil ||
+            creditAccount?.plaidMetadata != nil ||
+            portfolioTransaction?.plaidMetadata != nil
+        }
+    }
+
+    private func calendarDayKey(for date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    private func rebuildCalendarEventCache() {
+        calendarEventCache = Dictionary(
+            uniqueKeysWithValues: calendarWeeks.flatMap(\.days).map { date in
+                (calendarDayKey(for: date), calendarEvents(for: date))
+            }
+        )
+    }
+
+    private func cachedCalendarEvents(for date: Date) -> [CalendarEventItem] {
+        calendarEventCache[calendarDayKey(for: date)] ?? []
     }
 
     private func calendarEvents(for date: Date) -> [CalendarEventItem] {
@@ -2777,6 +2818,9 @@ struct ContentView: View {
     }
 
     private func creditAccountActualBalance(_ account: CreditAccount) -> Double {
+        if account.plaidMetadata != nil {
+            return account.startingBalance
+        }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in
@@ -3066,12 +3110,12 @@ struct ContentView: View {
                 }
             }
 
-            if !budget.holdings.isEmpty {
+            if !budget.consolidatedHoldings.isEmpty {
                 GlassCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Portfolio Holdings")
                             .font(.headline)
-                        ForEach(budget.holdings.prefix(5)) { holding in
+                        ForEach(budget.consolidatedHoldings.prefix(5)) { holding in
                             HStack {
                                 Text(holding.ticker)
                                 Spacer()
@@ -3090,7 +3134,7 @@ struct ContentView: View {
     @ViewBuilder
     private func recurringCalendarDayCell(for date: Date?, maxVisibleEvents: Int) -> some View {
         if let date {
-            let events = calendarEvents(for: date)
+            let events = cachedCalendarEvents(for: date)
             let visibleEvents = Array(events.prefix(maxVisibleEvents))
             let hiddenEventCount = max(events.count - visibleEvents.count, 0)
             let calendar = Calendar.current
@@ -3165,6 +3209,13 @@ struct ContentView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                             .allowsTightening(true)
+                        if event.isPlaidSynced {
+                            Text("Plaid")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.white.opacity(0.22), in: Capsule())
+                        }
                     }
                     if event.amount > 0 {
                         Text(calendarChipAmountText(for: event))
@@ -3280,7 +3331,7 @@ struct ContentView: View {
 
     private func maxCalendarEventCount(in week: CalendarWeek) -> Int {
         week.days
-            .map { calendarEvents(for: $0).count }
+            .map { cachedCalendarEvents(for: $0).count }
             .max() ?? 0
     }
 
@@ -5800,6 +5851,22 @@ struct AppSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Plaid") {
+                    NavigationLink("Bank, Card, and Portfolio Sync") {
+                        PlaidSettingsView(budget: budget)
+                    }
+                    if !budget.plaidConnectionStatuses.isEmpty {
+                        Text("\(budget.plaidConnectionStatuses.count) linked institution\(budget.plaidConnectionStatuses.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !budget.plaidReviewItems.isEmpty {
+                        Text("\(budget.plaidReviewItems.count) Plaid import\(budget.plaidReviewItems.count == 1 ? "" : "s") need review")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 Section("Alpaca Fallback") {
                     Toggle("Use Alpaca when primary provider fails", isOn: $budget.marketDataSettings.useAlpacaFallback)
                     SecureField("Alpaca API key ID", text: $budget.marketDataSettings.alpacaAPIKeyId)
@@ -5960,6 +6027,7 @@ struct TickerSnapshotDetailView: View {
     @State private var refreshError: String?
     @State private var companyProfile: MarketCompanyProfile?
     @State private var showAlertSettings = false
+    @State private var selectedTickerTransaction: PortfolioTransaction?
     private let marketDataService = MarketDataService()
 
     init(
@@ -6007,6 +6075,13 @@ struct TickerSnapshotDetailView: View {
     }
     private var latestPrice: Double { snapshot?.price ?? budget.cachedQuotes[cleanTicker]?.price ?? closes.last ?? 0 }
     private var priceChangeTint: Color { (snapshot?.percentChange ?? 0) >= 0 ? .green : .red }
+    private var tickerTransactions: [PortfolioTransaction] {
+        budget.portfolioTransactions
+            .filter {
+                $0.ticker?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == cleanTicker
+            }
+            .sorted { $0.date > $1.date }
+    }
 
     private var sma20: Double? { TickerIndicators.sma(indicatorCloses, period: 20) }
     private var sma50: Double? { TickerIndicators.sma(indicatorCloses, period: 50) }
@@ -6047,6 +6122,7 @@ struct TickerSnapshotDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     chartSection
+                    transactionActivitySection
                     financialsSection
                     notesSection
                     aiCaseSection
@@ -6096,6 +6172,9 @@ struct TickerSnapshotDetailView: View {
             }
             .sheet(isPresented: $showAlertSettings) {
                 WatchlistAlertSettingsView(budget: budget, ticker: ticker)
+            }
+            .sheet(item: $selectedTickerTransaction) { transaction in
+                PortfolioTransactionDetailView(transaction: transaction)
             }
             .sheet(item: $editingNoteDraft) { draft in
                 TickerSnapshotNoteEditorView(
@@ -6252,6 +6331,91 @@ struct TickerSnapshotDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .padding(.horizontal)
+    }
+
+    private var transactionActivitySection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Transactions", systemImage: "list.bullet.rectangle")
+                        .font(.headline)
+                    Spacer()
+                    Text("\(tickerTransactions.count)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+
+                if tickerTransactions.isEmpty {
+                    Text("No transactions recorded for \(cleanTicker).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(tickerTransactions) { transaction in
+                        Button {
+                            selectedTickerTransaction = transaction
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: transactionSystemImage(transaction.type))
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(transactionTint(transaction.type))
+                                    .frame(width: 30, height: 30)
+                                    .background(transactionTint(transaction.type).opacity(0.12), in: Circle())
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(transaction.type.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(transaction.date, format: .dateTime.month().day().year())
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 3) {
+                                    Text(transaction.amount, format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    if let shares = transaction.shares {
+                                        Text("\(shares.formatted(.number.precision(.fractionLength(0...4)))) shares")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func transactionSystemImage(_ type: PortfolioTransactionType) -> String {
+        switch type {
+        case .buy: return "arrow.down.circle"
+        case .sell: return "arrow.up.circle"
+        case .dividend: return "dollarsign.circle"
+        case .contribution: return "plus.circle"
+        case .billPaidByMargin: return "creditcard"
+        case .marginInterest: return "percent"
+        case .manualAdjustment: return "slider.horizontal.3"
+        }
+    }
+
+    private func transactionTint(_ type: PortfolioTransactionType) -> Color {
+        switch type {
+        case .sell, .dividend: return .green
+        case .buy, .billPaidByMargin, .marginInterest: return .orange
+        case .contribution: return .mint
+        case .manualAdjustment: return .indigo
+        }
     }
 
     private var notesSection: some View {
@@ -10104,6 +10268,9 @@ struct CreditAccountsView: View {
     @State private var showingAddAccount = false
 
     private func actualBalance(for account: CreditAccount) -> Double {
+        if account.plaidMetadata != nil {
+            return account.startingBalance
+        }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in
@@ -10344,6 +10511,9 @@ struct CreditAccountDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var actualBalance: Double {
+        if account.plaidMetadata != nil {
+            return account.startingBalance
+        }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
         return budget.expenses.reduce(account.startingBalance) { partial, expense in

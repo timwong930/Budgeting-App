@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A1B2C3DE2F1B518D0082AFEF /* BudgetingWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BNC0000E2F1B60000082AFEF /* BudgetNotificationContentExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		PLD000012F3000000082AFEF /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = PLD000022F3000000082AFEF /* LinkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,7 +45,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Budgeting App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1BAFE93C2F1B518D0082AFEF /* Momo's Money.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Momo's Money.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetingWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BudgetNotificationContentExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -72,6 +73,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				PLD000012F3000000082AFEF /* LinkKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -105,7 +107,7 @@
 		1BAFE93D2F1B518D0082AFEF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */,
+				1BAFE93C2F1B518D0082AFEF /* Momo's Money.app */,
 				A1B2C3D42F1B518D0082AFEF /* BudgetingWidgets.appex */,
 				BNC000042F1B60000082AFEF /* BudgetNotificationContentExtension.appex */,
 			);
@@ -135,9 +137,10 @@
 			);
 			name = "Budgeting App";
 			packageProductDependencies = (
+				PLD000022F3000000082AFEF /* LinkKit */,
 			);
 			productName = "Budgeting App";
-			productReference = 1BAFE93C2F1B518D0082AFEF /* Budgeting App.app */;
+			productReference = 1BAFE93C2F1B518D0082AFEF /* Momo's Money.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A1B2C3D92F1B518D0082AFEF /* BudgetingWidgets */ = {
@@ -211,6 +214,9 @@
 			);
 			mainGroup = 1BAFE9332F1B518D0082AFEF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				PLD000032F3000000082AFEF /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1BAFE93D2F1B518D0082AFEF /* Products */;
 			projectDirPath = "";
@@ -429,8 +435,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				PLAID_ASSOCIATED_DOMAIN = zqjvfmkesfwdtgwkcuxc.functions.supabase.co;
 				PRODUCT_BUNDLE_IDENTIFIER = "Timothy-Wong.Budgeting-App";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Momo's Money";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -465,8 +472,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				PLAID_ASSOCIATED_DOMAIN = zqjvfmkesfwdtgwkcuxc.functions.supabase.co;
 				PRODUCT_BUNDLE_IDENTIFIER = "Timothy-Wong.Budgeting-App";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Momo's Money";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -632,6 +640,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		PLD000032F3000000082AFEF /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/plaid/plaid-link-ios-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		PLD000022F3000000082AFEF /* LinkKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PLD000032F3000000082AFEF /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */;
+			productName = LinkKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1BAFE9342F1B518D0082AFEF /* Project object */;
 }

@@ -7,7 +7,7 @@
         "key": "TradingView chart",
         "location": {
           "startingColumn": 29,
-          "startingLine": 350
+          "startingLine": 414
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Open %@ snapshot",
         "location": {
           "startingColumn": 45,
-          "startingLine": 379
+          "startingLine": 443
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Chart style",
         "location": {
           "startingColumn": 20,
-          "startingLine": 426
+          "startingLine": 490
         }
       },
       {
@@ -31,31 +31,7 @@
         "key": "TradingView",
         "location": {
           "startingColumn": 26,
-          "startingLine": 548
-        }
-      },
-      {
-        "comment": "",
-        "key": "%@ Financials",
-        "location": {
-          "startingColumn": 30,
-          "startingLine": 531
-        }
-      },
-      {
-        "comment": "",
-        "key": "Financials",
-        "location": {
-          "startingColumn": 22,
-          "startingLine": 594
-        }
-      },
-      {
-        "comment": "",
-        "key": "TradingView",
-        "location": {
-          "startingColumn": 22,
-          "startingLine": 597
+          "startingLine": 595
         }
       }
     ]

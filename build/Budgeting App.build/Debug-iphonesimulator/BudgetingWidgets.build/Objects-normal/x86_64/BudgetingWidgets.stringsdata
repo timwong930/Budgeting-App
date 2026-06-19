@@ -1,0 +1,216 @@
+{
+  "source": "/Users/timothywong/Documents/XCode/Budgeting App/BudgetingWidgets/BudgetingWidgets.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Budget Left",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 337
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income: %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 347
+        }
+      },
+      {
+        "comment": "",
+        "key": "Income",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 353
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expense",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 359
+        }
+      },
+      {
+        "comment": "",
+        "key": "This Month",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 371
+        }
+      },
+      {
+        "comment": "",
+        "key": "Details",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 375
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Income",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 386
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Expense",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 395
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@/%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 413
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 444
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cash",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 455
+        }
+      },
+      {
+        "comment": "",
+        "key": "Margin",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 462
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 477
+        }
+      },
+      {
+        "comment": "",
+        "key": "Total Value",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 487
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cash",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 497
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld holding%@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 524
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 554
+        }
+      },
+      {
+        "comment": "",
+        "key": "No watchlist",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 572
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 585
+        }
+      },
+      {
+        "comment": "",
+        "key": "No watchlist tickers added",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 598
+        }
+      },
+      {
+        "comment": "",
+        "key": "Budget Summary",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 634
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remaining budget, section progress, and quick-add buttons for income & expenses.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 635
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio Snapshot",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 647
+        }
+      },
+      {
+        "comment": "",
+        "key": "Portfolio value, cash balance, margin used, and top holdings.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 648
+        }
+      },
+      {
+        "comment": "",
+        "key": "Watchlist",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 660
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick view of watchlist ticker prices.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 661
+        }
+      }
+    ]
+  },
+  "version": 1
+}

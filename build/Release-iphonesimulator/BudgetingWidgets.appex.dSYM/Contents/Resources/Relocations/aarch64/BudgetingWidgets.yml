@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/timothywong/Documents/XCode/Budgeting App/build/Release-iphonesimulator/BudgetingWidgets.appex/BudgetingWidgets'
+relocations:     []
+...

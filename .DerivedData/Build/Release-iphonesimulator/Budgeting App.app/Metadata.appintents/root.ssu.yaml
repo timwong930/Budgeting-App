@@ -1,0 +1,112 @@
+apiVersion: ssu/v1
+nlu:
+  shortcuts:
+    bundleIdentifier: Timothy-Wong.Budgeting-App
+    intents:
+    - metadata:
+        name: AddTickerNoteIntent_0
+        title: Add Note to Ticker
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Add a note to ${+applicationName}'
+          - '{${+prefix} }Save a note in ${+applicationName}'
+          - '{${+prefix} }Log a note for a ticker in ${+applicationName}'
+          - '{${+prefix} }Add ticker note in ${+applicationName}'
+    - metadata:
+        name: GetPortfolioSummaryIntent_1
+        title: Get Portfolio Summary
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Get my portfolio summary from ${+applicationName}'
+          - '{${+prefix} }What''s my portfolio value in ${+applicationName}'
+          - '{${+prefix} }Portfolio summary in ${+applicationName}'
+    - metadata:
+        name: AddExpenseIntent_2
+        title: Add Expense
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Add an expense to ${+applicationName}'
+          - '{${+prefix} }Log an expense in ${+applicationName}'
+          - '{${+prefix} }Track an expense in ${+applicationName}'
+    - metadata:
+        name: AddPortfolioTransactionIntent_3
+        title: Add Portfolio Transaction
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Add a transaction to ${+applicationName}'
+          - '{${+prefix} }Log a trade in ${+applicationName}'
+          - '{${+prefix} }Record a portfolio transaction in ${+applicationName}'
+    - metadata:
+        name: GetNetWorthIntent_4
+        title: Get Net Worth
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }What''s my net worth in ${+applicationName}'
+          - '{${+prefix} }Get net worth from ${+applicationName}'
+          - '{${+prefix} }Net worth in ${+applicationName}'
+    - metadata:
+        name: GetStockQuoteIntent_5
+        title: Get Stock Quote
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Get a stock quote from ${+applicationName}'
+          - '{${+prefix} }Check price in ${+applicationName}'
+          - '{${+prefix} }Stock quote in ${+applicationName}'
+    - metadata:
+        name: GetWatchlistPricesIntent_6
+        title: Get Watchlist Prices
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Get my watchlist from ${+applicationName}'
+          - '{${+prefix} }Watchlist prices in ${+applicationName}'
+          - '{${+prefix} }What''s on my watchlist in ${+applicationName}'
+    - metadata:
+        name: GetBudgetStatusIntent_7
+        title: Get Budget Status
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Get my budget from ${+applicationName}'
+          - '{${+prefix} }Budget status in ${+applicationName}'
+          - '{${+prefix} }How''s my budget in ${+applicationName}'
+    - metadata:
+        name: +negative
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }${+standardAppShortcutNegatives}'
+variables:
+- name: +applicationName
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+    - Momo's Money!
+- name: +prefix
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+      $ref: ssu://Resources/prefix/en.yaml
+- name: +standardAppShortcutNegatives
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+      $ref: ssu://Resources/standardAppShortcutNegatives/en.yaml

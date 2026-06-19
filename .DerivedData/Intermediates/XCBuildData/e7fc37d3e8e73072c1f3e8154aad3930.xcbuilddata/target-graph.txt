@@ -1,0 +1,6 @@
+Target dependency graph (3 targets)
+Target 'Budgeting App' in project 'Budgeting App'
+➜ Explicit dependency on target 'BudgetingWidgets' in project 'Budgeting App'
+➜ Explicit dependency on target 'BudgetNotificationContentExtension' in project 'Budgeting App'
+Target 'BudgetNotificationContentExtension' in project 'Budgeting App' (no dependencies)
+Target 'BudgetingWidgets' in project 'Budgeting App' (no dependencies)
