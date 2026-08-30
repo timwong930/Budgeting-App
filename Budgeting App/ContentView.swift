@@ -388,7 +388,7 @@ struct ContentView: View {
         let date: Date
     }
 
-    private enum CalendarViewMode: String, CaseIterable, Identifiable {
+    private enum CalendarViewMode: String, CaseIterable, Identifiable, Equatable {
         case month = "Month"
         case week = "Week"
         case day = "Day"
@@ -1477,36 +1477,6 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Add Calendar Entry")
 
-                        Menu {
-                            Toggle("Spending & bills", isOn: $calendarShowExpenses)
-                            Toggle("Income", isOn: $calendarShowIncome)
-                            Toggle("Transfers", isOn: $calendarShowTransfers)
-                            Toggle("Credit card due dates", isOn: $calendarShowCreditDue)
-                            Toggle("Portfolio activity", isOn: $calendarShowPortfolio)
-                            Divider()
-                            Button("Show everything") {
-                                calendarShowExpenses = true
-                                calendarShowIncome = true
-                                calendarShowTransfers = true
-                                calendarShowCreditDue = true
-                                calendarShowPortfolio = true
-                            }
-                            Button("Reset recommended filters") {
-                                calendarShowExpenses = true
-                                calendarShowIncome = true
-                                calendarShowTransfers = true
-                                calendarShowCreditDue = true
-                                calendarShowPortfolio = false
-                            }
-                        } label: {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                                .frame(width: 36, height: 36)
-                                .background(.thinMaterial, in: Circle())
-                        }
-                        .accessibilityLabel("Calendar Filters")
-
                         Button {
                             showingAddCashTransfer = true
                         } label: {
@@ -1518,6 +1488,18 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Transfer Cash")
+
+                        Button {
+                            showingCreditAccounts = true
+                        } label: {
+                            Image(systemName: "creditcard")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Credit Cards")
                     }
                 }
 
@@ -1732,7 +1714,11 @@ struct ContentView: View {
     }
 
     private var calendarActionDate: Date {
-        calendarViewMode == .month ? visibleCalendarMonth : calendarFocusDate
+        if calendarViewMode != .month { return calendarFocusDate }
+        if Calendar.current.isDate(visibleCalendarMonth, equalTo: Date(), toGranularity: .month) {
+            return Date()
+        }
+        return visibleCalendarMonth
     }
 
     private var calendarViewControls: some View {
