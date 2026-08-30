@@ -1504,8 +1504,8 @@ class BudgetModel: ObservableObject {
                 ?? combined.annualDividendPerShare
             combined.notes = tickerHoldings.first(where: { !$0.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.notes
                 ?? combined.notes
-            combined.plaidMetadata = tickerHoldings.first(where: { $0.plaidMetadata != nil })?.plaidMetadata
-                ?? combined.plaidMetadata
+            combined.plaidMetadata = nil
+            combined.portfolioAccountId = nil
             return combined
         }
         .sorted { $0.ticker < $1.ticker }
@@ -2076,71 +2076,81 @@ class BudgetModel: ObservableObject {
 
     var marginUsedFromLedger: Double {
         portfolioTransactions
-            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
-            .reduce(0) { partial, tx in
-            switch tx.type {
-            case .billPaidByMargin:
-                return partial + tx.amount
-            case .marginInterest:
-                return partial + tx.amount
-            case .sell:
-                return partial - tx.amount
-            case .manualAdjustment:
-                return partial + tx.amount
-            case .buy, .contribution, .dividend:
-                return partial
-            }
-        }
+            .filter { !portfolioAccountIsPlaidAuthoritative($0.portfolioAccountId) }
+            .reduce(0) { $0 + marginDelta(for: $1) }
     }
 
     var holdingsFromTransactions: [PortfolioHolding] {
-        var buckets: [String: (shares: Double, cost: Double)] = [:]
+        var buckets: [PortfolioPositionKey: (shares: Double, cost: Double)] = [:]
         let ordered = portfolioTransactions
-            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            .filter { !portfolioAccountIsPlaidAuthoritative($0.portfolioAccountId) }
             .sorted { $0.date < $1.date }
+
         for tx in ordered {
             let ticker = tx.ticker?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+            let key = PortfolioPositionKey(
+                portfolioAccountId: tx.portfolioAccountId,
+                securityIdentity: ticker
+            )
+
             switch tx.type {
             case .buy:
                 guard !ticker.isEmpty else { continue }
-                let shares = tx.shares ?? 0
-                let totalCost = tx.amount
-                var item = buckets[ticker, default: (0, 0)]
+                let shares = max(tx.shares ?? 0, 0)
+                guard shares > 0 else { continue }
+                var item = buckets[key, default: (0, 0)]
                 item.shares += shares
-                item.cost += totalCost
-                buckets[ticker] = item
+                item.cost += max(tx.amount, 0)
+                buckets[key] = item
             case .sell:
                 guard !ticker.isEmpty else { continue }
                 let sharesToSell = max(tx.shares ?? 0, 0)
-                guard sharesToSell > 0, var item = buckets[ticker], item.shares > 0 else { continue }
-                let average = item.shares > 0 ? item.cost / item.shares : 0
+                guard sharesToSell > 0, var item = buckets[key], item.shares > 0 else { continue }
+                let average = item.cost / item.shares
                 let sold = min(sharesToSell, item.shares)
                 item.shares -= sold
                 item.cost = max(item.cost - average * sold, 0)
-                buckets[ticker] = item
+                buckets[key] = item
             default:
                 continue
             }
         }
 
-        return buckets.compactMap { ticker, bucket in
+        return buckets.compactMap { key, bucket in
             guard bucket.shares > 0 else { return nil }
-            let quote = cachedQuotes[ticker]?.price ?? 0
+            let ticker = key.securityIdentity
+            let existing = holdings.first {
+                $0.portfolioAccountId == key.portfolioAccountId &&
+                $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker
+            } ?? holdings.first {
+                $0.plaidMetadata == nil &&
+                $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker
+            }
+            let quote = cachedQuotes[ticker]?.price ?? existing?.currentPrice ?? 0
+
             return PortfolioHolding(
                 ticker: ticker,
                 shares: bucket.shares,
-                averageCost: bucket.shares > 0 ? bucket.cost / bucket.shares : 0,
+                averageCost: bucket.cost / bucket.shares,
                 currentPrice: quote,
-                annualDividendPerShare: holdings.first(where: { $0.ticker.uppercased() == ticker })?.annualDividendPerShare ?? 0,
-                dividendFrequency: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendFrequency ?? .quarterly,
-                assetType: holdings.first(where: { $0.ticker.uppercased() == ticker })?.assetType ?? .dividendStock,
-                dividendReliability: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendReliability ?? .medium,
-                notes: holdings.first(where: { $0.ticker.uppercased() == ticker })?.notes ?? "",
-                nextExDividendDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextExDividendDate,
-                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate,
-                portfolioAccountId: resolvePortfolioAccountId(metadata: nil)
+                annualDividendPerShare: existing?.annualDividendPerShare ?? 0,
+                dividendFrequency: existing?.dividendFrequency ?? .quarterly,
+                assetType: existing?.assetType ?? .dividendStock,
+                dividendReliability: existing?.dividendReliability ?? .medium,
+                notes: existing?.notes ?? "",
+                nextExDividendDate: existing?.nextExDividendDate,
+                nextPayDate: existing?.nextPayDate,
+                portfolioAccountId: key.portfolioAccountId
             )
-        }.sorted { $0.ticker < $1.ticker }
+        }
+        .sorted {
+            let comparison = $0.ticker.localizedStandardCompare($1.ticker)
+            if comparison == .orderedSame {
+                return portfolioAccountName(for: $0.portfolioAccountId)
+                    .localizedStandardCompare(portfolioAccountName(for: $1.portfolioAccountId)) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
     }
 
     func addPortfolioTransaction(
@@ -2219,7 +2229,8 @@ class BudgetModel: ObservableObject {
         sharesBought: Double,
         pricePerShare: Double,
         date: Date,
-        fundingSource: InvestmentFundingSource
+        fundingSource: InvestmentFundingSource,
+        portfolioAccountId: UUID? = nil
     ) {
         let cleanTicker = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !cleanTicker.isEmpty else { return }
@@ -2232,7 +2243,8 @@ class BudgetModel: ObservableObject {
                 shares: sharesBought,
                 pricePerShare: pricePerShare,
                 amount: dollarsInvested,
-                notes: fundingSource == .newContribution ? "Funding: New Contribution" : "Funding: Cash/Margin"
+                notes: fundingSource == .newContribution ? "Funding: New Contribution" : "Funding: Cash/Margin",
+                portfolioAccountId: portfolioAccountId
             )
         )
     }
@@ -2251,6 +2263,10 @@ class BudgetModel: ObservableObject {
     private func applyCashImpact(for transaction: PortfolioTransaction) {
         let amount = transaction.amount
         guard amount != 0 else { return }
+        let resolvedAccountId = transaction.portfolioAccountId ?? (activePortfolioAccounts.count == 1 ? activePortfolioAccounts[0].id : nil)
+        guard let resolvedAccountId,
+              let accountIndex = portfolioAccounts.firstIndex(where: { $0.id == resolvedAccountId }),
+              !portfolioAccountIsPlaidAuthoritative(resolvedAccountId) else { return }
 
         switch transaction.type {
         case .contribution:
@@ -2259,7 +2275,7 @@ class BudgetModel: ObservableObject {
                 legacyName: transaction.fundingBankAccount ?? "",
                 delta: -amount
             )
-            let marginPaydown = min(max(marginUsedFromLedger, 0), max(amount, 0))
+            let marginPaydown = min(max(portfolioAccounts[accountIndex].marginBalance, 0), max(amount, 0))
             if marginPaydown > 0 {
                 portfolioTransactions.append(
                     PortfolioTransaction(
@@ -2267,30 +2283,31 @@ class BudgetModel: ObservableObject {
                         type: .manualAdjustment,
                         amount: -marginPaydown,
                         notes: "Cash contribution applied to margin balance",
-                        portfolioAccountId: transaction.portfolioAccountId
+                        portfolioAccountId: resolvedAccountId
                     )
                 )
             }
-            portfolioSnapshot.cashBalance += max(amount - marginPaydown, 0)
+            portfolioAccounts[accountIndex].cashBalance += max(amount - marginPaydown, 0)
         case .dividend:
-            portfolioSnapshot.cashBalance += amount
+            portfolioAccounts[accountIndex].cashBalance += amount
         case .buy:
-            let cashUsed = min(max(portfolioSnapshot.cashBalance, 0), max(amount, 0))
-            portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance - cashUsed, 0)
+            let cashUsed = min(max(portfolioAccounts[accountIndex].cashBalance, 0), max(amount, 0))
+            portfolioAccounts[accountIndex].cashBalance = max(portfolioAccounts[accountIndex].cashBalance - cashUsed, 0)
             let marginDraw = max(amount - cashUsed, 0)
-            guard marginDraw > 0 else { return }
-            portfolioTransactions.append(
-                PortfolioTransaction(
-                    date: transaction.date,
-                    type: .manualAdjustment,
-                    amount: marginDraw,
-                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy",
-                    portfolioAccountId: transaction.portfolioAccountId
+            if marginDraw > 0 {
+                portfolioTransactions.append(
+                    PortfolioTransaction(
+                        date: transaction.date,
+                        type: .manualAdjustment,
+                        amount: marginDraw,
+                        notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy",
+                        portfolioAccountId: resolvedAccountId
+                    )
                 )
-            )
+            }
         case .sell:
-            let marginPaydown = min(max(portfolioSnapshot.marginUsed, 0), max(amount, 0))
-            portfolioSnapshot.cashBalance += max(amount - marginPaydown, 0)
+            let marginPaydown = min(max(portfolioAccounts[accountIndex].marginBalance, 0), max(amount, 0))
+            portfolioAccounts[accountIndex].cashBalance += max(amount - marginPaydown, 0)
         case .billPaidByMargin, .marginInterest, .manualAdjustment:
             break
         }
@@ -2300,6 +2317,10 @@ class BudgetModel: ObservableObject {
     private func reverseCashImpact(for transaction: PortfolioTransaction) {
         let amount = transaction.amount
         guard amount != 0 else { return }
+        let resolvedAccountId = transaction.portfolioAccountId ?? (activePortfolioAccounts.count == 1 ? activePortfolioAccounts[0].id : nil)
+        guard let resolvedAccountId,
+              let accountIndex = portfolioAccounts.firstIndex(where: { $0.id == resolvedAccountId }),
+              !portfolioAccountIsPlaidAuthoritative(resolvedAccountId) else { return }
 
         switch transaction.type {
         case .contribution:
@@ -2308,22 +2329,22 @@ class BudgetModel: ObservableObject {
                 legacyName: transaction.fundingBankAccount ?? "",
                 delta: amount
             )
-            portfolioSnapshot.cashBalance -= amount
+            portfolioAccounts[accountIndex].cashBalance -= amount
         case .dividend:
-            portfolioSnapshot.cashBalance -= amount
+            portfolioAccounts[accountIndex].cashBalance -= amount
         case .buy:
-            portfolioSnapshot.cashBalance += min(max(amount, 0), amount)
+            portfolioAccounts[accountIndex].cashBalance += max(amount, 0)
         case .sell:
-            portfolioSnapshot.cashBalance -= amount
+            portfolioAccounts[accountIndex].cashBalance -= amount
         case .billPaidByMargin, .marginInterest, .manualAdjustment:
             break
         }
-        portfolioSnapshot.cashBalance = max(portfolioSnapshot.cashBalance, 0)
+        portfolioAccounts[accountIndex].cashBalance = max(portfolioAccounts[accountIndex].cashBalance, 0)
         roundPortfolioCashBalance()
     }
 
     private func roundPortfolioCashBalance() {
-        portfolioSnapshot.cashBalance = (portfolioSnapshot.cashBalance * 100).rounded() / 100
+        roundPortfolioAccountBalances()
     }
 
     private func applyEditableCashImpact(for transaction: PortfolioTransaction) {
@@ -2345,45 +2366,74 @@ class BudgetModel: ObservableObject {
     }
 
     func synchronizeLegacyMarginStateFromLedger() {
-        let manualPortfolioAccounts = portfolioAccounts.filter { !isPlaidAuthoritativePortfolioAccount($0.id) }
-        var legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
-        let legacyMarginUsed = max(portfolioSnapshot.marginUsed, 0)
-        if legacyTransactions.isEmpty,
-           legacyMarginUsed > 0,
-           let manualPortfolioAccount = manualPortfolioAccounts.first {
-            portfolioTransactions.append(
-                PortfolioTransaction(
-                    type: .manualAdjustment,
-                    amount: legacyMarginUsed,
-                    notes: "Imported existing margin balance",
-                    portfolioAccountId: manualPortfolioAccount.id
+        let manualPortfolioAccounts = portfolioAccounts.filter { !portfolioAccountIsPlaidAuthoritative($0.id) }
+
+        for account in manualPortfolioAccounts {
+            let accountTransactions = portfolioTransactions.filter { $0.portfolioAccountId == account.id }
+            if accountTransactions.isEmpty, account.marginBalance > 0 {
+                portfolioTransactions.append(
+                    PortfolioTransaction(
+                        type: .manualAdjustment,
+                        amount: account.marginBalance,
+                        notes: "Imported existing margin balance",
+                        portfolioAccountId: account.id
+                    )
                 )
-            )
-            legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            }
         }
 
+        let manualTransactions = portfolioTransactions.filter { !portfolioAccountIsPlaidAuthoritative($0.portfolioAccountId) }
         let derivedHoldings = holdingsFromTransactions
-        if !derivedHoldings.isEmpty || !legacyTransactions.isEmpty {
-            holdings = derivedHoldings
-            portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
+        if !derivedHoldings.isEmpty || !manualTransactions.isEmpty {
+            let derivedKeys = Set(derivedHoldings.map {
+                PortfolioPositionKey(
+                    portfolioAccountId: $0.portfolioAccountId,
+                    securityIdentity: $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                )
+            })
+            let preservedHoldings = holdings.filter { holding in
+                if portfolioAccountIsPlaidAuthoritative(holding.portfolioAccountId) { return true }
+                let key = PortfolioPositionKey(
+                    portfolioAccountId: holding.portfolioAccountId,
+                    securityIdentity: holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                )
+                return !derivedKeys.contains(key)
+            }
+            holdings = (preservedHoldings + derivedHoldings).sorted {
+                let comparison = $0.ticker.localizedStandardCompare($1.ticker)
+                if comparison == .orderedSame {
+                    return portfolioAccountName(for: $0.portfolioAccountId)
+                        .localizedStandardCompare(portfolioAccountName(for: $1.portfolioAccountId)) == .orderedAscending
+                }
+                return comparison == .orderedAscending
+            }
         }
 
-        if let manualPortfolioAccount = manualPortfolioAccounts.first {
-            sweepCashAgainstMarginIfNeeded(portfolioAccountId: manualPortfolioAccount.id)
+        for account in manualPortfolioAccounts {
+            guard let index = portfolioAccounts.firstIndex(where: { $0.id == account.id }) else { continue }
+            portfolioAccounts[index].marginBalance = max(marginUsedFromLedger(for: account.id), 0)
         }
 
+        for account in manualPortfolioAccounts {
+            sweepCashAgainstMarginIfNeeded(portfolioAccountId: account.id)
+        }
+
+        for account in manualPortfolioAccounts {
+            guard let index = portfolioAccounts.firstIndex(where: { $0.id == account.id }) else { continue }
+            portfolioAccounts[index].marginBalance = max(marginUsedFromLedger(for: account.id), 0)
+        }
+
+        roundPortfolioAccountBalances()
         portfolioSnapshot.freeMarginLimit = marginSettings.interestFreeMarginLimit
         portfolioSnapshot.marginInterestRate = marginSettings.marginInterestRate
     }
 
     private func sweepCashAgainstMarginIfNeeded(portfolioAccountId: UUID) {
-        let availableCash = max(portfolioSnapshot.cashBalance, 0)
-        let currentMargin = max(marginUsedFromLedger, 0)
+        guard let accountIndex = portfolioAccounts.firstIndex(where: { $0.id == portfolioAccountId }) else { return }
+        let availableCash = max(portfolioAccounts[accountIndex].cashBalance, 0)
+        let currentMargin = max(portfolioAccounts[accountIndex].marginBalance, 0)
         let sweepAmount = min(availableCash, currentMargin)
-        guard sweepAmount > 0 else {
-            roundPortfolioCashBalance()
-            return
-        }
+        guard sweepAmount > 0 else { return }
 
         let roundedSweep = (sweepAmount * 100).rounded() / 100
         guard roundedSweep > 0 else { return }
@@ -2396,9 +2446,9 @@ class BudgetModel: ObservableObject {
                 portfolioAccountId: portfolioAccountId
             )
         )
-        portfolioSnapshot.cashBalance = max(availableCash - roundedSweep, 0)
-        portfolioSnapshot.marginUsed = max(currentMargin - roundedSweep, 0)
-        roundPortfolioCashBalance()
+        portfolioAccounts[accountIndex].cashBalance = max(availableCash - roundedSweep, 0)
+        portfolioAccounts[accountIndex].marginBalance = max(currentMargin - roundedSweep, 0)
+        roundPortfolioAccountBalances()
     }
 
     private func recordPortfolioValueHistory() {

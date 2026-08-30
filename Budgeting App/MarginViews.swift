@@ -623,7 +623,7 @@ struct MarginDashboardView: View {
                     Button("View Details") { showSnapshotDetails = true }
                         .buttonStyle(.bordered)
                 }
-                editableCurrencyRow("Cash Balance", value: $budget.portfolioSnapshot.cashBalance)
+                metricRow("All Portfolios Cash", budget.portfolioSnapshot.cashBalance)
                 metricRow("Holdings Value", totalMarketValue)
                 metricRow("Margin Used", budget.portfolioSnapshot.marginUsed)
                 metricRow("Net Portfolio Value", netPortfolioValue)
@@ -3066,6 +3066,7 @@ private struct AddTransactionView: View {
     @State private var amount = 0.0
     @State private var notes = ""
     @State private var fundingBankAccount = ""
+    @State private var portfolioAccountId: UUID?
 
     private var bankAccountOptions: [String] {
         let names = (budget.bankAccounts.map(\.name) + [fundingBankAccount])
@@ -3098,6 +3099,7 @@ private struct AddTransactionView: View {
     }
 
     private var canSave: Bool {
+        guard portfolioAccountId != nil else { return false }
         switch type {
         case .buy, .sell:
             return !cleanTicker.isEmpty && shares > 0 && transactionAmount > 0
@@ -3114,6 +3116,18 @@ private struct AddTransactionView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Portfolio") {
+                    Picker("Account", selection: $portfolioAccountId) {
+                        ForEach(budget.activePortfolioAccounts) { account in
+                            Text(account.name).tag(Optional(account.id))
+                        }
+                    }
+                    if budget.activePortfolioAccounts.isEmpty {
+                        Text("Add a portfolio account before recording investment activity.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("Position Details") {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     Picker("Type", selection: $type) {
@@ -3176,7 +3190,8 @@ private struct AddTransactionView: View {
                                 pricePerShare: pricePerShare > 0 ? pricePerShare : nil,
                                 amount: transactionAmount,
                                 notes: notes.nilIfBlank,
-                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil
+                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil,
+                                portfolioAccountId: portfolioAccountId
                             ),
                             fundingBankAccount: type == .contribution ? fundingBankAccount : nil
                         )
@@ -3186,6 +3201,9 @@ private struct AddTransactionView: View {
                 }
             }
             .onAppear {
+                if portfolioAccountId == nil {
+                    portfolioAccountId = budget.activePortfolioAccounts.first?.id
+                }
                 if fundingBankAccount.isEmpty {
                     fundingBankAccount = budget.bankAccounts.first?.name ?? ""
                 }
@@ -3219,6 +3237,7 @@ private struct AddInvestmentView: View {
     @State private var reliability: DividendReliability = .medium
     @State private var date = Date()
     @State private var quoteFetchTask: Task<Void, Never>?
+    @State private var portfolioAccountId: UUID?
 
     private var cleanTicker: String {
         ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -3229,12 +3248,24 @@ private struct AddInvestmentView: View {
     }
 
     private var canSave: Bool {
-        !cleanTicker.isEmpty && sharesBought > 0 && investmentAmount > 0
+        portfolioAccountId != nil && !cleanTicker.isEmpty && sharesBought > 0 && investmentAmount > 0
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Portfolio") {
+                    Picker("Account", selection: $portfolioAccountId) {
+                        ForEach(budget.activePortfolioAccounts) { account in
+                            Text(account.name).tag(Optional(account.id))
+                        }
+                    }
+                    if budget.activePortfolioAccounts.isEmpty {
+                        Text("Add a portfolio account before recording an investment.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("Position Details") {
                     TextField("Ticker", text: $ticker)
                         .textInputAutocapitalization(.characters)
@@ -3282,6 +3313,11 @@ private struct AddInvestmentView: View {
                 applyExistingHoldingDefaults()
                 queueQuoteFetchIfNeeded()
             }
+            .onAppear {
+                if portfolioAccountId == nil {
+                    portfolioAccountId = budget.activePortfolioAccounts.first?.id
+                }
+            }
             .onDisappear {
                 quoteFetchTask?.cancel()
             }
@@ -3291,7 +3327,10 @@ private struct AddInvestmentView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let existingHolding = budget.holdings.first { $0.ticker.uppercased() == cleanTicker }
+                        guard let portfolioAccountId else { return }
+                        let existingHolding = budget.holdings.first {
+                            $0.portfolioAccountId == portfolioAccountId && $0.ticker.uppercased() == cleanTicker
+                        }
                         let dividendToSave = annualDividendPerShare > 0
                             ? annualDividendPerShare
                             : (existingHolding?.annualDividendPerShare ?? 0)
@@ -3304,9 +3343,12 @@ private struct AddInvestmentView: View {
                             sharesBought: sharesBought,
                             pricePerShare: pricePerShare,
                             date: date,
-                            fundingSource: .cash
+                            fundingSource: .cash,
+                            portfolioAccountId: portfolioAccountId
                         )
-                        if let idx = budget.holdings.firstIndex(where: { $0.ticker.uppercased() == cleanTicker }) {
+                        if let idx = budget.holdings.firstIndex(where: {
+                            $0.portfolioAccountId == portfolioAccountId && $0.ticker.uppercased() == cleanTicker
+                        }) {
                             budget.holdings[idx].annualDividendPerShare = dividendToSave
                             budget.holdings[idx].dividendFrequency = frequencyToSave
                             budget.holdings[idx].assetType = assetType
@@ -3321,7 +3363,10 @@ private struct AddInvestmentView: View {
     }
 
     private func applyExistingHoldingDefaults() {
-        guard let holding = budget.holdings.first(where: { $0.ticker.uppercased() == cleanTicker }) else { return }
+        guard let portfolioAccountId,
+              let holding = budget.holdings.first(where: {
+                  $0.portfolioAccountId == portfolioAccountId && $0.ticker.uppercased() == cleanTicker
+              }) else { return }
         if annualDividendPerShare <= 0 {
             annualDividendPerShare = holding.annualDividendPerShare
         }

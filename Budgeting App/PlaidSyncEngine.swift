@@ -57,8 +57,10 @@ extension BudgetModel {
         } else if plaidInvestmentValue > 0 {
             portfolioSnapshot.portfolioValue = roundedCurrency(plaidInvestmentValue)
         }
-        if plaidInvestmentCash > 0 {
+        if plaidInvestmentCash > 0, portfolioAccounts.isEmpty {
             portfolioSnapshot.cashBalance = roundedCurrency(plaidInvestmentCash)
+        } else {
+            synchronizeAggregatePortfolioBalances()
         }
 
         for transaction in payload.investmentTransactions {
@@ -72,6 +74,7 @@ extension BudgetModel {
         }
 
         migrateLegacyAccountsIfNeeded()
+        synchronizeLegacyMarginStateFromLedger()
         return result
     }
 }
@@ -280,38 +283,56 @@ private extension BudgetModel {
 
     func applyPlaidHoldings(_ syncedHoldings: [PlaidSyncedHolding], syncedAt: Date) {
         let displayableHoldings = syncedHoldings.filter(isDisplayablePlaidHolding)
-        let existingByTicker = holdings.reduce(into: [String: PortfolioHolding]()) { result, holding in
-            guard let ticker = normalizedTicker(holding.ticker) else { return }
-            if result[ticker] == nil || (result[ticker]?.plaidMetadata != nil && holding.plaidMetadata == nil) {
-                result[ticker] = holding
-            }
+        let syncedExternalAccountIds = Set(displayableHoldings.map(\.accountId))
+        let preservedHoldings = holdings.filter { holding in
+            guard let metadata = holding.plaidMetadata else { return true }
+            return !syncedExternalAccountIds.contains(metadata.accountId)
         }
-        let groupedPlaidHoldings = displayableHoldings.reduce(into: [String: [PlaidSyncedHolding]]()) { result, holding in
-            guard let ticker = normalizedTicker(holding.ticker) else { return }
-            result[ticker, default: []].append(holding)
+
+        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
+            let securityIdentity = holding.securityId ?? normalizedTicker(holding.ticker) ?? holding.name
+            return "\(holding.accountId)|\(securityIdentity)"
         }
-        let plaidTickers = Set(groupedPlaidHoldings.keys)
+
         watchlistTickers.removeAll { isOptionContractTicker($0) }
-        let manualOnlyHoldings = holdings.filter { holding in
-            holding.plaidMetadata == nil && !plaidTickers.contains(holding.ticker.uppercased())
-        }
-        let importedHoldings: [PortfolioHolding] = groupedPlaidHoldings.compactMap { ticker, plaidHoldings in
-            guard let holding = plaidHoldings.first else { return nil }
-            let existing = existingByTicker[ticker]
+
+        let importedHoldings: [PortfolioHolding] = groupedPlaidHoldings.compactMap { _, plaidHoldings in
+            guard let first = plaidHoldings.first,
+                  let ticker = normalizedTicker(first.ticker) else { return nil }
+
+            let portfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)
+            let existing = holdings.first { holding in
+                guard holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker else { return false }
+                if let securityId = first.securityId,
+                   holding.plaidMetadata?.securityId == securityId,
+                   holding.plaidMetadata?.accountId == first.accountId {
+                    return true
+                }
+                return holding.portfolioAccountId == portfolioAccountId
+            } ?? holdings.first {
+                $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker
+            }
+
             let totalQuantity = plaidHoldings.reduce(0) { $0 + $1.quantity }
             let totalCostBasis = plaidHoldings.reduce(0) { partial, holding in
                 partial + (holding.costBasis ?? ((existing?.averageCost ?? 0) * holding.quantity))
             }
             let institutionValue = plaidHoldings.compactMap(\.institutionValue).reduce(0, +)
-            let fallbackPrice = plaidHoldings.compactMap(\.institutionPrice).first { $0 > 0 } ?? existing?.currentPrice ?? 0
-            let price = totalQuantity > 0 && institutionValue > 0 ? institutionValue / totalQuantity : fallbackPrice
-            let averageCost = totalQuantity > 0 ? totalCostBasis / max(totalQuantity, 0.000001) : 0
+            let fallbackPrice = plaidHoldings.compactMap(\.institutionPrice).first { $0 > 0 }
+                ?? existing?.currentPrice
+                ?? 0
+            let price = totalQuantity > 0 && institutionValue > 0
+                ? institutionValue / totalQuantity
+                : fallbackPrice
+            let averageCost = totalQuantity > 0 ? totalCostBasis / totalQuantity : 0
+
             if price > 0 {
                 cachedQuotes[ticker] = CachedQuote(ticker: ticker, price: price, updatedAt: syncedAt)
             }
             if !watchlistTickers.contains(where: { normalizedTicker($0) == ticker }) {
                 watchlistTickers.append(ticker)
             }
+
             return PortfolioHolding(
                 ticker: ticker,
                 shares: totalQuantity,
@@ -324,19 +345,30 @@ private extension BudgetModel {
                 notes: existing?.notes ?? "",
                 nextExDividendDate: existing?.nextExDividendDate,
                 nextPayDate: existing?.nextPayDate,
+                portfolioAccountId: portfolioAccountId,
                 plaidMetadata: PlaidSourceMetadata(
-                    itemId: holding.itemId,
-                    accountId: holding.accountId,
-                    securityId: holding.securityId,
+                    itemId: first.itemId,
+                    accountId: first.accountId,
+                    securityId: first.securityId,
                     lastSyncedAt: syncedAt
                 )
             )
         }
-        holdings = (manualOnlyHoldings + importedHoldings).sorted { $0.ticker < $1.ticker }
+
+        holdings = (preservedHoldings + importedHoldings).sorted { lhs, rhs in
+            let comparison = lhs.ticker.localizedStandardCompare(rhs.ticker)
+            if comparison == .orderedSame {
+                return portfolioAccountName(for: lhs.portfolioAccountId)
+                    .localizedStandardCompare(portfolioAccountName(for: rhs.portfolioAccountId)) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
+
         let holdingsValue = holdings.reduce(0) { total, holding in
             let price = cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
             return total + holding.shares * price
         }
+        synchronizeAggregatePortfolioBalances()
         portfolioSnapshot.portfolioValue = roundedCurrency(holdingsValue + portfolioSnapshot.cashBalance)
     }
 
@@ -376,6 +408,7 @@ private extension BudgetModel {
             pricePerShare: transaction.price,
             amount: roundedCurrency(abs(transaction.amount)),
             notes: transaction.name,
+            portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
             plaidMetadata: PlaidSourceMetadata(
                 itemId: transaction.itemId,
                 accountId: transaction.accountId,
