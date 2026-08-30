@@ -12,10 +12,10 @@ Tasks are ordered by dependency. Complete and verify one task before starting th
 
 ## 2. Stable account references
 
-- [ ] Replace name-based account relationships with local account UUIDs.
-- [ ] Add backward-compatible references to income, expenses, transfers, portfolio transactions, and holdings.
-- [ ] Keep display names as presentation data rather than identity.
-- [ ] Prevent manual ledger operations from mutating Plaid-authoritative balances.
+- [x] Replace name-based account references with stable local UUIDs.
+- [x] Add backward-compatible account references to income, expenses, transfers, portfolio transactions, and holdings.
+- [x] Keep display names as presentation fields only.
+- [x] Prevent manual ledger actions from mutating Plaid-authoritative balances.
 
 ## 3. Multi-account portfolio model
 

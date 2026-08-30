@@ -71,6 +71,7 @@ extension BudgetModel {
             plaidConnectionStatuses = payload.connectionStatuses
         }
 
+        migrateLegacyAccountsIfNeeded()
         return result
     }
 }

@@ -73,8 +73,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var section: BudgetSection
     var categoryId: UUID
     var paymentAccount: String
+    var paymentAccountId: UUID?
     var note: String
     var creditCardPaymentTarget: String?
+    var creditCardPaymentTargetId: UUID?
     var plaidMetadata: PlaidSourceMetadata?
 
     init(
@@ -85,8 +87,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         section: BudgetSection,
         categoryId: UUID,
         paymentAccount: String = "",
+        paymentAccountId: UUID? = nil,
         note: String = "",
         creditCardPaymentTarget: String? = nil,
+        creditCardPaymentTargetId: UUID? = nil,
         plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
@@ -96,8 +100,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.section = section
         self.categoryId = categoryId
         self.paymentAccount = paymentAccount
+        self.paymentAccountId = paymentAccountId
         self.note = note
         self.creditCardPaymentTarget = creditCardPaymentTarget
+        self.creditCardPaymentTargetId = creditCardPaymentTargetId
         self.plaidMetadata = plaidMetadata
     }
 
@@ -109,8 +115,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case section
         case categoryId
         case paymentAccount
+        case paymentAccountId
         case note
         case creditCardPaymentTarget
+        case creditCardPaymentTargetId
         case plaidMetadata
     }
 
@@ -123,8 +131,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         section = try container.decode(BudgetSection.self, forKey: .section)
         categoryId = try container.decode(UUID.self, forKey: .categoryId)
         paymentAccount = try container.decodeIfPresent(String.self, forKey: .paymentAccount) ?? ""
+        paymentAccountId = try container.decodeIfPresent(UUID.self, forKey: .paymentAccountId)
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
         creditCardPaymentTarget = try container.decodeIfPresent(String.self, forKey: .creditCardPaymentTarget)
+        creditCardPaymentTargetId = try container.decodeIfPresent(UUID.self, forKey: .creditCardPaymentTargetId)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
         if creditCardPaymentTarget == nil {
             creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
@@ -306,6 +316,8 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
     var date: Date
     var fromAccountName: String
     var toAccountName: String
+    var fromAccountId: UUID?
+    var toAccountId: UUID?
     var note: String
 
     init(
@@ -315,6 +327,8 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
         date: Date = Date(),
         fromAccountName: String,
         toAccountName: String,
+        fromAccountId: UUID? = nil,
+        toAccountId: UUID? = nil,
         note: String = ""
     ) {
         self.id = id
@@ -323,6 +337,8 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
         self.date = date
         self.fromAccountName = fromAccountName
         self.toAccountName = toAccountName
+        self.fromAccountId = fromAccountId
+        self.toAccountId = toAccountId
         self.note = note
     }
 }
@@ -368,14 +384,16 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
     var amount: Double
     var date: Date
     var bankName: String
+    var bankAccountId: UUID?
     var plaidMetadata: PlaidSourceMetadata?
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", plaidMetadata: PlaidSourceMetadata? = nil) {
+    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", bankAccountId: UUID? = nil, plaidMetadata: PlaidSourceMetadata? = nil) {
         self.id = id
         self.name = name
         self.amount = amount
         self.date = date
         self.bankName = bankName
+        self.bankAccountId = bankAccountId
         self.plaidMetadata = plaidMetadata
     }
 
@@ -385,6 +403,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         case amount
         case date
         case bankName
+        case bankAccountId
         case plaidMetadata
     }
 
@@ -395,6 +414,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         amount = try container.decode(Double.self, forKey: .amount)
         date = try container.decode(Date.self, forKey: .date)
         bankName = try container.decodeIfPresent(String.self, forKey: .bankName) ?? ""
+        bankAccountId = try container.decodeIfPresent(UUID.self, forKey: .bankAccountId)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 
@@ -405,6 +425,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         try container.encode(amount, forKey: .amount)
         try container.encode(date, forKey: .date)
         try container.encode(bankName, forKey: .bankName)
+        try container.encodeIfPresent(bankAccountId, forKey: .bankAccountId)
         try container.encodeIfPresent(plaidMetadata, forKey: .plaidMetadata)
     }
 }
@@ -668,7 +689,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
     var pricePerShare: Double?
     var amount: Double
     var notes: String?
+    var portfolioAccountId: UUID?
     var fundingBankAccount: String?
+    var fundingBankAccountId: UUID?
     var plaidMetadata: PlaidSourceMetadata?
 
     init(
@@ -680,7 +703,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         pricePerShare: Double? = nil,
         amount: Double,
         notes: String? = nil,
+        portfolioAccountId: UUID? = nil,
         fundingBankAccount: String? = nil,
+        fundingBankAccountId: UUID? = nil,
         plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
@@ -691,7 +716,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         self.pricePerShare = pricePerShare
         self.amount = amount
         self.notes = notes
+        self.portfolioAccountId = portfolioAccountId
         self.fundingBankAccount = fundingBankAccount
+        self.fundingBankAccountId = fundingBankAccountId
         self.plaidMetadata = plaidMetadata
     }
 
@@ -704,7 +731,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         case pricePerShare
         case amount
         case notes
+        case portfolioAccountId
         case fundingBankAccount
+        case fundingBankAccountId
         case plaidMetadata
     }
 
@@ -718,7 +747,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         pricePerShare = try container.decodeIfPresent(Double.self, forKey: .pricePerShare)
         amount = try container.decode(Double.self, forKey: .amount)
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        portfolioAccountId = try container.decodeIfPresent(UUID.self, forKey: .portfolioAccountId)
         fundingBankAccount = try container.decodeIfPresent(String.self, forKey: .fundingBankAccount)
+        fundingBankAccountId = try container.decodeIfPresent(UUID.self, forKey: .fundingBankAccountId)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 
@@ -732,7 +763,9 @@ struct PortfolioTransaction: Identifiable, Codable, Sendable, Equatable {
         try container.encodeIfPresent(pricePerShare, forKey: .pricePerShare)
         try container.encode(amount, forKey: .amount)
         try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encodeIfPresent(portfolioAccountId, forKey: .portfolioAccountId)
         try container.encodeIfPresent(fundingBankAccount, forKey: .fundingBankAccount)
+        try container.encodeIfPresent(fundingBankAccountId, forKey: .fundingBankAccountId)
         try container.encodeIfPresent(plaidMetadata, forKey: .plaidMetadata)
     }
 }
@@ -839,6 +872,7 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
     var notes: String
     var nextExDividendDate: Date?
     var nextPayDate: Date?
+    var portfolioAccountId: UUID?
     var plaidMetadata: PlaidSourceMetadata?
 
     init(
@@ -854,6 +888,7 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
         notes: String = "",
         nextExDividendDate: Date? = nil,
         nextPayDate: Date? = nil,
+        portfolioAccountId: UUID? = nil,
         plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
@@ -868,6 +903,7 @@ struct PortfolioHolding: Identifiable, Codable, Sendable, Equatable {
         self.notes = notes
         self.nextExDividendDate = nextExDividendDate
         self.nextPayDate = nextPayDate
+        self.portfolioAccountId = portfolioAccountId
         self.plaidMetadata = plaidMetadata
     }
 }
@@ -1775,6 +1811,57 @@ class BudgetModel: ObservableObject {
                 )
             )
         }
+
+        migrateStableAccountReferencesIfNeeded()
+    }
+
+    private func migrateStableAccountReferencesIfNeeded() {
+        for index in incomes.indices where incomes[index].bankAccountId == nil {
+            incomes[index].bankAccountId = resolveFinancialAccountId(legacyName: incomes[index].bankName, allowedKinds: [.depository], metadata: incomes[index].plaidMetadata)
+        }
+        for index in expenses.indices {
+            if expenses[index].paymentAccountId == nil {
+                expenses[index].paymentAccountId = resolveFinancialAccountId(legacyName: expenses[index].paymentAccount, allowedKinds: [.depository, .credit], metadata: expenses[index].plaidMetadata)
+            }
+            if expenses[index].creditCardPaymentTargetId == nil, let target = creditCardPaymentTarget(for: expenses[index]) {
+                expenses[index].creditCardPaymentTargetId = resolveFinancialAccountId(legacyName: target, allowedKinds: [.credit])
+            }
+        }
+        for index in cashTransfers.indices {
+            if cashTransfers[index].fromAccountId == nil { cashTransfers[index].fromAccountId = resolveFinancialAccountId(legacyName: cashTransfers[index].fromAccountName, allowedKinds: [.depository]) }
+            if cashTransfers[index].toAccountId == nil { cashTransfers[index].toAccountId = resolveFinancialAccountId(legacyName: cashTransfers[index].toAccountName, allowedKinds: [.depository]) }
+        }
+        for index in portfolioTransactions.indices {
+            if portfolioTransactions[index].portfolioAccountId == nil { portfolioTransactions[index].portfolioAccountId = resolvePortfolioAccountId(metadata: portfolioTransactions[index].plaidMetadata) }
+            if portfolioTransactions[index].fundingBankAccountId == nil, let name = portfolioTransactions[index].fundingBankAccount { portfolioTransactions[index].fundingBankAccountId = resolveFinancialAccountId(legacyName: name, allowedKinds: [.depository]) }
+        }
+        for index in holdings.indices where holdings[index].portfolioAccountId == nil {
+            holdings[index].portfolioAccountId = resolvePortfolioAccountId(metadata: holdings[index].plaidMetadata)
+        }
+    }
+
+    private func resolveFinancialAccountId(legacyName: String, allowedKinds: [FinancialAccountKind], metadata: PlaidSourceMetadata? = nil) -> UUID? {
+        if let externalId = metadata?.accountId, let account = financialAccounts.first(where: { $0.externalAccountId == externalId && allowedKinds.contains($0.kind) }) { return account.id }
+        let normalized = normalizedAccountName(legacyName)
+        guard !normalized.isEmpty else { return nil }
+        let matches = financialAccounts.filter { allowedKinds.contains($0.kind) && normalizedAccountName($0.name) == normalized }
+        if matches.count == 1 { return matches[0].id }
+        if matches.count > 1 { return nil }
+        var candidates: [(UUID, String, FinancialAccountKind, PlaidSourceMetadata?)] = []
+        if allowedKinds.contains(.depository) { candidates += bankAccounts.filter { normalizedAccountName($0.name) == normalized }.map { ($0.id, $0.name, .depository, $0.plaidMetadata) } }
+        if allowedKinds.contains(.credit) { candidates += creditAccounts.filter { normalizedAccountName($0.name) == normalized }.map { ($0.id, $0.name, .credit, $0.plaidMetadata) } }
+        guard candidates.count == 1 else { return nil }
+        let candidate = candidates[0]
+        if !financialAccounts.contains(where: { $0.id == candidate.0 }) {
+            financialAccounts.append(FinancialAccount(id: candidate.0, name: candidate.1, institutionName: candidate.3?.institutionName, kind: candidate.2, source: candidate.3 == nil ? .manual : .plaid, externalAccountId: candidate.3?.accountId, externalItemId: candidate.3?.itemId, lastSyncedAt: candidate.3?.lastSyncedAt))
+        }
+        return candidate.0
+    }
+
+    private func resolvePortfolioAccountId(metadata: PlaidSourceMetadata?) -> UUID? {
+        if let externalId = metadata?.accountId, let financial = financialAccounts.first(where: { $0.externalAccountId == externalId }), let portfolio = portfolioAccounts.first(where: { $0.financialAccountId == financial.id }) { return portfolio.id }
+        let active = portfolioAccounts.filter(\.isActive)
+        return active.count == 1 ? active[0].id : nil
     }
 
     private func hasFinancialAccount(id: UUID, metadata: PlaidSourceMetadata?) -> Bool {
@@ -1988,7 +2075,9 @@ class BudgetModel: ObservableObject {
     }
 
     var marginUsedFromLedger: Double {
-        portfolioTransactions.reduce(0) { partial, tx in
+        portfolioTransactions
+            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            .reduce(0) { partial, tx in
             switch tx.type {
             case .billPaidByMargin:
                 return partial + tx.amount
@@ -2006,7 +2095,9 @@ class BudgetModel: ObservableObject {
 
     var holdingsFromTransactions: [PortfolioHolding] {
         var buckets: [String: (shares: Double, cost: Double)] = [:]
-        let ordered = portfolioTransactions.sorted { $0.date < $1.date }
+        let ordered = portfolioTransactions
+            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            .sorted { $0.date < $1.date }
         for tx in ordered {
             let ticker = tx.ticker?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
             switch tx.type {
@@ -2046,7 +2137,8 @@ class BudgetModel: ObservableObject {
                 dividendReliability: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendReliability ?? .medium,
                 notes: holdings.first(where: { $0.ticker.uppercased() == ticker })?.notes ?? "",
                 nextExDividendDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextExDividendDate,
-                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate
+                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate,
+                portfolioAccountId: resolvePortfolioAccountId(metadata: nil)
             )
         }.sorted { $0.ticker < $1.ticker }
     }
@@ -2061,33 +2153,64 @@ class BudgetModel: ObservableObject {
             let cleanFundingBankAccount = fundingBankAccount?.trimmingCharacters(in: .whitespacesAndNewlines)
             transaction.fundingBankAccount = cleanFundingBankAccount?.isEmpty == false ? cleanFundingBankAccount : nil
         }
+        if transaction.portfolioAccountId == nil {
+            transaction.portfolioAccountId = resolvePortfolioAccountId(metadata: transaction.plaidMetadata)
+        }
+        if transaction.fundingBankAccountId == nil, let fundingName = transaction.fundingBankAccount {
+            transaction.fundingBankAccountId = resolveFinancialAccountId(legacyName: fundingName, allowedKinds: [.depository])
+        }
         portfolioTransactions.append(transaction)
-        if affectsBalances {
+        let isPlaidAuthoritative = isPlaidAuthoritativePortfolioAccount(transaction.portfolioAccountId)
+        if affectsBalances && !isPlaidAuthoritative {
             applyCashImpact(for: transaction)
         }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !isPlaidAuthoritative {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func updatePortfolioTransaction(_ updatedTransaction: PortfolioTransaction) {
         guard let index = portfolioTransactions.firstIndex(where: { $0.id == updatedTransaction.id }) else { return }
         let previousTransaction = portfolioTransactions[index]
-        reverseEditableCashImpact(for: previousTransaction)
-        portfolioTransactions[index] = updatedTransaction
-        applyEditableCashImpact(for: updatedTransaction)
+        let previousIsPlaid = isPlaidAuthoritativePortfolioAccount(previousTransaction.portfolioAccountId)
+        if !previousIsPlaid {
+            reverseEditableCashImpact(for: previousTransaction)
+        }
+
+        var resolvedTransaction = updatedTransaction
+        if resolvedTransaction.portfolioAccountId == nil {
+            resolvedTransaction.portfolioAccountId = resolvePortfolioAccountId(metadata: resolvedTransaction.plaidMetadata)
+        }
+        if resolvedTransaction.fundingBankAccountId == nil, let fundingName = resolvedTransaction.fundingBankAccount {
+            resolvedTransaction.fundingBankAccountId = resolveFinancialAccountId(legacyName: fundingName, allowedKinds: [.depository])
+        }
+        portfolioTransactions[index] = resolvedTransaction
+
+        let updatedIsPlaid = isPlaidAuthoritativePortfolioAccount(resolvedTransaction.portfolioAccountId)
+        if !updatedIsPlaid {
+            applyEditableCashImpact(for: resolvedTransaction)
+        }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !previousIsPlaid || !updatedIsPlaid {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func deletePortfolioTransaction(id: UUID) {
         guard let index = portfolioTransactions.firstIndex(where: { $0.id == id }) else { return }
         let removedTransaction = portfolioTransactions.remove(at: index)
-        reverseEditableCashImpact(for: removedTransaction)
+        let isPlaidAuthoritative = isPlaidAuthoritativePortfolioAccount(removedTransaction.portfolioAccountId)
+        if !isPlaidAuthoritative {
+            reverseEditableCashImpact(for: removedTransaction)
+        }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !isPlaidAuthoritative {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func addInvestment(
@@ -2131,7 +2254,11 @@ class BudgetModel: ObservableObject {
 
         switch transaction.type {
         case .contribution:
-            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: -amount)
+            applyBankAccountDelta(
+                accountId: transaction.fundingBankAccountId,
+                legacyName: transaction.fundingBankAccount ?? "",
+                delta: -amount
+            )
             let marginPaydown = min(max(marginUsedFromLedger, 0), max(amount, 0))
             if marginPaydown > 0 {
                 portfolioTransactions.append(
@@ -2139,7 +2266,8 @@ class BudgetModel: ObservableObject {
                         date: transaction.date,
                         type: .manualAdjustment,
                         amount: -marginPaydown,
-                        notes: "Cash contribution applied to margin balance"
+                        notes: "Cash contribution applied to margin balance",
+                        portfolioAccountId: transaction.portfolioAccountId
                     )
                 )
             }
@@ -2156,7 +2284,8 @@ class BudgetModel: ObservableObject {
                     date: transaction.date,
                     type: .manualAdjustment,
                     amount: marginDraw,
-                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy"
+                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy",
+                    portfolioAccountId: transaction.portfolioAccountId
                 )
             )
         case .sell:
@@ -2174,7 +2303,11 @@ class BudgetModel: ObservableObject {
 
         switch transaction.type {
         case .contribution:
-            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: amount)
+            applyBankAccountDelta(
+                accountId: transaction.fundingBankAccountId,
+                legacyName: transaction.fundingBankAccount ?? "",
+                delta: amount
+            )
             portfolioSnapshot.cashBalance -= amount
         case .dividend:
             portfolioSnapshot.cashBalance -= amount
@@ -2212,30 +2345,38 @@ class BudgetModel: ObservableObject {
     }
 
     func synchronizeLegacyMarginStateFromLedger() {
+        let manualPortfolioAccounts = portfolioAccounts.filter { !isPlaidAuthoritativePortfolioAccount($0.id) }
+        var legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         let legacyMarginUsed = max(portfolioSnapshot.marginUsed, 0)
-        if portfolioTransactions.isEmpty, legacyMarginUsed > 0 {
+        if legacyTransactions.isEmpty,
+           legacyMarginUsed > 0,
+           let manualPortfolioAccount = manualPortfolioAccounts.first {
             portfolioTransactions.append(
                 PortfolioTransaction(
                     type: .manualAdjustment,
                     amount: legacyMarginUsed,
-                    notes: "Imported existing margin balance"
+                    notes: "Imported existing margin balance",
+                    portfolioAccountId: manualPortfolioAccount.id
                 )
             )
+            legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         }
 
         let derivedHoldings = holdingsFromTransactions
-        if !derivedHoldings.isEmpty || !portfolioTransactions.isEmpty {
+        if !derivedHoldings.isEmpty || !legacyTransactions.isEmpty {
             holdings = derivedHoldings
             portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
         }
 
-        sweepCashAgainstMarginIfNeeded()
+        if let manualPortfolioAccount = manualPortfolioAccounts.first {
+            sweepCashAgainstMarginIfNeeded(portfolioAccountId: manualPortfolioAccount.id)
+        }
 
         portfolioSnapshot.freeMarginLimit = marginSettings.interestFreeMarginLimit
         portfolioSnapshot.marginInterestRate = marginSettings.marginInterestRate
     }
 
-    private func sweepCashAgainstMarginIfNeeded() {
+    private func sweepCashAgainstMarginIfNeeded(portfolioAccountId: UUID) {
         let availableCash = max(portfolioSnapshot.cashBalance, 0)
         let currentMargin = max(marginUsedFromLedger, 0)
         let sweepAmount = min(availableCash, currentMargin)
@@ -2251,7 +2392,8 @@ class BudgetModel: ObservableObject {
             PortfolioTransaction(
                 type: .manualAdjustment,
                 amount: -roundedSweep,
-                notes: "Cash balance swept to pay down margin"
+                notes: "Cash balance swept to pay down margin",
+                portfolioAccountId: portfolioAccountId
             )
         )
         portfolioSnapshot.cashBalance = max(availableCash - roundedSweep, 0)
@@ -2297,16 +2439,20 @@ class BudgetModel: ObservableObject {
     }
 
     func addIncomeEntry(_ entry: IncomeEntry) {
-        incomes.append(entry)
-        applyBalanceImpact(for: entry, multiplier: 1)
+        var resolved = entry
+        if resolved.bankAccountId == nil { resolved.bankAccountId = resolveFinancialAccountId(legacyName: resolved.bankName, allowedKinds: [.depository], metadata: resolved.plaidMetadata) }
+        incomes.append(resolved)
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func updateIncomeEntry(_ updatedEntry: IncomeEntry) {
         guard let index = incomes.firstIndex(where: { $0.id == updatedEntry.id }) else { return }
         let previousEntry = incomes[index]
         applyBalanceImpact(for: previousEntry, multiplier: -1)
-        incomes[index] = updatedEntry
-        applyBalanceImpact(for: updatedEntry, multiplier: 1)
+        var resolved = updatedEntry
+        if resolved.bankAccountId == nil { resolved.bankAccountId = resolveFinancialAccountId(legacyName: resolved.bankName, allowedKinds: [.depository], metadata: resolved.plaidMetadata) }
+        incomes[index] = resolved
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func deleteIncomeEntry(id: UUID) {
@@ -2316,16 +2462,18 @@ class BudgetModel: ObservableObject {
     }
 
     func addExpense(_ expense: Expense) {
-        expenses.append(expense)
-        applyBalanceImpact(for: expense, multiplier: 1)
+        let resolved = resolvingAccountReferences(for: expense)
+        expenses.append(resolved)
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func updateExpense(_ updatedExpense: Expense) {
         guard let index = expenses.firstIndex(where: { $0.id == updatedExpense.id }) else { return }
         let previousExpense = expenses[index]
         applyBalanceImpact(for: previousExpense, multiplier: -1)
-        expenses[index] = updatedExpense
-        applyBalanceImpact(for: updatedExpense, multiplier: 1)
+        let resolved = resolvingAccountReferences(for: updatedExpense)
+        expenses[index] = resolved
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func deleteExpense(id: UUID) {
@@ -2335,18 +2483,19 @@ class BudgetModel: ObservableObject {
     }
 
     func addCashTransfer(_ transfer: CashTransfer) {
-        guard canApplyCashTransfer(transfer) else { return }
-        cashTransfers.append(transfer)
-        applyBalanceImpact(for: transfer, multiplier: 1)
+        let resolved = resolvingAccountReferences(for: transfer)
+        guard canApplyCashTransfer(resolved) else { return }
+        cashTransfers.append(resolved)
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func updateCashTransfer(_ updatedTransfer: CashTransfer) {
-        guard canApplyCashTransfer(updatedTransfer),
-              let index = cashTransfers.firstIndex(where: { $0.id == updatedTransfer.id }) else { return }
+        let resolved = resolvingAccountReferences(for: updatedTransfer)
+        guard canApplyCashTransfer(resolved), let index = cashTransfers.firstIndex(where: { $0.id == resolved.id }) else { return }
         let previousTransfer = cashTransfers[index]
         applyBalanceImpact(for: previousTransfer, multiplier: -1)
-        cashTransfers[index] = updatedTransfer
-        applyBalanceImpact(for: updatedTransfer, multiplier: 1)
+        cashTransfers[index] = resolved
+        applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
     func deleteCashTransfer(id: UUID) {
@@ -2369,13 +2518,23 @@ class BudgetModel: ObservableObject {
         }
         let normalizedName = normalizedAccountName(account.name)
         guard !normalizedName.isEmpty else { return 0 }
+        let stableAccountId = financialAccountId(for: account)
         return expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(for: expense),
-               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+            if let targetId = expense.creditCardPaymentTargetId {
+                if targetId == stableAccountId {
+                    return partial - expense.amount
+                }
+            } else if let paidCard = creditCardPaymentTarget(for: expense),
+                      paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
-            let paymentAccount = normalizedAccountName(expense.paymentAccount)
-            guard paymentAccount == normalizedName else { return partial }
+
+            if let paymentAccountId = expense.paymentAccountId {
+                guard paymentAccountId == stableAccountId else { return partial }
+            } else {
+                let paymentAccount = normalizedAccountName(expense.paymentAccount)
+                guard paymentAccount == normalizedName else { return partial }
+            }
             return partial + expense.amount
         }
     }
@@ -2385,6 +2544,10 @@ class BudgetModel: ObservableObject {
     }
 
     func creditCardPaymentTarget(for expense: Expense) -> String? {
+        if let targetId = expense.creditCardPaymentTargetId,
+           let account = financialAccounts.first(where: { $0.id == targetId }) {
+            return account.name
+        }
         if let target = expense.creditCardPaymentTarget?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             return target
@@ -2536,32 +2699,81 @@ class BudgetModel: ObservableObject {
         savingsGoals[index].currentAmount = max(updatedAmount, 0)
     }
 
+    private func resolvingAccountReferences(for expense: Expense) -> Expense {
+        var resolved = expense
+        if resolved.paymentAccountId == nil { resolved.paymentAccountId = resolveFinancialAccountId(legacyName: resolved.paymentAccount, allowedKinds: [.depository, .credit], metadata: resolved.plaidMetadata) }
+        if resolved.creditCardPaymentTargetId == nil, let target = creditCardPaymentTarget(for: resolved) { resolved.creditCardPaymentTargetId = resolveFinancialAccountId(legacyName: target, allowedKinds: [.credit]) }
+        return resolved
+    }
+
+    private func resolvingAccountReferences(for transfer: CashTransfer) -> CashTransfer {
+        var resolved = transfer
+        if resolved.fromAccountId == nil { resolved.fromAccountId = resolveFinancialAccountId(legacyName: resolved.fromAccountName, allowedKinds: [.depository]) }
+        if resolved.toAccountId == nil { resolved.toAccountId = resolveFinancialAccountId(legacyName: resolved.toAccountName, allowedKinds: [.depository]) }
+        return resolved
+    }
+
     private func applyBalanceImpact(for income: IncomeEntry, multiplier: Double) {
-        applyBankAccountDelta(named: income.bankName, delta: income.amount * multiplier)
+        applyBankAccountDelta(accountId: income.bankAccountId, legacyName: income.bankName, delta: income.amount * multiplier)
     }
 
     private func applyBalanceImpact(for expense: Expense, multiplier: Double) {
-        applyBankAccountDelta(named: expense.paymentAccount, delta: -expense.amount * multiplier)
+        applyBankAccountDelta(accountId: expense.paymentAccountId, legacyName: expense.paymentAccount, delta: -expense.amount * multiplier)
     }
 
     private func applyBalanceImpact(for transfer: CashTransfer, multiplier: Double) {
-        applyBankAccountDelta(named: transfer.fromAccountName, delta: -transfer.amount * multiplier)
-        applyBankAccountDelta(named: transfer.toAccountName, delta: transfer.amount * multiplier)
+        applyBankAccountDelta(accountId: transfer.fromAccountId, legacyName: transfer.fromAccountName, delta: -transfer.amount * multiplier)
+        applyBankAccountDelta(accountId: transfer.toAccountId, legacyName: transfer.toAccountName, delta: transfer.amount * multiplier)
     }
 
     private func canApplyCashTransfer(_ transfer: CashTransfer) -> Bool {
-        let from = normalizedAccountName(transfer.fromAccountName)
-        let to = normalizedAccountName(transfer.toAccountName)
-        guard transfer.amount > 0, !from.isEmpty, !to.isEmpty, from != to else { return false }
-        let availableAccounts = Set(bankAccounts.map { normalizedAccountName($0.name) })
-        return availableAccounts.contains(from) && availableAccounts.contains(to)
+        guard transfer.amount > 0, let from = bankAccountIndex(accountId: transfer.fromAccountId, legacyName: transfer.fromAccountName), let to = bankAccountIndex(accountId: transfer.toAccountId, legacyName: transfer.toAccountName) else { return false }
+        return from != to
     }
 
-    private func applyBankAccountDelta(named accountName: String, delta: Double) {
-        let normalized = normalizedAccountName(accountName)
-        guard !normalized.isEmpty else { return }
-        guard let index = bankAccounts.firstIndex(where: { normalizedAccountName($0.name) == normalized }) else { return }
+    private func applyBankAccountDelta(accountId: UUID?, legacyName: String, delta: Double) {
+        guard let index = bankAccountIndex(accountId: accountId, legacyName: legacyName) else { return }
+        guard bankAccounts[index].plaidMetadata == nil else { return }
+        if let accountId, financialAccounts.first(where: { $0.id == accountId })?.source == .plaid { return }
         bankAccounts[index].balance = ((bankAccounts[index].balance + delta) * 100).rounded() / 100
+    }
+
+    private func bankAccountIndex(accountId: UUID?, legacyName: String) -> Int? {
+        if let accountId {
+            if let direct = bankAccounts.firstIndex(where: { $0.id == accountId }) { return direct }
+            guard let financial = financialAccounts.first(where: { $0.id == accountId }) else { return nil }
+            if let externalId = financial.externalAccountId, let matched = bankAccounts.firstIndex(where: { $0.plaidMetadata?.accountId == externalId }) { return matched }
+            let normalized = normalizedAccountName(financial.name)
+            let matches = bankAccounts.indices.filter { normalizedAccountName(bankAccounts[$0].name) == normalized }
+            return matches.count == 1 ? matches[0] : nil
+        }
+        let normalized = normalizedAccountName(legacyName)
+        guard !normalized.isEmpty else { return nil }
+        let matches = bankAccounts.indices.filter { normalizedAccountName(bankAccounts[$0].name) == normalized }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private func financialAccountId(for creditAccount: CreditAccount) -> UUID? {
+        if let externalId = creditAccount.plaidMetadata?.accountId,
+           let financialAccount = financialAccounts.first(where: { $0.externalAccountId == externalId && $0.kind == .credit }) {
+            return financialAccount.id
+        }
+        if financialAccounts.contains(where: { $0.id == creditAccount.id && $0.kind == .credit }) {
+            return creditAccount.id
+        }
+        let normalized = normalizedAccountName(creditAccount.name)
+        let matches = financialAccounts.filter { $0.kind == .credit && normalizedAccountName($0.name) == normalized }
+        return matches.count == 1 ? matches[0].id : nil
+    }
+
+    private func isPlaidAuthoritativePortfolioAccount(_ portfolioAccountId: UUID?) -> Bool {
+        guard let portfolioAccountId,
+              let portfolioAccount = portfolioAccounts.first(where: { $0.id == portfolioAccountId }),
+              let financialAccountId = portfolioAccount.financialAccountId,
+              let financialAccount = financialAccounts.first(where: { $0.id == financialAccountId }) else {
+            return false
+        }
+        return financialAccount.source == .plaid
     }
 
     private func normalizedAccountName(_ name: String) -> String {
