@@ -182,6 +182,13 @@ struct ContentView: View {
     @State private var selectedCalendarDay: CalendarDaySelection?
     @State private var selectedCalendarEventList: CalendarDaySelection?
     @State private var visibleCalendarWeekStart: Date?
+    @State private var calendarFocusDate: Date = Date()
+    @AppStorage("calendar.viewMode") private var calendarViewMode: CalendarViewMode = .month
+    @AppStorage("calendar.showExpenses") private var calendarShowExpenses = true
+    @AppStorage("calendar.showIncome") private var calendarShowIncome = true
+    @AppStorage("calendar.showTransfers") private var calendarShowTransfers = true
+    @AppStorage("calendar.showCreditDue") private var calendarShowCreditDue = true
+    @AppStorage("calendar.showPortfolio") private var calendarShowPortfolio = false
     @State private var calendarEventCache: [Date: [CalendarEventItem]] = [:]
     @State private var selectedPortfolioTransaction: PortfolioTransaction?
     @State private var editingRecurringPayment: RecurringPayment?
@@ -379,6 +386,22 @@ struct ContentView: View {
     private struct CalendarDaySelection: Identifiable {
         let id = UUID()
         let date: Date
+    }
+
+    private enum CalendarViewMode: String, CaseIterable, Identifiable {
+        case month = "Month"
+        case week = "Week"
+        case day = "Day"
+
+        var id: String { rawValue }
+
+        var systemImage: String {
+            switch self {
+            case .month: return "calendar"
+            case .week: return "rectangle.split.3x1"
+            case .day: return "list.bullet.rectangle"
+            }
+        }
     }
 
     private struct CalendarDayTransactionsView: View {
@@ -780,7 +803,7 @@ struct ContentView: View {
                         Haptics.light()
                         switch action {
                         case .addCalendarEntry:
-                            selectedCalendarDay = CalendarDaySelection(date: visibleCalendarMonth)
+                            selectedCalendarDay = CalendarDaySelection(date: calendarActionDate)
                         case .transferCash:
                             showingAddCashTransfer = true
                         case .creditCards:
@@ -1061,7 +1084,7 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddCashTransfer) {
-            CashTransferEditorView(budget: budget, selectedDate: selectedTab == .calendar ? visibleCalendarMonth : selectedMonth)
+            CashTransferEditorView(budget: budget, selectedDate: selectedTab == .calendar ? calendarActionDate : selectedMonth)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
@@ -1091,7 +1114,7 @@ struct ContentView: View {
         .sheet(item: $selectedCalendarEventList) { selection in
             CalendarDayTransactionsView(
                 date: selection.date,
-                events: cachedCalendarEvents(for: selection.date),
+                events: filteredCalendarEvents(for: selection.date),
                 onOpen: openCalendarEvent,
                 onMarkPaid: { payment, date in
                     markRecurringOccurrencePaid(payment, on: date)
@@ -1437,13 +1460,13 @@ struct ContentView: View {
             VStack(spacing: 10) {
                 pageHeader(
                     title: "Calendar",
-                    subtitle: "Recurring and one-time cash flow.",
+                    subtitle: "Plan cash flow without the transaction noise.",
                     systemImage: "calendar"
                 ) {
                     HStack(spacing: 8) {
                         Button {
                             Haptics.light()
-                            selectedCalendarDay = CalendarDaySelection(date: visibleCalendarMonth)
+                            selectedCalendarDay = CalendarDaySelection(date: calendarActionDate)
                         } label: {
                             Image(systemName: "plus")
                                 .font(.headline.weight(.semibold))
@@ -1453,6 +1476,36 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Add Calendar Entry")
+
+                        Menu {
+                            Toggle("Spending & bills", isOn: $calendarShowExpenses)
+                            Toggle("Income", isOn: $calendarShowIncome)
+                            Toggle("Transfers", isOn: $calendarShowTransfers)
+                            Toggle("Credit card due dates", isOn: $calendarShowCreditDue)
+                            Toggle("Portfolio activity", isOn: $calendarShowPortfolio)
+                            Divider()
+                            Button("Show everything") {
+                                calendarShowExpenses = true
+                                calendarShowIncome = true
+                                calendarShowTransfers = true
+                                calendarShowCreditDue = true
+                                calendarShowPortfolio = true
+                            }
+                            Button("Reset recommended filters") {
+                                calendarShowExpenses = true
+                                calendarShowIncome = true
+                                calendarShowTransfers = true
+                                calendarShowCreditDue = true
+                                calendarShowPortfolio = false
+                            }
+                        } label: {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("Calendar Filters")
 
                         Button {
                             showingAddCashTransfer = true
@@ -1465,31 +1518,41 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Transfer Cash")
-
-                        Button {
-                            showingCreditAccounts = true
-                        } label: {
-                            Image(systemName: "creditcard")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                                .frame(width: 36, height: 36)
-                                .background(.thinMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Credit Cards")
                     }
                 }
-                calendarSummarySection
+
+                calendarViewControls
+
+                if calendarViewMode == .month {
+                    calendarSummarySection
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            recurringCalendarSection
-                .frame(maxHeight: .infinity, alignment: .top)
+            Group {
+                switch calendarViewMode {
+                case .month:
+                    recurringCalendarSection
+                case .week:
+                    calendarWeekAgendaSection
+                case .day:
+                    calendarDayAgendaSection
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .padding(.top, 22)
         .padding(.bottom, 0)
         .background(backgroundView)
+        .onChange(of: calendarViewMode) { oldValue, newValue in
+            guard oldValue != newValue, newValue != .month else { return }
+            if Calendar.current.isDate(visibleCalendarMonth, equalTo: Date(), toGranularity: .month) {
+                calendarFocusDate = Date()
+            } else {
+                calendarFocusDate = visibleCalendarMonth
+            }
+        }
     }
 
     private var calendarNetWorth: Double {
@@ -1666,6 +1729,282 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var calendarActionDate: Date {
+        calendarViewMode == .month ? visibleCalendarMonth : calendarFocusDate
+    }
+
+    private var calendarViewControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Picker("Calendar View", selection: $calendarViewMode) {
+                    ForEach(CalendarViewMode.allCases) { mode in
+                        Label(mode.rawValue, systemImage: mode.systemImage).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Menu {
+                    Toggle("Spending & bills", isOn: $calendarShowExpenses)
+                    Toggle("Income", isOn: $calendarShowIncome)
+                    Toggle("Transfers", isOn: $calendarShowTransfers)
+                    Toggle("Credit due", isOn: $calendarShowCreditDue)
+                    Toggle("Portfolio", isOn: $calendarShowPortfolio)
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 32)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Calendar Filters")
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: calendarShowPortfolio ? "eye.fill" : "eye.slash.fill")
+                    .font(.caption2)
+                    .foregroundStyle(calendarShowPortfolio ? appAccent : Color.secondary)
+                Text(calendarFilterSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if calendarViewMode != .month {
+                calendarFocusNavigation
+            }
+        }
+    }
+
+    private var calendarFilterSummary: String {
+        let allCoreVisible = calendarShowExpenses && calendarShowIncome && calendarShowTransfers && calendarShowCreditDue
+        if allCoreVisible && !calendarShowPortfolio {
+            return "Portfolio activity hidden · recommended"
+        }
+        if allCoreVisible && calendarShowPortfolio {
+            return "Showing all activity"
+        }
+        return "Custom filters active"
+    }
+
+    private var calendarFocusNavigation: some View {
+        HStack(spacing: 10) {
+            Button { shiftCalendarFocus(by: -1) } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: 32, height: 32)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                withAnimation(.snappy) { calendarFocusDate = Date() }
+            } label: {
+                VStack(spacing: 1) {
+                    Text(calendarFocusTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("Tap for today")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
+            Button { shiftCalendarFocus(by: 1) } label: {
+                Image(systemName: "chevron.right")
+                    .frame(width: 32, height: 32)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var calendarFocusTitle: String {
+        switch calendarViewMode {
+        case .month:
+            return visibleCalendarMonth.formatted(.dateTime.month(.wide).year())
+        case .week:
+            guard let first = focusedCalendarWeekDays.first, let last = focusedCalendarWeekDays.last else {
+                return calendarFocusDate.formatted(.dateTime.month(.abbreviated).day())
+            }
+            if Calendar.current.isDate(first, equalTo: last, toGranularity: .month) {
+                return "\(first.formatted(.dateTime.month(.abbreviated).day())) – \(last.formatted(.dateTime.day()))"
+            }
+            return "\(first.formatted(.dateTime.month(.abbreviated).day())) – \(last.formatted(.dateTime.month(.abbreviated).day()))"
+        case .day:
+            return calendarFocusDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        }
+    }
+
+    private var focusedCalendarWeekDays: [Date] {
+        let calendar = Calendar.current
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: calendarFocusDate) else {
+            return [calendar.startOfDay(for: calendarFocusDate)]
+        }
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: interval.start) }
+    }
+
+    private func shiftCalendarFocus(by offset: Int) {
+        let calendar = Calendar.current
+        let component: Calendar.Component = calendarViewMode == .week ? .weekOfYear : .day
+        guard let shifted = calendar.date(byAdding: component, value: offset, to: calendarFocusDate) else { return }
+        withAnimation(.snappy) {
+            calendarFocusDate = shifted
+        }
+    }
+
+    private var calendarWeekAgendaSection: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(focusedCalendarWeekDays, id: \.self) { day in
+                    calendarAgendaDayCard(for: day, showFullDate: false)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, contentBottomPadding)
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private var calendarDayAgendaSection: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                calendarAgendaDayCard(for: calendarFocusDate, showFullDate: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+            .padding(.bottom, contentBottomPadding)
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private func calendarAgendaDayCard(for date: Date, showFullDate: Bool) -> some View {
+        let events = filteredCalendarEvents(for: date)
+        let hiddenCount = max(cachedCalendarEvents(for: date).count - events.count, 0)
+        let isToday = Calendar.current.isDateInToday(date)
+
+        return GlassCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(showFullDate ? date.formatted(.dateTime.weekday(.wide).month(.wide).day()) : date.formatted(.dateTime.weekday(.wide)))
+                            .font(.subheadline.weight(.bold))
+                        if !showFullDate {
+                            Text(date.formatted(.dateTime.month(.abbreviated).day()))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if isToday {
+                        Text("Today")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(appAccent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(appAccent.opacity(0.12), in: Capsule())
+                    }
+
+                    Spacer()
+
+                    Text("\(events.count) item\(events.count == 1 ? "" : "s")")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                if events.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: hiddenCount > 0 ? "line.3.horizontal.decrease.circle" : "calendar.badge.checkmark")
+                            .foregroundStyle(.secondary)
+                        Text(hiddenCount > 0 ? "\(hiddenCount) item\(hiddenCount == 1 ? "" : "s") hidden by filters" : "Nothing scheduled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Add") {
+                            selectedCalendarDay = CalendarDaySelection(date: date)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(events) { event in
+                            calendarAgendaRow(event)
+                            if event.id != events.last?.id {
+                                Divider().padding(.leading, 42)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func calendarAgendaRow(_ event: CalendarEventItem) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                openCalendarEvent(event)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: event.iconName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(event.tint)
+                        .frame(width: 32, height: 32)
+                        .background(event.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text(event.name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if event.isPlaidSynced {
+                                Image(systemName: "link.circle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if !event.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(event.paymentAccount)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if event.amount > 0 {
+                        Text(calendarChipAmountText(for: event))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(event.isIncome ? Color.green : Color.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let recurring = event.recurringPayment {
+                Button {
+                    markRecurringOccurrencePaid(recurring, on: event.date)
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Mark \(event.name) paid")
+            }
+        }
+        .padding(.vertical, 7)
     }
 
     private var backgroundView: some View {
@@ -2629,6 +2968,16 @@ struct ContentView: View {
         calendarEventCache[calendarDayKey(for: date)] ?? []
     }
 
+    private func filteredCalendarEvents(for date: Date) -> [CalendarEventItem] {
+        cachedCalendarEvents(for: date).filter { event in
+            if event.portfolioTransaction != nil { return calendarShowPortfolio }
+            if event.isCreditDue { return calendarShowCreditDue }
+            if event.cashTransfer != nil { return calendarShowTransfers }
+            if event.isIncome { return calendarShowIncome }
+            return calendarShowExpenses
+        }
+    }
+
     private func calendarEvents(for date: Date) -> [CalendarEventItem] {
         let calendar = Calendar.current
         let recurring = recurringOccurrences(for: date)
@@ -3134,7 +3483,7 @@ struct ContentView: View {
     @ViewBuilder
     private func recurringCalendarDayCell(for date: Date?, maxVisibleEvents: Int) -> some View {
         if let date {
-            let events = cachedCalendarEvents(for: date)
+            let events = filteredCalendarEvents(for: date)
             let visibleEvents = Array(events.prefix(maxVisibleEvents))
             let hiddenEventCount = max(events.count - visibleEvents.count, 0)
             let calendar = Calendar.current
@@ -3197,62 +3546,38 @@ struct ContentView: View {
     }
 
     private func calendarEventChip(_ event: CalendarEventItem) -> some View {
-        HStack(spacing: 4) {
-            Button {
-                selectedCalendarEventList = CalendarDaySelection(date: event.date)
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 3) {
-                        Image(systemName: event.iconName)
-                            .font(.caption2)
-                        Text(event.name)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .allowsTightening(true)
-                        if event.isPlaidSynced {
-                            Text("Plaid")
-                                .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.white.opacity(0.22), in: Capsule())
-                        }
-                    }
-                    if event.amount > 0 {
-                        Text(calendarChipAmountText(for: event))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
+        Button {
+            selectedCalendarEventList = CalendarDaySelection(date: event.date)
+        } label: {
+            HStack(spacing: 3) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.white.opacity(0.72))
+                    .frame(width: 3, height: 14)
+                Image(systemName: event.iconName)
+                    .font(.system(size: 8, weight: .bold))
+                Text(event.name)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                    .allowsTightening(true)
+                Spacer(minLength: 0)
+                if event.isPlaidSynced {
+                    Image(systemName: "link.circle.fill")
+                        .font(.system(size: 8, weight: .bold))
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let recurring = event.recurringPayment {
-                Button {
-                    markRecurringOccurrencePaid(recurring, on: event.date)
-                } label: {
-                    Image(systemName: event.isPaid ? "checkmark.circle.fill" : "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(event.isPaid ? Color.green : Color.white.opacity(0.9))
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(event.isPaid)
-                .accessibilityLabel(event.isPaid ? "\(event.name) paid" : "Mark \(event.name) paid")
-            }
+            .frame(height: calendarEventChipHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(calendarEventBackground(for: event))
+            )
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: calendarEventChipHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(calendarEventBackground(for: event))
-        )
-        .clipped()
+        .buttonStyle(.plain)
+        .accessibilityLabel(calendarMenuTitle(for: event))
     }
 
     private func calendarOverflowButton(date: Date, hiddenEventCount: Int) -> some View {
@@ -3331,12 +3656,12 @@ struct ContentView: View {
 
     private func maxCalendarEventCount(in week: CalendarWeek) -> Int {
         week.days
-            .map { cachedCalendarEvents(for: $0).count }
+            .map { filteredCalendarEvents(for: $0).count }
             .max() ?? 0
     }
 
     private func maxVisibleCalendarEvents(for eventCount: Int) -> Int {
-        min(max(eventCount, 1), 5)
+        min(max(eventCount, 1), 3)
     }
 
     private var calendarCellTopInset: CGFloat {
@@ -3344,7 +3669,7 @@ struct ContentView: View {
     }
 
     private var calendarDayNumberHeight: CGFloat {
-        38
+        30
     }
 
     private var calendarTransactionsTopInset: CGFloat {
@@ -3352,15 +3677,15 @@ struct ContentView: View {
     }
 
     private var calendarCellContentSpacing: CGFloat {
-        6
+        4
     }
 
     private var calendarEventChipHeight: CGFloat {
-        48
+        28
     }
 
     private var calendarOverflowMenuHeight: CGFloat {
-        31
+        26
     }
 
     private func dayCellHeight(availableWidth: CGFloat, visibleEventSlots: Int, hasOverflow: Bool) -> CGFloat {
