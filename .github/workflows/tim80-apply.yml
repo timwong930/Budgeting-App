@@ -1,0 +1,36 @@
+name: Apply TIM-80 patch
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all
+    paths:
+      - .github/workflows/tim80-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all
+      - name: Apply source changes
+        run: |
+          python3 Scripts/tim80_patch.py
+          python3 Scripts/tim80_plaid_patch.py
+          python3 Scripts/tim80_ui_patch.py
+          python3 Scripts/tim80_tests_patch.py
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit implementation
+        run: |
+          rm -f Scripts/tim80_patch.py Scripts/tim80_plaid_patch.py Scripts/tim80_ui_patch.py Scripts/tim80_tests_patch.py
+          rm -f .github/workflows/tim80-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-80: isolate multi-account portfolios"
+          git push
