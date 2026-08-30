@@ -1,0 +1,43 @@
+name: Validate TIM-80 Plaid-first manual backup UX
+
+on:
+  push:
+    branches:
+      - 'timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all'
+    paths:
+      - '.github/workflows/tim80-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch manual backup UX
+        run: python3 .github/tim80_manual_backup_patch.py
+      - name: Validate patch
+        run: |
+          grep -n 'Manual Transaction' 'Budgeting App/MarginViews.swift'
+          grep -n 'Plaid is the primary source' 'Budgeting App/MarginViews.swift'
+          grep -n 'From Account (optional)' 'Budgeting App/MarginViews.swift'
+          git diff --check
+      - name: Commit source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/MarginViews.swift'
+          if ! git diff --cached --quiet; then
+            git commit -m 'TIM-80: make Plaid primary with manual backup entries'
+            git push
+          fi
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project 'Budgeting App.xcodeproj' \
+            -scheme 'Budgeting App' \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
