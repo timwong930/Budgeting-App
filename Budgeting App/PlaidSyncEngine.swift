@@ -303,7 +303,7 @@ private extension BudgetModel {
             guard let first = plaidHoldings.first,
                   let ticker = normalizedTicker(first.ticker) else { return nil }
 
-            let portfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)
+            let portfolioAccountId = resolvePortfolioAccountId(forPlaidExternalAccountId: first.accountId)
             let existing = holdings.first { holding in
                 guard holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker else { return false }
                 let securityId = first.securityId
@@ -411,7 +411,7 @@ private extension BudgetModel {
             pricePerShare: transaction.price,
             amount: roundedCurrency(abs(transaction.amount)),
             notes: transaction.name,
-            portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
+            portfolioAccountId: resolvePortfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
             plaidMetadata: PlaidSourceMetadata(
                 itemId: transaction.itemId,
                 accountId: transaction.accountId,
@@ -519,7 +519,7 @@ private extension BudgetModel {
         return value.range(of: pattern, options: .regularExpression) != nil
     }
 
-    func portfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
+    func resolvePortfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
     guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
         return nil
     }
