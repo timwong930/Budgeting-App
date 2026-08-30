@@ -374,6 +374,7 @@ struct CuanMarketModelsTests {
 
     private static func testPlaidCashHoldingFeedsCashAndMarginBalances() {
         let budget = BudgetModel()
+        budget.watchlistTickers = ["CUR:USD", "AAPL"]
 
         _ = budget.applyPlaidSync(
             PlaidSyncPayload(

@@ -303,7 +303,9 @@ private extension BudgetModel {
             return "\(holding.accountId)|\(securityIdentity)"
         }
 
-        watchlistTickers.removeAll { isOptionContractTicker($0) }
+        watchlistTickers.removeAll { ticker in
+            normalizedTicker(ticker) == "CUR:USD" || isOptionContractTicker(ticker)
+        }
 
         let importedHoldings: [PortfolioHolding] = groupedPlaidHoldings.compactMap { _, plaidHoldings in
             guard let first = plaidHoldings.first,
