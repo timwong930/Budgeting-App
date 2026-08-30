@@ -2,8 +2,10 @@ name: Apply TIM-80 optional account ID fix
 
 on:
   push:
-    branches: [timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all]
-    paths: [.github/workflows/tim80-patch.yml]
+    branches:
+      - 'timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all'
+    paths:
+      - '.github/workflows/tim80-patch.yml'
 
 permissions:
   contents: write
@@ -14,45 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Patch optional Plaid account ID
+        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("Budgeting App/PlaidSyncEngine.swift")
-          source = path.read_text()
-          old = '''        let preservedHoldings = holdings.filter { holding in
-            guard let metadata = holding.plaidMetadata else { return true }
-            return !syncedExternalAccountIds.contains(metadata.accountId)
-        }
-'''
-          new = '''        let preservedHoldings = holdings.filter { holding in
-            guard let metadata = holding.plaidMetadata else { return true }
-            guard let accountId = metadata.accountId else { return true }
-            return !syncedExternalAccountIds.contains(accountId)
-        }
-'''
-          if old not in source:
-              if new in source:
-                  print("Optional account ID fix already applied")
-              else:
-                  raise SystemExit("Expected preservedHoldings block not found")
-          else:
-              source = source.replace(old, new, 1)
-              path.write_text(source)
-          PY
+          python3 -c 'from pathlib import Path; p=Path("Budgeting App/PlaidSyncEngine.swift"); s=p.read_text(); old="            return !syncedExternalAccountIds.contains(metadata.accountId)"; new="            guard let accountId = metadata.accountId else { return true }\n            return !syncedExternalAccountIds.contains(accountId)"; assert old in s or new in s, "Expected line not found"; p.write_text(s.replace(old,new,1)) if old in s else None'
       - name: Validate patch
+        shell: bash
         run: |
-          grep -n "guard let accountId = metadata.accountId else { return true }" "Budgeting App/PlaidSyncEngine.swift"
-          ! grep -q "contains(metadata.accountId)" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n 'guard let accountId = metadata.accountId else { return true }' 'Budgeting App/PlaidSyncEngine.swift'
+          ! grep -q 'contains(metadata.accountId)' 'Budgeting App/PlaidSyncEngine.swift'
           git diff --check
       - name: Commit fix
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "Budgeting App/PlaidSyncEngine.swift"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/PlaidSyncEngine.swift'
           if git diff --cached --quiet; then
-            echo "No source changes to commit"
+            echo 'No source changes to commit'
           else
-            git commit -m "TIM-80: unwrap Plaid holding account ID"
+            git commit -m 'TIM-80: unwrap Plaid holding account ID'
             git push
           fi
