@@ -20,6 +20,10 @@ struct CuanMarketModelsTests {
         testPlaidDuplicateTickerHoldingsAggregateWithoutCrash()
         testFinancialAccountCodableRoundTrip()
         testLegacyAccountsMigrateToStableAccountDomain()
+        testLegacyLedgerReferencesMigrateToUUIDs()
+        testStableAccountUUIDSurvivesRename()
+        testStableCreditUUIDSurvivesRename()
+        testManualLedgerDoesNotMutatePlaidBalance()
         testHoldingsConsolidateToOneRowPerTicker()
         print("CuanMarketModelsTests passed")
     }
@@ -138,6 +142,8 @@ struct CuanMarketModelsTests {
         let expense = try! decoder.decode(Expense.self, from: Data(legacyJSON.utf8))
 
         assert(expense.plaidMetadata == nil, "Expected legacy expense JSON without Plaid metadata to decode")
+        assert(expense.paymentAccountId == nil, "Expected legacy expense without account UUID to remain readable")
+        assert(expense.creditCardPaymentTargetId == nil, "Expected legacy credit-card UUID to default to nil")
     }
 
     private static func testPlaidBackendDecoderAcceptsPlaidDateOnlyStrings() {
@@ -440,6 +446,93 @@ struct CuanMarketModelsTests {
         assert(budget.portfolioAccounts.count == 1, "Expected migration to be idempotent")
         assert(budget.portfolioAccounts[0].cashBalance == 25, "Expected legacy portfolio cash to migrate")
         assert(budget.portfolioAccounts[0].marginBalance == 10, "Expected legacy portfolio margin to migrate")
+    }
+
+
+
+    private static func testLegacyLedgerReferencesMigrateToUUIDs() {
+        let checkingId = UUID()
+        let savingsId = UUID()
+        let creditId = UUID()
+        let investmentFinancialId = UUID()
+        let portfolioId = UUID()
+        let categoryId = UUID()
+        let budget = BudgetModel()
+        budget.financialAccounts = [
+            FinancialAccount(id: checkingId, name: "Checking", kind: .depository),
+            FinancialAccount(id: savingsId, name: "Savings", kind: .depository),
+            FinancialAccount(id: creditId, name: "Card", kind: .credit),
+            FinancialAccount(id: investmentFinancialId, name: "Brokerage", kind: .investment)
+        ]
+        budget.bankAccounts = [
+            BankAccount(id: checkingId, name: "Checking", balance: 500),
+            BankAccount(id: savingsId, name: "Savings", balance: 100)
+        ]
+        budget.creditAccounts = [CreditAccount(id: creditId, name: "Card", dueDay: 15)]
+        budget.portfolioAccounts = [PortfolioAccount(id: portfolioId, financialAccountId: investmentFinancialId, name: "Brokerage")]
+        budget.incomes = [IncomeEntry(name: "Paycheck", amount: 100, bankName: "Checking")]
+        budget.expenses = [Expense(name: "Groceries", amount: 25, section: .needs, categoryId: categoryId, paymentAccount: "Checking")]
+        budget.cashTransfers = [CashTransfer(name: "Move", amount: 20, fromAccountName: "Checking", toAccountName: "Savings")]
+        budget.portfolioTransactions = [PortfolioTransaction(type: .contribution, amount: 50, fundingBankAccount: "Checking")]
+        budget.holdings = [PortfolioHolding(ticker: "AAPL", shares: 1, averageCost: 100, currentPrice: 180)]
+
+        budget.migrateLegacyAccountsIfNeeded()
+
+        assert(budget.incomes[0].bankAccountId == checkingId, "Expected legacy income bank name to migrate to UUID")
+        assert(budget.expenses[0].paymentAccountId == checkingId, "Expected legacy expense payment account to migrate to UUID")
+        assert(budget.cashTransfers[0].fromAccountId == checkingId, "Expected transfer source to migrate to UUID")
+        assert(budget.cashTransfers[0].toAccountId == savingsId, "Expected transfer destination to migrate to UUID")
+        assert(budget.portfolioTransactions[0].portfolioAccountId == portfolioId, "Expected portfolio transaction to link to stable portfolio UUID")
+        assert(budget.portfolioTransactions[0].fundingBankAccountId == checkingId, "Expected portfolio funding bank to migrate to UUID")
+        assert(budget.holdings[0].portfolioAccountId == portfolioId, "Expected holding to link to stable portfolio UUID")
+    }
+
+    private static func testStableCreditUUIDSurvivesRename() {
+        let cardId = UUID()
+        let categoryId = UUID()
+        let budget = BudgetModel()
+        budget.financialAccounts = [FinancialAccount(id: cardId, name: "Card", kind: .credit)]
+        budget.creditAccounts = [CreditAccount(id: cardId, name: "Card", dueDay: 15, startingBalance: 100)]
+        budget.expenses = [
+            Expense(name: "Purchase", amount: 25, section: .needs, categoryId: categoryId, paymentAccount: "Card", paymentAccountId: cardId)
+        ]
+        assert(budget.creditAccountActualBalance(budget.creditAccounts[0]) == 125, "Expected expense to count against card by UUID")
+
+        budget.creditAccounts[0].name = "Travel Card"
+        budget.financialAccounts[0].name = "Travel Card"
+        assert(budget.creditAccountActualBalance(budget.creditAccounts[0]) == 125, "Expected card rename not to break UUID-linked expense")
+    }
+
+    private static func testStableAccountUUIDSurvivesRename() {
+        let checkingId = UUID()
+        let savingsId = UUID()
+        let transferId = UUID()
+        let budget = BudgetModel()
+        budget.financialAccounts = [
+            FinancialAccount(id: checkingId, name: "Checking", kind: .depository),
+            FinancialAccount(id: savingsId, name: "Savings", kind: .depository)
+        ]
+        budget.bankAccounts = [
+            BankAccount(id: checkingId, name: "Checking", balance: 500),
+            BankAccount(id: savingsId, name: "Savings", balance: 100)
+        ]
+        budget.addCashTransfer(CashTransfer(id: transferId, name: "Move", amount: 50, fromAccountName: "Checking", toAccountName: "Savings"))
+        assert(budget.cashTransfers[0].fromAccountId == checkingId, "Expected transfer source UUID to persist")
+        budget.bankAccounts[0].name = "Primary Checking"
+        budget.financialAccounts[0].name = "Primary Checking"
+        budget.updateCashTransfer(CashTransfer(id: transferId, name: "Move", amount: 30, fromAccountName: "Checking", toAccountName: "Savings", fromAccountId: checkingId, toAccountId: savingsId))
+        assert(budget.bankAccounts.first(where: { $0.id == checkingId })?.balance == 470, "Expected renamed source to remain linked by UUID")
+        assert(budget.bankAccounts.first(where: { $0.id == savingsId })?.balance == 130, "Expected destination to remain linked by UUID")
+    }
+
+    private static func testManualLedgerDoesNotMutatePlaidBalance() {
+        let financialId = UUID()
+        let budget = BudgetModel()
+        budget.financialAccounts = [FinancialAccount(id: financialId, name: "Plaid Checking", kind: .depository, source: .plaid, externalAccountId: "plaid-checking")]
+        budget.bankAccounts = [BankAccount(name: "Plaid Checking", balance: 1000, plaidMetadata: PlaidSourceMetadata(itemId: "item-1", accountId: "plaid-checking"))]
+        budget.addIncomeEntry(IncomeEntry(name: "Manual adjustment", amount: 250, bankName: "Plaid Checking", bankAccountId: financialId))
+        assert(budget.bankAccounts[0].balance == 1000, "Expected manual ledger actions not to mutate Plaid-authoritative balances")
+        assert(budget.incomes.count == 1, "Expected manual ledger row to remain recorded")
     }
 
     private static func testHoldingsConsolidateToOneRowPerTicker() {
