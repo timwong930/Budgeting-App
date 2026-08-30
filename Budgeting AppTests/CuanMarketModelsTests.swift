@@ -17,7 +17,10 @@ struct CuanMarketModelsTests {
         testPlaidHoldingsSnapshotPreservesTickerMetadata()
         testPlaidWatchlistImportDedupesAndUppercases()
         testPlaidOptionHoldingsDoNotImportAsStockTickers()
-        testPlaidDuplicateTickerHoldingsAggregateWithoutCrash()
+        testPlaidCashHoldingFeedsCashAndMarginBalances()
+        testPlaidDuplicateTickerHoldingsStayAccountScoped()
+        testManualSameTickerHoldingsStayAccountScoped()
+        testPortfolioCashAndMarginStayAccountScoped()
         testFinancialAccountCodableRoundTrip()
         testLegacyAccountsMigrateToStableAccountDomain()
         testLegacyLedgerReferencesMigrateToUUIDs()
@@ -308,7 +311,7 @@ struct CuanMarketModelsTests {
             )
         )
 
-        let holding = budget.holdings.first
+        let holding = budget.holdings.first { $0.plaidMetadata?.accountId == "inv-1" }
         assert(holding?.ticker == "AAPL", "Expected Plaid ticker to be normalized")
         assert(holding?.shares == 3, "Expected shares to come from Plaid holdings snapshot")
         assert(holding?.annualDividendPerShare == 0.96, "Expected manual dividend metadata to be preserved")
@@ -369,16 +372,50 @@ struct CuanMarketModelsTests {
         assert(budget.watchlistTickers == ["AAPL"], "Expected existing option contract tickers to be removed from watchlist on Plaid sync")
     }
 
-    private static func testPlaidDuplicateTickerHoldingsAggregateWithoutCrash() {
+    private static func testPlaidCashHoldingFeedsCashAndMarginBalances() {
         let budget = BudgetModel()
-        budget.holdings = [
-            PortfolioHolding(ticker: "AAPL", shares: 1, averageCost: 100, currentPrice: 150),
-            PortfolioHolding(ticker: "AAPL", shares: 2, averageCost: 110, currentPrice: 155)
-        ]
+        budget.watchlistTickers = ["CUR:USD", "AAPL"]
 
         _ = budget.applyPlaidSync(
             PlaidSyncPayload(
-                accounts: [],
+                accounts: [
+                    PlaidSyncedAccount(id: "inv-cash", itemId: "item-1", name: "Cash Brokerage", type: .investment, subtype: "brokerage", currentBalance: 485.50, availableBalance: 999, creditLimit: nil, institutionName: "Broker"),
+                    PlaidSyncedAccount(id: "inv-margin", itemId: "item-1", name: "Margin Brokerage", type: .investment, subtype: "brokerage", currentBalance: 285, availableBalance: -999, creditLimit: nil, institutionName: "Broker")
+                ],
+                transactions: [],
+                creditLiabilities: [],
+                holdings: [
+                    PlaidSyncedHolding(accountId: "inv-cash", itemId: "item-1", securityId: "sec-aapl", ticker: "AAPL", name: "Apple", quantity: 2, costBasis: 300, institutionPrice: 180, institutionValue: 360, priceAsOf: nil, securityType: "equity"),
+                    PlaidSyncedHolding(accountId: "inv-cash", itemId: "item-1", securityId: "cash-usd-1", ticker: "CUR:USD", name: "US Dollar", quantity: 125.50, costBasis: nil, institutionPrice: 1, institutionValue: 125.50, priceAsOf: nil, securityType: "cash"),
+                    PlaidSyncedHolding(accountId: "inv-margin", itemId: "item-1", securityId: "sec-msft", ticker: "MSFT", name: "Microsoft", quantity: 1, costBasis: 300, institutionPrice: 360, institutionValue: 360, priceAsOf: nil, securityType: "equity"),
+                    PlaidSyncedHolding(accountId: "inv-margin", itemId: "item-1", securityId: "cash-usd-2", ticker: "CUR:USD", name: "US Dollar", quantity: -75, costBasis: nil, institutionPrice: 1, institutionValue: -75, priceAsOf: nil, securityType: "cash")
+                ],
+                investmentTransactions: [],
+                connectionStatuses: []
+            )
+        )
+
+        let cashAccount = budget.portfolioAccounts.first { $0.name == "Cash Brokerage" }
+        let marginAccount = budget.portfolioAccounts.first { $0.name == "Margin Brokerage" }
+        assert(cashAccount?.cashBalance == 125.50, "Expected CUR:USD positive value to become brokerage cash balance")
+        assert(cashAccount?.marginBalance == 0, "Expected positive CUR:USD cash not to create margin")
+        assert(marginAccount?.cashBalance == 0, "Expected negative CUR:USD value not to remain as negative cash")
+        assert(marginAccount?.marginBalance == 75, "Expected negative CUR:USD value to become margin used")
+        assert(!budget.holdings.contains(where: { $0.ticker == "CUR:USD" }), "Expected CUR:USD to be excluded from holdings")
+        assert(!budget.watchlistTickers.contains("CUR:USD"), "Expected CUR:USD to be excluded from watchlist")
+        assert(budget.portfolioSnapshot.cashBalance == 125.50, "Expected All Portfolios cash to aggregate positive cash balances")
+        assert(budget.portfolioSnapshot.marginUsed == 75, "Expected All Portfolios margin to aggregate negative cash balances")
+    }
+
+    private static func testPlaidDuplicateTickerHoldingsStayAccountScoped() {
+        let budget = BudgetModel()
+
+        _ = budget.applyPlaidSync(
+            PlaidSyncPayload(
+                accounts: [
+                    PlaidSyncedAccount(id: "inv-1", itemId: "item-1", name: "Brokerage A", type: .investment, subtype: "brokerage", currentBalance: 180, availableBalance: 0, creditLimit: nil, institutionName: "Broker A"),
+                    PlaidSyncedAccount(id: "inv-2", itemId: "item-2", name: "Brokerage B", type: .investment, subtype: "brokerage", currentBalance: 362, availableBalance: 0, creditLimit: nil, institutionName: "Broker B")
+                ],
                 transactions: [],
                 creditLiabilities: [],
                 holdings: [
@@ -391,9 +428,68 @@ struct CuanMarketModelsTests {
         )
 
         let aaplHoldings = budget.holdings.filter { $0.ticker == "AAPL" }
-        assert(aaplHoldings.count == 1, "Expected duplicate Plaid ticker holdings to aggregate into one portfolio row")
-        assert(aaplHoldings.first?.shares == 3, "Expected duplicate Plaid ticker quantities to be summed")
-        assert(abs((aaplHoldings.first?.currentPrice ?? 0) - 180.6667) < 0.001, "Expected duplicate Plaid ticker price to use combined institution value divided by shares")
+        assert(aaplHoldings.count == 2, "Expected same ticker to remain as two brokerage-scoped positions")
+        assert(Set(aaplHoldings.compactMap(\.portfolioAccountId)).count == 2, "Expected each Plaid holding to retain a different portfolio account ID")
+        assert(aaplHoldings.map(\.shares).sorted() == [1, 2], "Expected brokerage quantities to remain independent")
+
+        let aggregate = budget.consolidatedHoldings.first { $0.ticker == "AAPL" }
+        assert(aggregate?.shares == 3, "Expected All Portfolios to sum same-ticker shares")
+        assert(abs((aggregate?.averageCost ?? 0) - 120) < 0.001, "Expected All Portfolios average cost to be share weighted")
+        assert(aggregate?.portfolioAccountId == nil, "Expected All Portfolios holding to be derived rather than tied to one brokerage")
+    }
+
+    private static func testManualSameTickerHoldingsStayAccountScoped() {
+        let accountA = PortfolioAccount(name: "Brokerage A", cashBalance: 1_000)
+        let accountB = PortfolioAccount(name: "Brokerage B", cashBalance: 1_000)
+        let budget = BudgetModel()
+        budget.portfolioAccounts = [accountA, accountB]
+        budget.portfolioTransactions = []
+        budget.holdings = []
+        budget.portfolioSnapshot.cashBalance = 0
+        budget.portfolioSnapshot.marginUsed = 0
+
+        budget.addPortfolioTransaction(
+            PortfolioTransaction(type: .buy, ticker: "AAPL", shares: 2, pricePerShare: 100, amount: 200, portfolioAccountId: accountA.id)
+        )
+        budget.addPortfolioTransaction(
+            PortfolioTransaction(type: .buy, ticker: "AAPL", shares: 3, pricePerShare: 150, amount: 450, portfolioAccountId: accountB.id)
+        )
+
+        let positions = budget.holdings.filter { $0.ticker == "AAPL" }
+        assert(positions.count == 2, "Expected manual same-ticker buys to produce two account-scoped holdings")
+        let holdingA = positions.first { $0.portfolioAccountId == accountA.id }
+        let holdingB = positions.first { $0.portfolioAccountId == accountB.id }
+        assert(holdingA?.shares == 2 && holdingA?.averageCost == 100, "Expected Brokerage A quantity and cost basis to stay isolated")
+        assert(holdingB?.shares == 3 && holdingB?.averageCost == 150, "Expected Brokerage B quantity and cost basis to stay isolated")
+
+        let aggregate = budget.consolidatedHoldings.first { $0.ticker == "AAPL" }
+        assert(aggregate?.shares == 5, "Expected All Portfolios to sum manual same-ticker shares")
+        assert(abs((aggregate?.averageCost ?? 0) - 130) < 0.001, "Expected aggregate manual cost basis to be weighted correctly")
+    }
+
+    private static func testPortfolioCashAndMarginStayAccountScoped() {
+        let accountA = PortfolioAccount(name: "Brokerage A", cashBalance: 100)
+        let accountB = PortfolioAccount(name: "Brokerage B", cashBalance: 25)
+        let budget = BudgetModel()
+        budget.portfolioAccounts = [accountA, accountB]
+        budget.portfolioTransactions = []
+        budget.holdings = []
+        budget.portfolioSnapshot.cashBalance = 0
+        budget.portfolioSnapshot.marginUsed = 0
+
+        budget.addPortfolioTransaction(
+            PortfolioTransaction(type: .buy, ticker: "MSFT", shares: 1, pricePerShare: 200, amount: 200, portfolioAccountId: accountA.id)
+        )
+        budget.addPortfolioTransaction(
+            PortfolioTransaction(type: .buy, ticker: "NVDA", shares: 1, pricePerShare: 75, amount: 75, portfolioAccountId: accountB.id)
+        )
+
+        let refreshedA = budget.portfolioAccounts.first { $0.id == accountA.id }
+        let refreshedB = budget.portfolioAccounts.first { $0.id == accountB.id }
+        assert(refreshedA?.cashBalance == 0 && refreshedA?.marginBalance == 100, "Expected Brokerage A cash and margin to update independently")
+        assert(refreshedB?.cashBalance == 0 && refreshedB?.marginBalance == 50, "Expected Brokerage B cash and margin to update independently")
+        assert(budget.portfolioSnapshot.cashBalance == 0, "Expected All Portfolios cash to equal account cash total")
+        assert(budget.portfolioSnapshot.marginUsed == 150, "Expected All Portfolios margin to equal account margin total")
     }
 
     private static func testFinancialAccountCodableRoundTrip() {

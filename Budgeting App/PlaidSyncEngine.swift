@@ -57,8 +57,10 @@ extension BudgetModel {
         } else if plaidInvestmentValue > 0 {
             portfolioSnapshot.portfolioValue = roundedCurrency(plaidInvestmentValue)
         }
-        if plaidInvestmentCash > 0 {
+        if plaidInvestmentCash > 0, portfolioAccounts.isEmpty {
             portfolioSnapshot.cashBalance = roundedCurrency(plaidInvestmentCash)
+        } else {
+            synchronizeAggregatePortfolioBalances()
         }
 
         for transaction in payload.investmentTransactions {
@@ -72,6 +74,7 @@ extension BudgetModel {
         }
 
         migrateLegacyAccountsIfNeeded()
+        synchronizeLegacyMarginStateFromLedger()
         return result
     }
 }
@@ -118,17 +121,21 @@ private extension BudgetModel {
         }
 
         guard account.type == .investment else { return }
-        let cashBalance = roundedCurrency(account.availableBalance ?? 0)
+        let availableBalance = roundedCurrency(account.availableBalance ?? 0)
+        let cashBalance = roundedCurrency(max(availableBalance, 0))
+        let marginBalance = roundedCurrency(max(-availableBalance, 0))
         if let index = portfolioAccounts.firstIndex(where: { $0.financialAccountId == financialAccountId }) {
             portfolioAccounts[index].name = account.name
             portfolioAccounts[index].cashBalance = cashBalance
+            portfolioAccounts[index].marginBalance = marginBalance
             portfolioAccounts[index].isActive = true
         } else {
             portfolioAccounts.append(
                 PortfolioAccount(
                     financialAccountId: financialAccountId,
                     name: account.name,
-                    cashBalance: cashBalance
+                    cashBalance: cashBalance,
+                    marginBalance: marginBalance
                 )
             )
         }
@@ -279,39 +286,64 @@ private extension BudgetModel {
     }
 
     func applyPlaidHoldings(_ syncedHoldings: [PlaidSyncedHolding], syncedAt: Date) {
+        let syncedExternalAccountIds = Set(syncedHoldings.map(\.accountId))
+        applyPlaidCashHoldings(syncedHoldings)
         let displayableHoldings = syncedHoldings.filter(isDisplayablePlaidHolding)
-        let existingByTicker = holdings.reduce(into: [String: PortfolioHolding]()) { result, holding in
-            guard let ticker = normalizedTicker(holding.ticker) else { return }
-            if result[ticker] == nil || (result[ticker]?.plaidMetadata != nil && holding.plaidMetadata == nil) {
-                result[ticker] = holding
+        let preservedHoldings = holdings.filter { holding in
+            guard let metadata = holding.plaidMetadata else { return true }
+            guard let accountId = metadata.accountId else { return true }
+            return !syncedExternalAccountIds.contains(accountId)
+        }
+
+        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
+            let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let securityIdentity = normalizedSecurityId.isEmpty
+                ? (normalizedTicker(holding.ticker) ?? holding.name ?? "UNKNOWN")
+                : normalizedSecurityId
+            return "\(holding.accountId)|\(securityIdentity)"
+        }
+
+        watchlistTickers.removeAll { ticker in
+            normalizedTicker(ticker) == "CUR:USD" || isOptionContractTicker(ticker)
+        }
+
+        let importedHoldings: [PortfolioHolding] = groupedPlaidHoldings.compactMap { _, plaidHoldings in
+            guard let first = plaidHoldings.first,
+                  let ticker = normalizedTicker(first.ticker) else { return nil }
+
+            let resolvedPortfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)
+            let existing = holdings.first { holding in
+                guard holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker else { return false }
+                let securityId = first.securityId
+                if holding.plaidMetadata?.securityId == securityId,
+                   holding.plaidMetadata?.accountId == first.accountId {
+                    return true
+                }
+                return holding.portfolioAccountId == resolvedPortfolioAccountId
+            } ?? holdings.first {
+                $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker
             }
-        }
-        let groupedPlaidHoldings = displayableHoldings.reduce(into: [String: [PlaidSyncedHolding]]()) { result, holding in
-            guard let ticker = normalizedTicker(holding.ticker) else { return }
-            result[ticker, default: []].append(holding)
-        }
-        let plaidTickers = Set(groupedPlaidHoldings.keys)
-        watchlistTickers.removeAll { isOptionContractTicker($0) }
-        let manualOnlyHoldings = holdings.filter { holding in
-            holding.plaidMetadata == nil && !plaidTickers.contains(holding.ticker.uppercased())
-        }
-        let importedHoldings: [PortfolioHolding] = groupedPlaidHoldings.compactMap { ticker, plaidHoldings in
-            guard let holding = plaidHoldings.first else { return nil }
-            let existing = existingByTicker[ticker]
+
             let totalQuantity = plaidHoldings.reduce(0) { $0 + $1.quantity }
             let totalCostBasis = plaidHoldings.reduce(0) { partial, holding in
                 partial + (holding.costBasis ?? ((existing?.averageCost ?? 0) * holding.quantity))
             }
             let institutionValue = plaidHoldings.compactMap(\.institutionValue).reduce(0, +)
-            let fallbackPrice = plaidHoldings.compactMap(\.institutionPrice).first { $0 > 0 } ?? existing?.currentPrice ?? 0
-            let price = totalQuantity > 0 && institutionValue > 0 ? institutionValue / totalQuantity : fallbackPrice
-            let averageCost = totalQuantity > 0 ? totalCostBasis / max(totalQuantity, 0.000001) : 0
+            let fallbackPrice = plaidHoldings.compactMap(\.institutionPrice).first { $0 > 0 }
+                ?? existing?.currentPrice
+                ?? 0
+            let price = totalQuantity > 0 && institutionValue > 0
+                ? institutionValue / totalQuantity
+                : fallbackPrice
+            let averageCost = totalQuantity > 0 ? totalCostBasis / totalQuantity : 0
+
             if price > 0 {
                 cachedQuotes[ticker] = CachedQuote(ticker: ticker, price: price, updatedAt: syncedAt)
             }
             if !watchlistTickers.contains(where: { normalizedTicker($0) == ticker }) {
                 watchlistTickers.append(ticker)
             }
+
             return PortfolioHolding(
                 ticker: ticker,
                 shares: totalQuantity,
@@ -324,19 +356,30 @@ private extension BudgetModel {
                 notes: existing?.notes ?? "",
                 nextExDividendDate: existing?.nextExDividendDate,
                 nextPayDate: existing?.nextPayDate,
+                portfolioAccountId: resolvedPortfolioAccountId,
                 plaidMetadata: PlaidSourceMetadata(
-                    itemId: holding.itemId,
-                    accountId: holding.accountId,
-                    securityId: holding.securityId,
+                    itemId: first.itemId,
+                    accountId: first.accountId,
+                    securityId: first.securityId,
                     lastSyncedAt: syncedAt
                 )
             )
         }
-        holdings = (manualOnlyHoldings + importedHoldings).sorted { $0.ticker < $1.ticker }
+
+        holdings = (preservedHoldings + importedHoldings).sorted { lhs, rhs in
+            let comparison = lhs.ticker.localizedStandardCompare(rhs.ticker)
+            if comparison == .orderedSame {
+                return portfolioAccountName(for: lhs.portfolioAccountId)
+                    .localizedStandardCompare(portfolioAccountName(for: rhs.portfolioAccountId)) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
+
         let holdingsValue = holdings.reduce(0) { total, holding in
             let price = cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
             return total + holding.shares * price
         }
+        synchronizeAggregatePortfolioBalances()
         portfolioSnapshot.portfolioValue = roundedCurrency(holdingsValue + portfolioSnapshot.cashBalance)
     }
 
@@ -376,6 +419,7 @@ private extension BudgetModel {
             pricePerShare: transaction.price,
             amount: roundedCurrency(abs(transaction.amount)),
             notes: transaction.name,
+            portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
             plaidMetadata: PlaidSourceMetadata(
                 itemId: transaction.itemId,
                 accountId: transaction.accountId,
@@ -468,7 +512,40 @@ private extension BudgetModel {
         return ticker.isEmpty ? nil : ticker
     }
 
+    func isPlaidCashHolding(_ holding: PlaidSyncedHolding) -> Bool {
+        let ticker = normalizedTicker(holding.ticker)
+        let securityType = holding.securityType?.lowercased() ?? ""
+        return ticker == "CUR:USD" || securityType.contains("cash")
+    }
+
+    func plaidCashAmount(for holding: PlaidSyncedHolding) -> Double {
+        if let institutionValue = holding.institutionValue {
+            return institutionValue
+        }
+        if let institutionPrice = holding.institutionPrice {
+            return holding.quantity * institutionPrice
+        }
+        return holding.quantity
+    }
+
+    func applyPlaidCashHoldings(_ syncedHoldings: [PlaidSyncedHolding]) {
+        let groupedCashHoldings = Dictionary(grouping: syncedHoldings.filter(isPlaidCashHolding)) { $0.accountId }
+        for (externalAccountId, cashHoldings) in groupedCashHoldings {
+            guard let portfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: externalAccountId),
+                  let index = portfolioAccounts.firstIndex(where: { $0.id == portfolioAccountId }) else {
+                continue
+            }
+
+            let netCash = roundedCurrency(cashHoldings.reduce(0) { $0 + plaidCashAmount(for: $1) })
+            portfolioAccounts[index].cashBalance = roundedCurrency(max(netCash, 0))
+            portfolioAccounts[index].marginBalance = roundedCurrency(max(-netCash, 0))
+        }
+    }
+
     func isDisplayablePlaidHolding(_ holding: PlaidSyncedHolding) -> Bool {
+        if isPlaidCashHolding(holding) {
+            return false
+        }
         guard let ticker = normalizedTicker(holding.ticker) else { return false }
         let securityType = holding.securityType?.lowercased() ?? ""
         if securityType.contains("option") || securityType.contains("derivative") {
@@ -482,6 +559,7 @@ private extension BudgetModel {
         let pattern = #"^[A-Z]{1,6}\d{6}[CP]\d{8}$"#
         return value.range(of: pattern, options: .regularExpression) != nil
     }
+
 
     func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
