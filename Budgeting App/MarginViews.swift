@@ -107,6 +107,7 @@ struct MarginDashboardView: View {
     @AppStorage("margin.holdingsViewMode") private var holdingsViewMode: HoldingsViewMode = .cards
     @State private var isRefreshingPrices = false
     @State private var selectedHolding: PortfolioHolding?
+    @State private var selectedPortfolioAccountId: UUID?
     @AppStorage("margin.selectedNetWorthRange") private var selectedNetWorthRange: NetWorthRange = .threeMonths
     @State private var selectedNetWorthPoint: PortfolioValuePoint?
     @State private var showSnapshotDetails = false
@@ -134,10 +135,39 @@ struct MarginDashboardView: View {
         ]
     }
 
+    private var selectedPortfolioHoldings: [PortfolioHolding] {
+        budget.holdings(forPortfolioAccountId: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioTransactions: [PortfolioTransaction] {
+        budget.transactions(forPortfolioAccountId: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioCashBalance: Double {
+        budget.portfolioCashBalance(for: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioMarginBalance: Double {
+        budget.portfolioMarginBalance(for: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioName: String {
+        budget.portfolioAccountName(for: selectedPortfolioAccountId)
+    }
+
+    private func portfolioPickerLabel(for account: PortfolioAccount) -> String {
+        let matchingAccounts = budget.activePortfolioAccounts.filter { $0.name == account.name }
+        guard matchingAccounts.count > 1,
+              let index = matchingAccounts.firstIndex(where: { $0.id == account.id }) else {
+            return account.name
+        }
+        return "\(account.name) \(index + 1)"
+    }
+
     private var displayHoldings: [PortfolioHolding] {
-        let consolidatedHoldings = budget.consolidatedHoldings
-        let portfolioValue = holdingsMarketValue(for: consolidatedHoldings)
-        let filtered = consolidatedHoldings.filter { holding in
+        let holdings = selectedPortfolioHoldings
+        let portfolioValue = holdingsMarketValue(for: holdings)
+        let filtered = holdings.filter { holding in
             guard let assetType = holdingsAssetFilter.assetType else { return true }
             return holding.assetType == assetType
         }
@@ -188,19 +218,19 @@ struct MarginDashboardView: View {
 
     private var monthlyTransactions: [PortfolioTransaction] {
         guard let monthInterval else { return [] }
-        return budget.portfolioTransactions.filter { monthInterval.contains($0.date) }
+        return selectedPortfolioTransactions.filter { monthInterval.contains($0.date) }
     }
 
     private var totalMarketValue: Double {
-        holdingsMarketValue(for: budget.holdings)
+        holdingsMarketValue(for: selectedPortfolioHoldings)
     }
 
     private var grossPortfolioValue: Double {
-        totalMarketValue + budget.portfolioSnapshot.cashBalance
+        totalMarketValue + selectedPortfolioCashBalance
     }
 
     private var netPortfolioValue: Double {
-        grossPortfolioValue - budget.portfolioSnapshot.marginUsed
+        grossPortfolioValue - selectedPortfolioMarginBalance
     }
 
     private var latestHoldingsUpdate: Date? {
@@ -208,7 +238,7 @@ struct MarginDashboardView: View {
     }
 
     private var annualDividendsFromHoldings: Double {
-        budget.holdings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }
+        selectedPortfolioHoldings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }
     }
 
     private var monthlyDividendsFromHoldings: Double {
@@ -230,7 +260,7 @@ struct MarginDashboardView: View {
 
     private var monthlyInterest: Double {
         MarginCalculator.monthlyInterest(
-            marginUsed: budget.portfolioSnapshot.marginUsed,
+            marginUsed: selectedPortfolioMarginBalance,
             freeMarginLimit: budget.marginSettings.interestFreeMarginLimit,
             marginInterestRate: budget.marginSettings.marginInterestRate
         )
@@ -238,7 +268,7 @@ struct MarginDashboardView: View {
 
     private var estimatedMonthlyMarginCostAtFivePercent: Double {
         MarginCalculator.monthlyInterest(
-            marginUsed: budget.portfolioSnapshot.marginUsed,
+            marginUsed: selectedPortfolioMarginBalance,
             freeMarginLimit: budget.marginSettings.interestFreeMarginLimit,
             marginInterestRate: 0.05
         )
@@ -268,7 +298,7 @@ struct MarginDashboardView: View {
     private var monthsUntilFreeLimit: Double {
         let expected = max(budget.recurringElectricBill.expectedAmount, 0)
         guard expected > 0 else { return 0 }
-        let remaining = max(budget.marginSettings.interestFreeMarginLimit - budget.portfolioSnapshot.marginUsed, 0)
+        let remaining = max(budget.marginSettings.interestFreeMarginLimit - selectedPortfolioMarginBalance, 0)
         return remaining / expected
     }
 
@@ -278,12 +308,12 @@ struct MarginDashboardView: View {
     }
 
     private var interestFreeMarginRemaining: Double {
-        max(budget.marginSettings.interestFreeMarginLimit - budget.portfolioSnapshot.marginUsed, 0)
+        max(budget.marginSettings.interestFreeMarginLimit - selectedPortfolioMarginBalance, 0)
     }
 
     private var paidMarginAmount: Double {
         MarginCalculator.paidMargin(
-            marginUsed: budget.portfolioSnapshot.marginUsed,
+            marginUsed: selectedPortfolioMarginBalance,
             freeMarginLimit: budget.marginSettings.interestFreeMarginLimit
         )
     }
@@ -296,12 +326,12 @@ struct MarginDashboardView: View {
 
     private var marginUtilizationPercent: Double {
         guard budget.marginSettings.totalMarginAvailable > 0 else { return 0 }
-        return budget.portfolioSnapshot.marginUsed / budget.marginSettings.totalMarginAvailable
+        return selectedPortfolioMarginBalance / budget.marginSettings.totalMarginAvailable
     }
 
     private var personalCapUtilizationPercent: Double {
         guard budget.marginSettings.personalMarginCap > 0 else { return 0 }
-        return budget.portfolioSnapshot.marginUsed / budget.marginSettings.personalMarginCap
+        return selectedPortfolioMarginBalance / budget.marginSettings.personalMarginCap
     }
 
     private var dividendInterestSpread: Double {
@@ -319,16 +349,16 @@ struct MarginDashboardView: View {
     private var estimatedDropToMarginCall: Double {
         guard grossPortfolioValue > 0 else { return 0 }
         let maintenance = budget.marginSettings.maintenanceRequirementPercent
-        let thresholdValue = budget.portfolioSnapshot.marginUsed / max(1 - maintenance, 0.01)
+        let thresholdValue = selectedPortfolioMarginBalance / max(1 - maintenance, 0.01)
         let drop = 1 - (thresholdValue / grossPortfolioValue)
         return max(0, drop)
     }
 
     private var experimentStatus: ExperimentStatus {
-        if stressTestFails || budget.portfolioSnapshot.marginUsed > budget.marginSettings.personalMarginCap {
+        if stressTestFails || selectedPortfolioMarginBalance > budget.marginSettings.personalMarginCap {
             return .stopExperiment
         }
-        if budget.portfolioSnapshot.marginUsed > budget.marginSettings.interestFreeMarginLimit || personalCapUtilizationPercent >= budget.marginSettings.warningThresholdPercent {
+        if selectedPortfolioMarginBalance > budget.marginSettings.interestFreeMarginLimit || personalCapUtilizationPercent >= budget.marginSettings.warningThresholdPercent {
             return .risky
         }
         if dividendCoverageOfElectricBill < 1 {
@@ -339,10 +369,10 @@ struct MarginDashboardView: View {
 
     private var warningItems: [String] {
         var warnings: [String] = []
-        if budget.portfolioSnapshot.marginUsed > budget.marginSettings.interestFreeMarginLimit {
+        if selectedPortfolioMarginBalance > budget.marginSettings.interestFreeMarginLimit {
             warnings.append("Margin used exceeds your interest-free limit.")
         }
-        if budget.portfolioSnapshot.marginUsed > budget.marginSettings.personalMarginCap {
+        if selectedPortfolioMarginBalance > budget.marginSettings.personalMarginCap {
             warnings.append("Margin used exceeds your personal margin cap.")
         }
         if dividendCoverageOfElectricBill < 1, budget.recurringElectricBill.expectedAmount > 0 {
@@ -359,7 +389,7 @@ struct MarginDashboardView: View {
             MarginScenarioResult(
                 drawdown: drawdown,
                 stressPortfolioValue: MarginCalculator.stressPortfolioValue(portfolioValue: grossPortfolioValue, drawdown: drawdown),
-                stressEquity: MarginCalculator.stressEquity(portfolioValue: grossPortfolioValue, marginUsed: budget.portfolioSnapshot.marginUsed, drawdown: drawdown)
+                stressEquity: MarginCalculator.stressEquity(portfolioValue: grossPortfolioValue, marginUsed: selectedPortfolioMarginBalance, drawdown: drawdown)
             )
         }
     }
@@ -369,7 +399,7 @@ struct MarginDashboardView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM yy"
 
-        let grouped = Dictionary(grouping: budget.portfolioTransactions) { tx in
+        let grouped = Dictionary(grouping: selectedPortfolioTransactions) { tx in
             calendar.date(from: calendar.dateComponents([.year, .month], from: tx.date)) ?? tx.date
         }
 
@@ -431,9 +461,12 @@ struct MarginDashboardView: View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 titleHeader
+                portfolioAccountSelector
                 marginInsightSummarySection
                 experimentStatusCard
-                netWorthChartCard
+                if selectedPortfolioAccountId == nil {
+                    netWorthChartCard
+                }
                 portfolioSnapshotCard
                 holdingsCard
                 dividendForecastCard
@@ -465,6 +498,12 @@ struct MarginDashboardView: View {
         }
         .onChange(of: budget.holdings) { _, _ in
             syncPortfolioSnapshotAndHistory()
+        }
+        .onChange(of: budget.portfolioAccounts) { _, accounts in
+            guard let selectedPortfolioAccountId else { return }
+            if !accounts.contains(where: { $0.id == selectedPortfolioAccountId && $0.isActive }) {
+                self.selectedPortfolioAccountId = nil
+            }
         }
         .sheet(isPresented: $showAddTransaction) { AddTransactionView(budget: budget) }
         .sheet(isPresented: $showAddInvestment) { AddInvestmentView(budget: budget) }
@@ -534,9 +573,50 @@ struct MarginDashboardView: View {
         }
     }
 
+    private var portfolioAccountSelector: some View {
+        CuanCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Portfolio View")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CuanTheme.text)
+                        Text("Switch between each brokerage account or view the combined portfolio.")
+                            .font(.caption2)
+                            .foregroundStyle(CuanTheme.muted)
+                    }
+                    Spacer()
+                }
+
+                Picker("Portfolio", selection: $selectedPortfolioAccountId) {
+                    Text("All Portfolios").tag(nil as UUID?)
+                    ForEach(budget.activePortfolioAccounts) { account in
+                        Text(portfolioPickerLabel(for: account)).tag(Optional(account.id))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if let selectedPortfolioAccountId {
+                    HStack(spacing: 14) {
+                        Label(
+                            selectedPortfolioHoldings.count == 1 ? "1 holding" : "\(selectedPortfolioHoldings.count) holdings",
+                            systemImage: "chart.pie"
+                        )
+                        Spacer()
+                        Text(selectedPortfolioCashBalance, format: .currency(code: "USD"))
+                            .font(.caption.weight(.semibold))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(CuanTheme.muted)
+                    .accessibilityLabel("Selected portfolio \(budget.portfolioAccountName(for: selectedPortfolioAccountId))")
+                }
+            }
+        }
+    }
+
     private var marginInsightSummarySection: some View {
         let grossText = grossPortfolioValue.formatted(.currency(code: "USD"))
-        let marginText = budget.portfolioSnapshot.marginUsed.formatted(.currency(code: "USD"))
+        let marginText = selectedPortfolioMarginBalance.formatted(.currency(code: "USD"))
         let personalCapText = budget.marginSettings.personalMarginCap.formatted(.currency(code: "USD"))
         let monthsUntilFreeLimitText = monthsUntilFreeLimit.formatted(.number.precision(.fractionLength(1)))
 
@@ -616,16 +696,16 @@ struct MarginDashboardView: View {
         CuanCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Portfolio Snapshot")
+                    Text("\(selectedPortfolioName) Snapshot")
                         .font(.headline)
                         .foregroundStyle(CuanTheme.text)
                     Spacer()
                     Button("View Details") { showSnapshotDetails = true }
                         .buttonStyle(.bordered)
                 }
-                metricRow("All Portfolios Cash", budget.portfolioSnapshot.cashBalance)
+                metricRow(selectedPortfolioAccountId == nil ? "All Portfolios Cash" : "Cash Balance", selectedPortfolioCashBalance)
                 metricRow("Holdings Value", totalMarketValue)
-                metricRow("Margin Used", budget.portfolioSnapshot.marginUsed)
+                metricRow("Margin Used", selectedPortfolioMarginBalance)
                 metricRow("Net Portfolio Value", netPortfolioValue)
                 metricRow("Gross Portfolio Value", grossPortfolioValue)
                 editablePercentRow("Total Maintenance Requirement", value: $budget.marginSettings.maintenanceRequirementPercent)
@@ -678,7 +758,7 @@ struct MarginDashboardView: View {
                         .foregroundStyle(.yellow)
                 }
 
-                if budget.consolidatedHoldings.isEmpty {
+                if selectedPortfolioHoldings.isEmpty {
                     VStack(spacing: 8) {
                         Text("No holdings yet.")
                             .font(.caption)
@@ -1187,13 +1267,13 @@ struct MarginDashboardView: View {
                 HStack {
                     Text("Margin Used vs Free Limit")
                     Spacer()
-                    Text("\(budget.portfolioSnapshot.marginUsed, format: .currency(code: "USD")) / \(budget.marginSettings.interestFreeMarginLimit, format: .currency(code: "USD"))")
+                    Text("\(selectedPortfolioMarginBalance, format: .currency(code: "USD")) / \(budget.marginSettings.interestFreeMarginLimit, format: .currency(code: "USD"))")
                         .fontWeight(.semibold)
                 }
                 HStack {
                     Text("Margin Used vs Personal Cap")
                     Spacer()
-                    Text("\(budget.portfolioSnapshot.marginUsed, format: .currency(code: "USD")) / \(budget.marginSettings.personalMarginCap, format: .currency(code: "USD"))")
+                    Text("\(selectedPortfolioMarginBalance, format: .currency(code: "USD")) / \(budget.marginSettings.personalMarginCap, format: .currency(code: "USD"))")
                         .fontWeight(.semibold)
                 }
                 HStack {
@@ -1553,6 +1633,7 @@ struct MarginDashboardView: View {
     }
 
     private func syncPortfolioSnapshotAndHistory() {
+        guard selectedPortfolioAccountId == nil else { return }
         budget.portfolioSnapshot.portfolioValue = grossPortfolioValue
         budget.portfolioSnapshot.freeMarginLimit = budget.marginSettings.interestFreeMarginLimit
         budget.portfolioSnapshot.marginInterestRate = budget.marginSettings.marginInterestRate
@@ -1578,7 +1659,7 @@ struct MarginDashboardView: View {
     private func forecastDividends(for component: Calendar.Component) -> Double {
         let calendar = Calendar.current
         guard let interval = calendar.dateInterval(of: component, for: Date()) else { return 0 }
-        return budget.holdings.reduce(0) { partial, holding in
+        return selectedPortfolioHoldings.reduce(0) { partial, holding in
             guard let nextPayDate = holding.nextPayDate else { return partial }
             let payout = holding.shares * (holding.annualDividendPerShare / holding.dividendFrequency.paymentsPerYear)
             guard payout > 0 else { return partial }
