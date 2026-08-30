@@ -3190,8 +3190,8 @@ private struct AddTransactionView: View {
                                 pricePerShare: pricePerShare > 0 ? pricePerShare : nil,
                                 amount: transactionAmount,
                                 notes: notes.nilIfBlank,
-                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil,
-                                portfolioAccountId: portfolioAccountId
+                                portfolioAccountId: portfolioAccountId,
+                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil
                             ),
                             fundingBankAccount: type == .contribution ? fundingBankAccount : nil
                         )
