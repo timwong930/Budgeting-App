@@ -29,7 +29,7 @@ jobs:
               raise SystemExit("Expected Plaid security identity expression was not found")
 
           marker = "    func normalized(_ value: String) -> String {\n"
-          helpers = '''    func portfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
+          helpers = '''    func resolvePortfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
               guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
                   return nil
               }
@@ -56,19 +56,26 @@ jobs:
           }
 
           '''
-          if "func portfolioAccountId(forPlaidExternalAccountId" not in source:
+          if "func portfolioAccountId(forPlaidExternalAccountId" not in source and "func resolvePortfolioAccountId(forPlaidExternalAccountId" not in source:
               if marker not in source:
                   raise SystemExit("Expected helper insertion marker was not found")
               source = source.replace(marker, helpers + marker, 1)
+
+          source = source.replace(
+              "portfolioAccountId(forPlaidExternalAccountId:",
+              "resolvePortfolioAccountId(forPlaidExternalAccountId:"
+          )
 
           path.write_text(source)
           PY
       - name: Validate patch
         run: |
-          grep -n "func portfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "func resolvePortfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "let portfolioAccountId = resolvePortfolioAccountId" "Budgeting App/PlaidSyncEngine.swift"
           grep -n "func portfolioAccountName" "Budgeting App/PlaidSyncEngine.swift"
           grep -n "func synchronizeAggregatePortfolioBalances" "Budgeting App/PlaidSyncEngine.swift"
           grep -n 'holding.name ?? "UNKNOWN"' "Budgeting App/PlaidSyncEngine.swift"
+          ! grep -q "portfolioAccountId(forPlaidExternalAccountId:" "Budgeting App/PlaidSyncEngine.swift"
           git diff --check
       - name: Commit fix
         run: |
@@ -78,6 +85,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "TIM-80: align Plaid sync with portfolio account model"
+            git commit -m "TIM-80: avoid portfolio account resolver shadowing"
             git push
           fi
