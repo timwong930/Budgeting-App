@@ -3140,7 +3140,7 @@ private struct AddTransactionView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var date = Date()
-    @State private var type: PortfolioTransactionType = .contribution
+    @State private var type: PortfolioTransactionType = .manualAdjustment
     @State private var ticker = ""
     @State private var shares = 0.0
     @State private var pricePerShare = 0.0
@@ -3185,8 +3185,7 @@ private struct AddTransactionView: View {
         case .buy, .sell:
             return !cleanTicker.isEmpty && shares > 0 && transactionAmount > 0
         case .contribution:
-            let hasFundingAccount = !fundingBankAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return transactionAmount > 0 && hasFundingAccount
+            return transactionAmount > 0
         case .manualAdjustment:
             return transactionAmount != 0
         case .dividend, .billPaidByMargin, .marginInterest:
@@ -3197,14 +3196,22 @@ private struct AddTransactionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Portfolio") {
-                    Picker("Account", selection: $portfolioAccountId) {
+                Section("Manual Backup") {
+                    Picker("Portfolio Account", selection: $portfolioAccountId) {
                         ForEach(budget.activePortfolioAccounts) { account in
-                            Text(account.name).tag(Optional(account.id))
+                            Text(portfolioAccountLabel(for: account)).tag(Optional(account.id))
                         }
                     }
                     if budget.activePortfolioAccounts.isEmpty {
-                        Text("Add a portfolio account before recording investment activity.")
+                        Text("Connect Plaid or add a portfolio account before recording manual activity.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let portfolioAccountId, budget.portfolioAccountIsPlaidAuthoritative(portfolioAccountId) {
+                        Text("Plaid is the primary source for this account. Use manual transactions only to backfill or correct activity Plaid misses; synced balances remain authoritative.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Manual transactions are a backup for activity that is not available from Plaid.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -3217,17 +3224,20 @@ private struct AddTransactionView: View {
                         }
                     }
                     if type == .contribution {
-                        Picker("From Account", selection: $fundingBankAccount) {
-                            ForEach(bankAccountOptions, id: \.self) { accountName in
-                                Text(accountName).tag(accountName)
-                            }
-                        }
                         if budget.bankAccounts.isEmpty {
-                            Text("Add a bank account before recording a portfolio contribution.")
+                            Text("Funding account is optional for a manual backup contribution.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        } else if let selectedAccount {
-                            LabeledContent("Available", value: selectedAccount.balance.formatted(.currency(code: "USD")))
+                        } else {
+                            Picker("From Account (optional)", selection: $fundingBankAccount) {
+                                Text("Not linked").tag("")
+                                ForEach(bankAccountOptions, id: \.self) { accountName in
+                                    Text(accountName).tag(accountName)
+                                }
+                            }
+                            if let selectedAccount {
+                                LabeledContent("Available", value: selectedAccount.balance.formatted(.currency(code: "USD")))
+                            }
                         }
                     }
                     TextField("Ticker (optional)", text: $ticker)
@@ -3255,7 +3265,7 @@ private struct AddTransactionView: View {
                     TextField("Notes (optional)", text: $notes)
                 }
             }
-            .navigationTitle("Add Transaction")
+            .navigationTitle("Manual Transaction")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -3294,6 +3304,14 @@ private struct AddTransactionView: View {
                 fundingBankAccount = budget.bankAccounts.first?.name ?? ""
             }
         }
+    }
+
+    private func portfolioAccountLabel(for account: PortfolioAccount) -> String {
+        let matches = budget.activePortfolioAccounts.filter { $0.name == account.name }
+        guard matches.count > 1, let index = matches.firstIndex(where: { $0.id == account.id }) else {
+            return account.name
+        }
+        return "\(account.name) \(index + 1)"
     }
 
     private var selectedAccount: BankAccount? {
@@ -3335,14 +3353,22 @@ private struct AddInvestmentView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Portfolio") {
-                    Picker("Account", selection: $portfolioAccountId) {
+                Section("Manual Backup") {
+                    Picker("Portfolio Account", selection: $portfolioAccountId) {
                         ForEach(budget.activePortfolioAccounts) { account in
-                            Text(account.name).tag(Optional(account.id))
+                            Text(portfolioAccountLabel(for: account)).tag(Optional(account.id))
                         }
                     }
                     if budget.activePortfolioAccounts.isEmpty {
-                        Text("Add a portfolio account before recording an investment.")
+                        Text("Connect Plaid or add a portfolio account before recording a manual investment.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let portfolioAccountId, budget.portfolioAccountIsPlaidAuthoritative(portfolioAccountId) {
+                        Text("Plaid remains the primary source for this account. Use manual investments only when a position is missing or needs temporary backfill; the next Plaid sync may replace synced position data.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Manual investments are intended as a fallback when Plaid data is unavailable.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -3389,7 +3415,7 @@ private struct AddInvestmentView: View {
                     LabeledContent("Funding", value: "Cash/Margin")
                 }
             }
-            .navigationTitle("Add Investment")
+            .navigationTitle("Manual Investment")
             .onChange(of: ticker) { _, _ in
                 applyExistingHoldingDefaults()
                 queueQuoteFetchIfNeeded()
@@ -3441,6 +3467,14 @@ private struct AddInvestmentView: View {
                 }
             }
         }
+    }
+
+    private func portfolioAccountLabel(for account: PortfolioAccount) -> String {
+        let matches = budget.activePortfolioAccounts.filter { $0.name == account.name }
+        guard matches.count > 1, let index = matches.firstIndex(where: { $0.id == account.id }) else {
+            return account.name
+        }
+        return "\(account.name) \(index + 1)"
     }
 
     private func applyExistingHoldingDefaults() {
