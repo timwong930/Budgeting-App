@@ -304,7 +304,7 @@ private extension BudgetModel {
             guard let first = plaidHoldings.first,
                   let ticker = normalizedTicker(first.ticker) else { return nil }
 
-            let portfolioAccountId = resolvePortfolioAccountId(forPlaidExternalAccountId: first.accountId)
+            let resolvedPortfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)
             let existing = holdings.first { holding in
                 guard holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker else { return false }
                 let securityId = first.securityId
@@ -312,7 +312,7 @@ private extension BudgetModel {
                    holding.plaidMetadata?.accountId == first.accountId {
                     return true
                 }
-                return holding.portfolioAccountId == portfolioAccountId
+                return holding.portfolioAccountId == resolvedPortfolioAccountId
             } ?? holdings.first {
                 $0.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker
             }
@@ -349,7 +349,7 @@ private extension BudgetModel {
                 notes: existing?.notes ?? "",
                 nextExDividendDate: existing?.nextExDividendDate,
                 nextPayDate: existing?.nextPayDate,
-                portfolioAccountId: portfolioAccountId,
+                portfolioAccountId: resolvedPortfolioAccountId,
                 plaidMetadata: PlaidSourceMetadata(
                     itemId: first.itemId,
                     accountId: first.accountId,
@@ -412,7 +412,7 @@ private extension BudgetModel {
             pricePerShare: transaction.price,
             amount: roundedCurrency(abs(transaction.amount)),
             notes: transaction.name,
-            portfolioAccountId: resolvePortfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
+            portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId: transaction.accountId),
             plaidMetadata: PlaidSourceMetadata(
                 itemId: transaction.itemId,
                 accountId: transaction.accountId,
@@ -520,31 +520,6 @@ private extension BudgetModel {
         return value.range(of: pattern, options: .regularExpression) != nil
     }
 
-    func resolvePortfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
-    guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
-        return nil
-    }
-    return portfolioAccounts.first(where: { $0.financialAccountId == financialAccountId })?.id
-}
-
-func portfolioAccountName(for id: UUID?) -> String {
-    guard let id,
-          let account = portfolioAccounts.first(where: { $0.id == id }) else {
-        return "Unassigned"
-    }
-    let trimmedName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmedName.isEmpty ? "Investment Account" : trimmedName
-}
-
-func synchronizeAggregatePortfolioBalances() {
-    let activeAccounts = portfolioAccounts.filter(\.isActive)
-    portfolioSnapshot.cashBalance = roundedCurrency(
-        activeAccounts.reduce(0) { $0 + $1.cashBalance }
-    )
-    portfolioSnapshot.marginUsed = roundedCurrency(
-        activeAccounts.reduce(0) { $0 + $1.marginBalance }
-    )
-}
 
     func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
