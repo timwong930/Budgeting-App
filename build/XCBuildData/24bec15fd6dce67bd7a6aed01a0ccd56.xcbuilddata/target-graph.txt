@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'BudgetingWidgets' in project 'Budgeting App' (no dependencies)

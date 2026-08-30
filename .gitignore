@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode build artifacts
+build/
+.DerivedData/
+DerivedData/
+
+# Xcode user-specific state
+*.xcuserdatad/
+
+# Supabase CLI local state
+supabase/.temp/
+
+# Local secrets — never commit real values (keep *.example files)
+.env
+supabase/.env
+supabase/.env.local
+*.secret
