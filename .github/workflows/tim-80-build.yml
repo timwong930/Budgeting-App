@@ -24,3 +24,5 @@ jobs:
             -derivedDataPath .DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+# TIM-80 validation trigger after Plaid model-alignment fix.
