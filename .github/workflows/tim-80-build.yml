@@ -3,7 +3,10 @@ name: Validate TIM-80 Build
 on:
   push:
     branches: [timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all]
-    paths: [.github/workflows/tim-80-build.yml]
+    paths:
+      - .github/workflows/tim-80-build.yml
+      - Budgeting App/**
+      - Budgeting AppTests/**
 
 jobs:
   build:
