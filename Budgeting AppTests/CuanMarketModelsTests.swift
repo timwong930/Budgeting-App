@@ -17,6 +17,7 @@ struct CuanMarketModelsTests {
         testPlaidHoldingsSnapshotPreservesTickerMetadata()
         testPlaidWatchlistImportDedupesAndUppercases()
         testPlaidOptionHoldingsDoNotImportAsStockTickers()
+        testPlaidCashHoldingFeedsCashAndMarginBalances()
         testPlaidDuplicateTickerHoldingsStayAccountScoped()
         testManualSameTickerHoldingsStayAccountScoped()
         testPortfolioCashAndMarginStayAccountScoped()
@@ -369,6 +370,40 @@ struct CuanMarketModelsTests {
 
         assert(budget.holdings.map(\.ticker) == ["AAPL"], "Expected Plaid option contracts to be excluded from portfolio holdings")
         assert(budget.watchlistTickers == ["AAPL"], "Expected existing option contract tickers to be removed from watchlist on Plaid sync")
+    }
+
+    private static func testPlaidCashHoldingFeedsCashAndMarginBalances() {
+        let budget = BudgetModel()
+
+        _ = budget.applyPlaidSync(
+            PlaidSyncPayload(
+                accounts: [
+                    PlaidSyncedAccount(id: "inv-cash", itemId: "item-1", name: "Cash Brokerage", type: .investment, subtype: "brokerage", currentBalance: 485.50, availableBalance: 999, creditLimit: nil, institutionName: "Broker"),
+                    PlaidSyncedAccount(id: "inv-margin", itemId: "item-1", name: "Margin Brokerage", type: .investment, subtype: "brokerage", currentBalance: 285, availableBalance: -999, creditLimit: nil, institutionName: "Broker")
+                ],
+                transactions: [],
+                creditLiabilities: [],
+                holdings: [
+                    PlaidSyncedHolding(accountId: "inv-cash", itemId: "item-1", securityId: "sec-aapl", ticker: "AAPL", name: "Apple", quantity: 2, costBasis: 300, institutionPrice: 180, institutionValue: 360, priceAsOf: nil, securityType: "equity"),
+                    PlaidSyncedHolding(accountId: "inv-cash", itemId: "item-1", securityId: "cash-usd-1", ticker: "CUR:USD", name: "US Dollar", quantity: 125.50, costBasis: nil, institutionPrice: 1, institutionValue: 125.50, priceAsOf: nil, securityType: "cash"),
+                    PlaidSyncedHolding(accountId: "inv-margin", itemId: "item-1", securityId: "sec-msft", ticker: "MSFT", name: "Microsoft", quantity: 1, costBasis: 300, institutionPrice: 360, institutionValue: 360, priceAsOf: nil, securityType: "equity"),
+                    PlaidSyncedHolding(accountId: "inv-margin", itemId: "item-1", securityId: "cash-usd-2", ticker: "CUR:USD", name: "US Dollar", quantity: -75, costBasis: nil, institutionPrice: 1, institutionValue: -75, priceAsOf: nil, securityType: "cash")
+                ],
+                investmentTransactions: [],
+                connectionStatuses: []
+            )
+        )
+
+        let cashAccount = budget.portfolioAccounts.first { $0.name == "Cash Brokerage" }
+        let marginAccount = budget.portfolioAccounts.first { $0.name == "Margin Brokerage" }
+        assert(cashAccount?.cashBalance == 125.50, "Expected CUR:USD positive value to become brokerage cash balance")
+        assert(cashAccount?.marginBalance == 0, "Expected positive CUR:USD cash not to create margin")
+        assert(marginAccount?.cashBalance == 0, "Expected negative CUR:USD value not to remain as negative cash")
+        assert(marginAccount?.marginBalance == 75, "Expected negative CUR:USD value to become margin used")
+        assert(!budget.holdings.contains(where: { $0.ticker == "CUR:USD" }), "Expected CUR:USD to be excluded from holdings")
+        assert(!budget.watchlistTickers.contains("CUR:USD"), "Expected CUR:USD to be excluded from watchlist")
+        assert(budget.portfolioSnapshot.cashBalance == 125.50, "Expected All Portfolios cash to aggregate positive cash balances")
+        assert(budget.portfolioSnapshot.marginUsed == 75, "Expected All Portfolios margin to aggregate negative cash balances")
     }
 
     private static func testPlaidDuplicateTickerHoldingsStayAccountScoped() {
