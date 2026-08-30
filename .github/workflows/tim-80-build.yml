@@ -25,4 +25,4 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-# TIM-80 validation trigger after Plaid model-alignment fix.
+# TIM-80 validation trigger after optional Plaid account-ID unwrap fix.
