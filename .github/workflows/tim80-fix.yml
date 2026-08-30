@@ -1,0 +1,32 @@
+name: Apply TIM-80 compile fix
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all
+    paths:
+      - .github/workflows/tim80-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all
+      - name: Apply fix
+        run: python3 Scripts/tim80_compile_fix.py
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit fix
+        run: |
+          rm -f Scripts/tim80_compile_fix.py
+          rm -f .github/workflows/tim80-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-80: fix Plaid security identity handling"
+          git push
