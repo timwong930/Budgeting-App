@@ -286,7 +286,8 @@ private extension BudgetModel {
         let syncedExternalAccountIds = Set(displayableHoldings.map(\.accountId))
         let preservedHoldings = holdings.filter { holding in
             guard let metadata = holding.plaidMetadata else { return true }
-            return !syncedExternalAccountIds.contains(metadata.accountId)
+            guard let accountId = metadata.accountId else { return true }
+            return !syncedExternalAccountIds.contains(accountId)
         }
 
         let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
