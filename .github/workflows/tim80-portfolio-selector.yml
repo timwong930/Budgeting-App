@@ -1,0 +1,275 @@
+name: Apply TIM-80 portfolio selector
+
+on:
+  push:
+    branches:
+      - 'timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all'
+    paths:
+      - '.github/workflows/tim80-portfolio-selector.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add portfolio account selector
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('Budgeting App/MarginViews.swift')
+          source = path.read_text()
+
+          source = source.replace(
+              '    @State private var selectedHolding: PortfolioHolding?\n',
+              '    @State private var selectedHolding: PortfolioHolding?\n    @State private var selectedPortfolioAccountId: UUID?\n',
+              1,
+          )
+
+          marker = '''    private var holdingsGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 50), spacing: 4),
+            GridItem(.flexible(minimum: 44), spacing: 8, alignment: .trailing),
+            GridItem(.flexible(minimum: 50), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 55), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 36), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 36), spacing: 4, alignment: .trailing),
+            GridItem(.flexible(minimum: 55), spacing: 0, alignment: .trailing),
+        ]
+    }
+'''
+          helpers = marker + '''
+    private var selectedPortfolioHoldings: [PortfolioHolding] {
+        budget.holdings(forPortfolioAccountId: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioTransactions: [PortfolioTransaction] {
+        budget.transactions(forPortfolioAccountId: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioCashBalance: Double {
+        budget.portfolioCashBalance(for: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioMarginBalance: Double {
+        budget.portfolioMarginBalance(for: selectedPortfolioAccountId)
+    }
+
+    private var selectedPortfolioName: String {
+        budget.portfolioAccountName(for: selectedPortfolioAccountId)
+    }
+
+    private func portfolioPickerLabel(for account: PortfolioAccount) -> String {
+        let matchingAccounts = budget.activePortfolioAccounts.filter { $0.name == account.name }
+        guard matchingAccounts.count > 1,
+              let index = matchingAccounts.firstIndex(where: { $0.id == account.id }) else {
+            return account.name
+        }
+        return "\\(account.name) \\(index + 1)"
+    }
+'''
+          if 'private var selectedPortfolioHoldings' not in source:
+              if marker not in source:
+                  raise SystemExit('holdingsGridColumns marker not found')
+              source = source.replace(marker, helpers, 1)
+
+          source = source.replace(
+              '        let consolidatedHoldings = budget.consolidatedHoldings\n        let portfolioValue = holdingsMarketValue(for: consolidatedHoldings)\n        let filtered = consolidatedHoldings.filter { holding in',
+              '        let holdings = selectedPortfolioHoldings\n        let portfolioValue = holdingsMarketValue(for: holdings)\n        let filtered = holdings.filter { holding in',
+              1,
+          )
+          source = source.replace(
+              '        return budget.portfolioTransactions.filter { monthInterval.contains($0.date) }',
+              '        return selectedPortfolioTransactions.filter { monthInterval.contains($0.date) }',
+              1,
+          )
+          source = source.replace(
+              '        holdingsMarketValue(for: budget.holdings)',
+              '        holdingsMarketValue(for: selectedPortfolioHoldings)',
+              1,
+          )
+          source = source.replace(
+              '        totalMarketValue + budget.portfolioSnapshot.cashBalance',
+              '        totalMarketValue + selectedPortfolioCashBalance',
+              1,
+          )
+          source = source.replace(
+              '        grossPortfolioValue - budget.portfolioSnapshot.marginUsed',
+              '        grossPortfolioValue - selectedPortfolioMarginBalance',
+              1,
+          )
+          source = source.replace(
+              '        budget.holdings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }',
+              '        selectedPortfolioHoldings.reduce(0) { $0 + ($1.shares * $1.annualDividendPerShare) }',
+              1,
+          )
+          source = source.replace(
+              '        let grouped = Dictionary(grouping: budget.portfolioTransactions) { tx in',
+              '        let grouped = Dictionary(grouping: selectedPortfolioTransactions) { tx in',
+              1,
+          )
+
+          pre_body_start = source.index('struct MarginDashboardView: View {')
+          pre_body_end = source.index('    var body: some View {', pre_body_start)
+          prefix = source[pre_body_start:pre_body_end]
+          prefix = prefix.replace('budget.portfolioSnapshot.marginUsed', 'selectedPortfolioMarginBalance')
+          source = source[:pre_body_start] + prefix + source[pre_body_end:]
+
+          source = source.replace(
+              '''                titleHeader
+                marginInsightSummarySection
+                experimentStatusCard
+                netWorthChartCard
+                portfolioSnapshotCard
+''',
+              '''                titleHeader
+                portfolioAccountSelector
+                marginInsightSummarySection
+                experimentStatusCard
+                if selectedPortfolioAccountId == nil {
+                    netWorthChartCard
+                }
+                portfolioSnapshotCard
+''',
+              1,
+          )
+
+          selector_anchor = '''    private var marginInsightSummarySection: some View {
+'''
+          selector = '''    private var portfolioAccountSelector: some View {
+        CuanCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Portfolio View")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(CuanTheme.text)
+                        Text("Switch between each brokerage account or view the combined portfolio.")
+                            .font(.caption2)
+                            .foregroundStyle(CuanTheme.muted)
+                    }
+                    Spacer()
+                }
+
+                Picker("Portfolio", selection: $selectedPortfolioAccountId) {
+                    Text("All Portfolios").tag(nil as UUID?)
+                    ForEach(budget.activePortfolioAccounts) { account in
+                        Text(portfolioPickerLabel(for: account)).tag(Optional(account.id))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if let selectedPortfolioAccountId {
+                    HStack(spacing: 14) {
+                        Label(
+                            selectedPortfolioHoldings.count == 1 ? "1 holding" : "\\(selectedPortfolioHoldings.count) holdings",
+                            systemImage: "chart.pie"
+                        )
+                        Spacer()
+                        Text(selectedPortfolioCashBalance, format: .currency(code: "USD"))
+                            .font(.caption.weight(.semibold))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(CuanTheme.muted)
+                    .accessibilityLabel("Selected portfolio \\(budget.portfolioAccountName(for: selectedPortfolioAccountId))")
+                }
+            }
+        }
+    }
+
+'''
+          if 'private var portfolioAccountSelector' not in source:
+              if selector_anchor not in source:
+                  raise SystemExit('marginInsightSummarySection anchor not found')
+              source = source.replace(selector_anchor, selector + selector_anchor, 1)
+
+          ui_start = source.index('    private var marginInsightSummarySection: some View {')
+          ui_end = source.index('    private func syncPortfolioSnapshotAndHistory()', ui_start)
+          ui_block = source[ui_start:ui_end]
+          ui_block = ui_block.replace('budget.portfolioSnapshot.marginUsed', 'selectedPortfolioMarginBalance')
+          ui_block = ui_block.replace('budget.portfolioSnapshot.cashBalance', 'selectedPortfolioCashBalance')
+          source = source[:ui_start] + ui_block + source[ui_end:]
+
+          source = source.replace(
+              '                    Text("Portfolio Snapshot")',
+              '                    Text("\\(selectedPortfolioName) Snapshot")',
+              1,
+          )
+          source = source.replace(
+              '                metricRow("All Portfolios Cash", selectedPortfolioCashBalance)',
+              '                metricRow(selectedPortfolioAccountId == nil ? "All Portfolios Cash" : "Cash Balance", selectedPortfolioCashBalance)',
+              1,
+          )
+          source = source.replace(
+              '                if budget.consolidatedHoldings.isEmpty {',
+              '                if selectedPortfolioHoldings.isEmpty {',
+              1,
+          )
+
+          source = source.replace(
+              '''    private func syncPortfolioSnapshotAndHistory() {
+        budget.portfolioSnapshot.portfolioValue = grossPortfolioValue
+''',
+              '''    private func syncPortfolioSnapshotAndHistory() {
+        guard selectedPortfolioAccountId == nil else { return }
+        budget.portfolioSnapshot.portfolioValue = grossPortfolioValue
+''',
+              1,
+          )
+          source = source.replace(
+              '        return budget.holdings.reduce(0) { partial, holding in',
+              '        return selectedPortfolioHoldings.reduce(0) { partial, holding in',
+              1,
+          )
+
+          source = source.replace(
+              '''        .onChange(of: budget.holdings) { _, _ in
+            syncPortfolioSnapshotAndHistory()
+        }
+''',
+              '''        .onChange(of: budget.holdings) { _, _ in
+            syncPortfolioSnapshotAndHistory()
+        }
+        .onChange(of: budget.portfolioAccounts) { _, accounts in
+            guard let selectedPortfolioAccountId else { return }
+            if !accounts.contains(where: { $0.id == selectedPortfolioAccountId && $0.isActive }) {
+                self.selectedPortfolioAccountId = nil
+            }
+        }
+''',
+              1,
+          )
+
+          path.write_text(source)
+          PY
+      - name: Validate patch
+        shell: bash
+        run: |
+          grep -n 'private var portfolioAccountSelector' 'Budgeting App/MarginViews.swift'
+          grep -n 'Text("All Portfolios").tag(nil as UUID?)' 'Budgeting App/MarginViews.swift'
+          grep -n 'holdings(forPortfolioAccountId: selectedPortfolioAccountId)' 'Budgeting App/MarginViews.swift'
+          grep -n 'transactions(forPortfolioAccountId: selectedPortfolioAccountId)' 'Budgeting App/MarginViews.swift'
+          git diff --check
+      - name: Commit product change
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/MarginViews.swift'
+          if ! git diff --cached --quiet; then
+            git commit -m 'TIM-80: add portfolio account switcher'
+            git push
+          fi
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project 'Budgeting App.xcodeproj' \
+            -scheme 'Budgeting App' \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
