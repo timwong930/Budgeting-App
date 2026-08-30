@@ -292,7 +292,7 @@ private extension BudgetModel {
         let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
             let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
             let securityIdentity = normalizedSecurityId.isEmpty
-                ? (normalizedTicker(holding.ticker) ?? holding.name)
+                ? (normalizedTicker(holding.ticker) ?? holding.name ?? "UNKNOWN")
                 : normalizedSecurityId
             return "\(holding.accountId)|\(securityIdentity)"
         }
@@ -518,6 +518,32 @@ private extension BudgetModel {
         let pattern = #"^[A-Z]{1,6}\d{6}[CP]\d{8}$"#
         return value.range(of: pattern, options: .regularExpression) != nil
     }
+
+    func portfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
+    guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
+        return nil
+    }
+    return portfolioAccounts.first(where: { $0.financialAccountId == financialAccountId })?.id
+}
+
+func portfolioAccountName(for id: UUID?) -> String {
+    guard let id,
+          let account = portfolioAccounts.first(where: { $0.id == id }) else {
+        return "Unassigned"
+    }
+    let trimmedName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmedName.isEmpty ? "Investment Account" : trimmedName
+}
+
+func synchronizeAggregatePortfolioBalances() {
+    let activeAccounts = portfolioAccounts.filter(\.isActive)
+    portfolioSnapshot.cashBalance = roundedCurrency(
+        activeAccounts.reduce(0) { $0 + $1.cashBalance }
+    )
+    portfolioSnapshot.marginUsed = roundedCurrency(
+        activeAccounts.reduce(0) { $0 + $1.marginBalance }
+    )
+}
 
     func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
