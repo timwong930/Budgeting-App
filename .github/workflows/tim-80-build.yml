@@ -1,0 +1,23 @@
+name: Validate TIM-80 Build
+
+on:
+  push:
+    branches: [timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all]
+    paths: [.github/workflows/tim-80-build.yml]
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project "Budgeting App.xcodeproj" \
+            -scheme "Budgeting App" \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
