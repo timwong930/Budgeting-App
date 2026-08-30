@@ -2266,7 +2266,8 @@ class BudgetModel: ObservableObject {
                         date: transaction.date,
                         type: .manualAdjustment,
                         amount: -marginPaydown,
-                        notes: "Cash contribution applied to margin balance"
+                        notes: "Cash contribution applied to margin balance",
+                        portfolioAccountId: transaction.portfolioAccountId
                     )
                 )
             }
@@ -2283,7 +2284,8 @@ class BudgetModel: ObservableObject {
                     date: transaction.date,
                     type: .manualAdjustment,
                     amount: marginDraw,
-                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy"
+                    notes: "Auto margin draw for \(transaction.ticker ?? "investment") buy",
+                    portfolioAccountId: transaction.portfolioAccountId
                 )
             )
         case .sell:
@@ -2343,31 +2345,38 @@ class BudgetModel: ObservableObject {
     }
 
     func synchronizeLegacyMarginStateFromLedger() {
+        let manualPortfolioAccounts = portfolioAccounts.filter { !isPlaidAuthoritativePortfolioAccount($0.id) }
+        var legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         let legacyMarginUsed = max(portfolioSnapshot.marginUsed, 0)
-        if portfolioTransactions.isEmpty, legacyMarginUsed > 0 {
+        if legacyTransactions.isEmpty,
+           legacyMarginUsed > 0,
+           let manualPortfolioAccount = manualPortfolioAccounts.first {
             portfolioTransactions.append(
                 PortfolioTransaction(
                     type: .manualAdjustment,
                     amount: legacyMarginUsed,
-                    notes: "Imported existing margin balance"
+                    notes: "Imported existing margin balance",
+                    portfolioAccountId: manualPortfolioAccount.id
                 )
             )
+            legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         }
 
-        let legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         let derivedHoldings = holdingsFromTransactions
         if !derivedHoldings.isEmpty || !legacyTransactions.isEmpty {
             holdings = derivedHoldings
             portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
         }
 
-        sweepCashAgainstMarginIfNeeded()
+        if let manualPortfolioAccount = manualPortfolioAccounts.first {
+            sweepCashAgainstMarginIfNeeded(portfolioAccountId: manualPortfolioAccount.id)
+        }
 
         portfolioSnapshot.freeMarginLimit = marginSettings.interestFreeMarginLimit
         portfolioSnapshot.marginInterestRate = marginSettings.marginInterestRate
     }
 
-    private func sweepCashAgainstMarginIfNeeded() {
+    private func sweepCashAgainstMarginIfNeeded(portfolioAccountId: UUID) {
         let availableCash = max(portfolioSnapshot.cashBalance, 0)
         let currentMargin = max(marginUsedFromLedger, 0)
         let sweepAmount = min(availableCash, currentMargin)
@@ -2383,7 +2392,8 @@ class BudgetModel: ObservableObject {
             PortfolioTransaction(
                 type: .manualAdjustment,
                 amount: -roundedSweep,
-                notes: "Cash balance swept to pay down margin"
+                notes: "Cash balance swept to pay down margin",
+                portfolioAccountId: portfolioAccountId
             )
         )
         portfolioSnapshot.cashBalance = max(availableCash - roundedSweep, 0)
