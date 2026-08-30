@@ -1,0 +1,99 @@
+name: Apply TIM-80 Plaid model alignment fix
+
+on:
+  push:
+    branches: [timothyhwo2000/tim-80-complete-multi-account-portfolio-isolation-and-all]
+    paths: [.github/workflows/tim80-patch.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Plaid sync model alignment
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Budgeting App/PlaidSyncEngine.swift")
+          source = path.read_text()
+
+          old_grouping = '''        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
+              let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
+              let securityIdentity = normalizedSecurityId.isEmpty
+                  ? (normalizedTicker(holding.ticker) ?? holding.name)
+                  : normalizedSecurityId
+              return "\\(holding.accountId)|\\(securityIdentity)"
+          }
+          '''
+          new_grouping = '''        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
+              let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
+              let fallbackSecurityIdentity = normalizedTicker(holding.ticker)
+                  ?? holding.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                  ?? "UNKNOWN"
+              let securityIdentity = normalizedSecurityId.isEmpty
+                  ? fallbackSecurityIdentity
+                  : normalizedSecurityId
+              return "\\(holding.accountId)|\\(securityIdentity)"
+          }
+          '''
+          if old_grouping not in source:
+              raise SystemExit("Expected Plaid grouping block was not found")
+          source = source.replace(old_grouping, new_grouping, 1)
+
+          marker = '''    func normalized(_ value: String) -> String {
+          '''
+          helpers = '''    func portfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
+              guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
+                  return nil
+              }
+              return portfolioAccounts.first(where: { $0.financialAccountId == financialAccountId })?.id
+          }
+
+              func portfolioAccountName(for id: UUID?) -> String {
+              guard let id,
+                    let account = portfolioAccounts.first(where: { $0.id == id }) else {
+                  return "Unassigned"
+              }
+              let trimmedName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+              return trimmedName.isEmpty ? "Investment Account" : trimmedName
+          }
+
+              func synchronizeAggregatePortfolioBalances() {
+              let activeAccounts = portfolioAccounts.filter(\\.isActive)
+              portfolioSnapshot.cashBalance = roundedCurrency(
+                  activeAccounts.reduce(0) { $0 + $1.cashBalance }
+              )
+              portfolioSnapshot.marginUsed = roundedCurrency(
+                  activeAccounts.reduce(0) { $0 + $1.marginBalance }
+              )
+          }
+
+          '''
+          if "func portfolioAccountId(forPlaidExternalAccountId" not in source:
+              if marker not in source:
+                  raise SystemExit("Expected helper insertion marker was not found")
+              source = source.replace(marker, helpers + marker, 1)
+
+          path.write_text(source)
+          PY
+      - name: Validate patch
+        run: |
+          grep -n "func portfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "func synchronizeAggregatePortfolioBalances" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "fallbackSecurityIdentity" "Budgeting App/PlaidSyncEngine.swift"
+          git diff --check
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Budgeting App/PlaidSyncEngine.swift"
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+          else
+            git commit -m "TIM-80: align Plaid sync with portfolio account model"
+            git push
+          fi
