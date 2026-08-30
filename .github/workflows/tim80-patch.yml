@@ -1,4 +1,4 @@
-name: Apply TIM-80 duplicate helper fix
+name: Apply TIM-80 compile fixes
 
 on:
   push:
@@ -15,61 +15,41 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Remove duplicate portfolio helpers
+      - name: Fix PortfolioTransaction argument ordering
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re
 
-          path = Path('Budgeting App/PlaidSyncEngine.swift')
+          path = Path('Budgeting App/MarginViews.swift')
           source = path.read_text()
-
-          source = source.replace(
-              '            let portfolioAccountId = resolvePortfolioAccountId(forPlaidExternalAccountId: first.accountId)',
-              '            let resolvedPortfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)',
-          )
-          source = source.replace(
-              '                return holding.portfolioAccountId == portfolioAccountId',
-              '                return holding.portfolioAccountId == resolvedPortfolioAccountId',
-          )
-          source = source.replace(
-              '                portfolioAccountId: portfolioAccountId,',
-              '                portfolioAccountId: resolvedPortfolioAccountId,',
-              1,
-          )
-          source = source.replace(
-              '            portfolioAccountId: resolvePortfolioAccountId(forPlaidExternalAccountId: transaction.accountId),',
-              '            portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId: transaction.accountId),',
-          )
-
-          pattern = re.compile(
-              r'\n    func resolvePortfolioAccountId\(forPlaidExternalAccountId externalAccountId: String\) -> UUID\? \{.*?\n\}\n\nfunc portfolioAccountName\(for id: UUID\?\) -> String \{.*?\n\}\n\nfunc synchronizeAggregatePortfolioBalances\(\) \{.*?\n\}\n',
-              re.S,
-          )
-          source, count = pattern.subn('\n', source, count=1)
-          if count != 1:
-              raise SystemExit(f'Expected one duplicate helper block, removed {count}')
-
+          old = '''                                notes: notes.nilIfBlank,
+                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil,
+                                portfolioAccountId: portfolioAccountId
+'''
+          new = '''                                notes: notes.nilIfBlank,
+                                portfolioAccountId: portfolioAccountId,
+                                fundingBankAccount: type == .contribution ? fundingBankAccount.nilIfBlank : nil
+'''
+          if old in source:
+              source = source.replace(old, new, 1)
+          elif new not in source:
+              raise SystemExit('Expected PortfolioTransaction argument block not found')
           path.write_text(source)
           PY
-      - name: Validate source cleanup
+      - name: Validate source
         shell: bash
         run: |
-          ! grep -q 'func resolvePortfolioAccountId' 'Budgeting App/PlaidSyncEngine.swift'
-          ! grep -q '^func portfolioAccountName' 'Budgeting App/PlaidSyncEngine.swift'
-          ! grep -q '^func synchronizeAggregatePortfolioBalances' 'Budgeting App/PlaidSyncEngine.swift'
-          grep -n 'resolvedPortfolioAccountId = portfolioAccountId' 'Budgeting App/PlaidSyncEngine.swift'
-          grep -n 'portfolioAccountId: portfolioAccountId(forPlaidExternalAccountId:' 'Budgeting App/PlaidSyncEngine.swift'
+          grep -n -A2 'notes: notes.nilIfBlank' 'Budgeting App/MarginViews.swift' | grep 'portfolioAccountId: portfolioAccountId'
           git diff --check
-      - name: Commit source cleanup
+      - name: Commit source fix
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add 'Budgeting App/PlaidSyncEngine.swift'
+          git add 'Budgeting App/MarginViews.swift'
           if ! git diff --cached --quiet; then
-            git commit -m 'TIM-80: remove duplicate portfolio helpers'
+            git commit -m 'TIM-80: fix portfolio transaction argument order'
             git push
           fi
       - name: Xcode version
