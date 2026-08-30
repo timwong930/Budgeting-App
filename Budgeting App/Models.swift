@@ -2075,7 +2075,9 @@ class BudgetModel: ObservableObject {
     }
 
     var marginUsedFromLedger: Double {
-        portfolioTransactions.reduce(0) { partial, tx in
+        portfolioTransactions
+            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            .reduce(0) { partial, tx in
             switch tx.type {
             case .billPaidByMargin:
                 return partial + tx.amount
@@ -2093,7 +2095,9 @@ class BudgetModel: ObservableObject {
 
     var holdingsFromTransactions: [PortfolioHolding] {
         var buckets: [String: (shares: Double, cost: Double)] = [:]
-        let ordered = portfolioTransactions.sorted { $0.date < $1.date }
+        let ordered = portfolioTransactions
+            .filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
+            .sorted { $0.date < $1.date }
         for tx in ordered {
             let ticker = tx.ticker?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
             switch tx.type {
@@ -2133,7 +2137,8 @@ class BudgetModel: ObservableObject {
                 dividendReliability: holdings.first(where: { $0.ticker.uppercased() == ticker })?.dividendReliability ?? .medium,
                 notes: holdings.first(where: { $0.ticker.uppercased() == ticker })?.notes ?? "",
                 nextExDividendDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextExDividendDate,
-                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate
+                nextPayDate: holdings.first(where: { $0.ticker.uppercased() == ticker })?.nextPayDate,
+                portfolioAccountId: resolvePortfolioAccountId(metadata: nil)
             )
         }.sorted { $0.ticker < $1.ticker }
     }
@@ -2148,33 +2153,64 @@ class BudgetModel: ObservableObject {
             let cleanFundingBankAccount = fundingBankAccount?.trimmingCharacters(in: .whitespacesAndNewlines)
             transaction.fundingBankAccount = cleanFundingBankAccount?.isEmpty == false ? cleanFundingBankAccount : nil
         }
+        if transaction.portfolioAccountId == nil {
+            transaction.portfolioAccountId = resolvePortfolioAccountId(metadata: transaction.plaidMetadata)
+        }
+        if transaction.fundingBankAccountId == nil, let fundingName = transaction.fundingBankAccount {
+            transaction.fundingBankAccountId = resolveFinancialAccountId(legacyName: fundingName, allowedKinds: [.depository])
+        }
         portfolioTransactions.append(transaction)
-        if affectsBalances {
+        let isPlaidAuthoritative = isPlaidAuthoritativePortfolioAccount(transaction.portfolioAccountId)
+        if affectsBalances && !isPlaidAuthoritative {
             applyCashImpact(for: transaction)
         }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !isPlaidAuthoritative {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func updatePortfolioTransaction(_ updatedTransaction: PortfolioTransaction) {
         guard let index = portfolioTransactions.firstIndex(where: { $0.id == updatedTransaction.id }) else { return }
         let previousTransaction = portfolioTransactions[index]
-        reverseEditableCashImpact(for: previousTransaction)
-        portfolioTransactions[index] = updatedTransaction
-        applyEditableCashImpact(for: updatedTransaction)
+        let previousIsPlaid = isPlaidAuthoritativePortfolioAccount(previousTransaction.portfolioAccountId)
+        if !previousIsPlaid {
+            reverseEditableCashImpact(for: previousTransaction)
+        }
+
+        var resolvedTransaction = updatedTransaction
+        if resolvedTransaction.portfolioAccountId == nil {
+            resolvedTransaction.portfolioAccountId = resolvePortfolioAccountId(metadata: resolvedTransaction.plaidMetadata)
+        }
+        if resolvedTransaction.fundingBankAccountId == nil, let fundingName = resolvedTransaction.fundingBankAccount {
+            resolvedTransaction.fundingBankAccountId = resolveFinancialAccountId(legacyName: fundingName, allowedKinds: [.depository])
+        }
+        portfolioTransactions[index] = resolvedTransaction
+
+        let updatedIsPlaid = isPlaidAuthoritativePortfolioAccount(resolvedTransaction.portfolioAccountId)
+        if !updatedIsPlaid {
+            applyEditableCashImpact(for: resolvedTransaction)
+        }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !previousIsPlaid || !updatedIsPlaid {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func deletePortfolioTransaction(id: UUID) {
         guard let index = portfolioTransactions.firstIndex(where: { $0.id == id }) else { return }
         let removedTransaction = portfolioTransactions.remove(at: index)
-        reverseEditableCashImpact(for: removedTransaction)
+        let isPlaidAuthoritative = isPlaidAuthoritativePortfolioAccount(removedTransaction.portfolioAccountId)
+        if !isPlaidAuthoritative {
+            reverseEditableCashImpact(for: removedTransaction)
+        }
         roundPortfolioCashBalance()
-        synchronizeLegacyMarginStateFromLedger()
-        recordPortfolioValueHistory()
+        if !isPlaidAuthoritative {
+            synchronizeLegacyMarginStateFromLedger()
+            recordPortfolioValueHistory()
+        }
     }
 
     func addInvestment(
@@ -2218,7 +2254,11 @@ class BudgetModel: ObservableObject {
 
         switch transaction.type {
         case .contribution:
-            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: -amount)
+            applyBankAccountDelta(
+                accountId: transaction.fundingBankAccountId,
+                legacyName: transaction.fundingBankAccount ?? "",
+                delta: -amount
+            )
             let marginPaydown = min(max(marginUsedFromLedger, 0), max(amount, 0))
             if marginPaydown > 0 {
                 portfolioTransactions.append(
@@ -2261,7 +2301,11 @@ class BudgetModel: ObservableObject {
 
         switch transaction.type {
         case .contribution:
-            applyBankAccountDelta(named: transaction.fundingBankAccount ?? "", delta: amount)
+            applyBankAccountDelta(
+                accountId: transaction.fundingBankAccountId,
+                legacyName: transaction.fundingBankAccount ?? "",
+                delta: amount
+            )
             portfolioSnapshot.cashBalance -= amount
         case .dividend:
             portfolioSnapshot.cashBalance -= amount
@@ -2310,8 +2354,9 @@ class BudgetModel: ObservableObject {
             )
         }
 
+        let legacyTransactions = portfolioTransactions.filter { !isPlaidAuthoritativePortfolioAccount($0.portfolioAccountId) }
         let derivedHoldings = holdingsFromTransactions
-        if !derivedHoldings.isEmpty || !portfolioTransactions.isEmpty {
+        if !derivedHoldings.isEmpty || !legacyTransactions.isEmpty {
             holdings = derivedHoldings
             portfolioSnapshot.marginUsed = max(marginUsedFromLedger, 0)
         }
@@ -2463,13 +2508,23 @@ class BudgetModel: ObservableObject {
         }
         let normalizedName = normalizedAccountName(account.name)
         guard !normalizedName.isEmpty else { return 0 }
+        let stableAccountId = financialAccountId(for: account)
         return expenses.reduce(account.startingBalance) { partial, expense in
-            if let paidCard = creditCardPaymentTarget(for: expense),
-               paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
+            if let targetId = expense.creditCardPaymentTargetId {
+                if targetId == stableAccountId {
+                    return partial - expense.amount
+                }
+            } else if let paidCard = creditCardPaymentTarget(for: expense),
+                      paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
             }
-            let paymentAccount = normalizedAccountName(expense.paymentAccount)
-            guard paymentAccount == normalizedName else { return partial }
+
+            if let paymentAccountId = expense.paymentAccountId {
+                guard paymentAccountId == stableAccountId else { return partial }
+            } else {
+                let paymentAccount = normalizedAccountName(expense.paymentAccount)
+                guard paymentAccount == normalizedName else { return partial }
+            }
             return partial + expense.amount
         }
     }
@@ -2479,6 +2534,10 @@ class BudgetModel: ObservableObject {
     }
 
     func creditCardPaymentTarget(for expense: Expense) -> String? {
+        if let targetId = expense.creditCardPaymentTargetId,
+           let account = financialAccounts.first(where: { $0.id == targetId }) {
+            return account.name
+        }
         if let target = expense.creditCardPaymentTarget?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             return target
@@ -2682,6 +2741,29 @@ class BudgetModel: ObservableObject {
         guard !normalized.isEmpty else { return nil }
         let matches = bankAccounts.indices.filter { normalizedAccountName(bankAccounts[$0].name) == normalized }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    private func financialAccountId(for creditAccount: CreditAccount) -> UUID? {
+        if let externalId = creditAccount.plaidMetadata?.accountId,
+           let financialAccount = financialAccounts.first(where: { $0.externalAccountId == externalId && $0.kind == .credit }) {
+            return financialAccount.id
+        }
+        if financialAccounts.contains(where: { $0.id == creditAccount.id && $0.kind == .credit }) {
+            return creditAccount.id
+        }
+        let normalized = normalizedAccountName(creditAccount.name)
+        let matches = financialAccounts.filter { $0.kind == .credit && normalizedAccountName($0.name) == normalized }
+        return matches.count == 1 ? matches[0].id : nil
+    }
+
+    private func isPlaidAuthoritativePortfolioAccount(_ portfolioAccountId: UUID?) -> Bool {
+        guard let portfolioAccountId,
+              let portfolioAccount = portfolioAccounts.first(where: { $0.id == portfolioAccountId }),
+              let financialAccountId = portfolioAccount.financialAccountId,
+              let financialAccount = financialAccounts.first(where: { $0.id == financialAccountId }) else {
+            return false
+        }
+        return financialAccount.source == .plaid
     }
 
     private func normalizedAccountName(_ name: String) -> String {
