@@ -21,31 +21,14 @@ jobs:
           path = Path("Budgeting App/PlaidSyncEngine.swift")
           source = path.read_text()
 
-          old_grouping = '''        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
-              let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
-              let securityIdentity = normalizedSecurityId.isEmpty
-                  ? (normalizedTicker(holding.ticker) ?? holding.name)
-                  : normalizedSecurityId
-              return "\\(holding.accountId)|\\(securityIdentity)"
-          }
-          '''
-          new_grouping = '''        let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
-              let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
-              let fallbackSecurityIdentity = normalizedTicker(holding.ticker)
-                  ?? holding.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-                  ?? "UNKNOWN"
-              let securityIdentity = normalizedSecurityId.isEmpty
-                  ? fallbackSecurityIdentity
-                  : normalizedSecurityId
-              return "\\(holding.accountId)|\\(securityIdentity)"
-          }
-          '''
-          if old_grouping not in source:
-              raise SystemExit("Expected Plaid grouping block was not found")
-          source = source.replace(old_grouping, new_grouping, 1)
+          optional_expression = "? (normalizedTicker(holding.ticker) ?? holding.name)"
+          fixed_expression = "? (normalizedTicker(holding.ticker) ?? holding.name ?? \"UNKNOWN\")"
+          if optional_expression in source:
+              source = source.replace(optional_expression, fixed_expression, 1)
+          elif fixed_expression not in source:
+              raise SystemExit("Expected Plaid security identity expression was not found")
 
-          marker = '''    func normalized(_ value: String) -> String {
-          '''
+          marker = "    func normalized(_ value: String) -> String {\n"
           helpers = '''    func portfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
               guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
                   return nil
@@ -53,7 +36,7 @@ jobs:
               return portfolioAccounts.first(where: { $0.financialAccountId == financialAccountId })?.id
           }
 
-              func portfolioAccountName(for id: UUID?) -> String {
+          func portfolioAccountName(for id: UUID?) -> String {
               guard let id,
                     let account = portfolioAccounts.first(where: { $0.id == id }) else {
                   return "Unassigned"
@@ -62,8 +45,8 @@ jobs:
               return trimmedName.isEmpty ? "Investment Account" : trimmedName
           }
 
-              func synchronizeAggregatePortfolioBalances() {
-              let activeAccounts = portfolioAccounts.filter(\\.isActive)
+          func synchronizeAggregatePortfolioBalances() {
+              let activeAccounts = portfolioAccounts.filter(\.isActive)
               portfolioSnapshot.cashBalance = roundedCurrency(
                   activeAccounts.reduce(0) { $0 + $1.cashBalance }
               )
@@ -83,8 +66,9 @@ jobs:
       - name: Validate patch
         run: |
           grep -n "func portfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "func portfolioAccountName" "Budgeting App/PlaidSyncEngine.swift"
           grep -n "func synchronizeAggregatePortfolioBalances" "Budgeting App/PlaidSyncEngine.swift"
-          grep -n "fallbackSecurityIdentity" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n 'holding.name ?? "UNKNOWN"' "Budgeting App/PlaidSyncEngine.swift"
           git diff --check
       - name: Commit fix
         run: |
