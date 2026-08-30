@@ -1,4 +1,4 @@
-name: Apply TIM-80 Plaid model alignment fix
+name: Apply TIM-80 optional account ID fix
 
 on:
   push:
@@ -13,75 +13,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch Plaid sync model alignment
+      - name: Patch optional Plaid account ID
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("Budgeting App/PlaidSyncEngine.swift")
           source = path.read_text()
-
-          optional_expression = "? (normalizedTicker(holding.ticker) ?? holding.name)"
-          fixed_expression = "? (normalizedTicker(holding.ticker) ?? holding.name ?? \"UNKNOWN\")"
-          if optional_expression in source:
-              source = source.replace(optional_expression, fixed_expression, 1)
-          elif fixed_expression not in source:
-              raise SystemExit("Expected Plaid security identity expression was not found")
-
-          marker = "    func normalized(_ value: String) -> String {\n"
-          helpers = '''    func resolvePortfolioAccountId(forPlaidExternalAccountId externalAccountId: String) -> UUID? {
-              guard let financialAccountId = financialAccounts.first(where: { $0.externalAccountId == externalAccountId })?.id else {
-                  return nil
-              }
-              return portfolioAccounts.first(where: { $0.financialAccountId == financialAccountId })?.id
-          }
-
-          func portfolioAccountName(for id: UUID?) -> String {
-              guard let id,
-                    let account = portfolioAccounts.first(where: { $0.id == id }) else {
-                  return "Unassigned"
-              }
-              let trimmedName = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
-              return trimmedName.isEmpty ? "Investment Account" : trimmedName
-          }
-
-          func synchronizeAggregatePortfolioBalances() {
-              let activeAccounts = portfolioAccounts.filter(\.isActive)
-              portfolioSnapshot.cashBalance = roundedCurrency(
-                  activeAccounts.reduce(0) { $0 + $1.cashBalance }
-              )
-              portfolioSnapshot.marginUsed = roundedCurrency(
-                  activeAccounts.reduce(0) { $0 + $1.marginBalance }
-              )
-          }
-
-          '''
-          if "func portfolioAccountId(forPlaidExternalAccountId" not in source and "func resolvePortfolioAccountId(forPlaidExternalAccountId" not in source:
-              if marker not in source:
-                  raise SystemExit("Expected helper insertion marker was not found")
-              source = source.replace(marker, helpers + marker, 1)
-
-          source = source.replace(
-              "func portfolioAccountId(forPlaidExternalAccountId ",
-              "func resolvePortfolioAccountId(forPlaidExternalAccountId ",
-              1
-          )
-          source = source.replace(
-              "portfolioAccountId(forPlaidExternalAccountId:",
-              "resolvePortfolioAccountId(forPlaidExternalAccountId:"
-          )
-
-          path.write_text(source)
+          old = '''        let preservedHoldings = holdings.filter { holding in
+            guard let metadata = holding.plaidMetadata else { return true }
+            return !syncedExternalAccountIds.contains(metadata.accountId)
+        }
+'''
+          new = '''        let preservedHoldings = holdings.filter { holding in
+            guard let metadata = holding.plaidMetadata else { return true }
+            guard let accountId = metadata.accountId else { return true }
+            return !syncedExternalAccountIds.contains(accountId)
+        }
+'''
+          if old not in source:
+              if new in source:
+                  print("Optional account ID fix already applied")
+              else:
+                  raise SystemExit("Expected preservedHoldings block not found")
+          else:
+              source = source.replace(old, new, 1)
+              path.write_text(source)
           PY
       - name: Validate patch
         run: |
-          grep -n "func resolvePortfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
-          grep -n "let portfolioAccountId = resolvePortfolioAccountId" "Budgeting App/PlaidSyncEngine.swift"
-          grep -n "func portfolioAccountName" "Budgeting App/PlaidSyncEngine.swift"
-          grep -n "func synchronizeAggregatePortfolioBalances" "Budgeting App/PlaidSyncEngine.swift"
-          grep -n 'holding.name ?? "UNKNOWN"' "Budgeting App/PlaidSyncEngine.swift"
-          ! grep -q "func portfolioAccountId(forPlaidExternalAccountId" "Budgeting App/PlaidSyncEngine.swift"
-          ! grep -q "= portfolioAccountId(forPlaidExternalAccountId:" "Budgeting App/PlaidSyncEngine.swift"
+          grep -n "guard let accountId = metadata.accountId else { return true }" "Budgeting App/PlaidSyncEngine.swift"
+          ! grep -q "contains(metadata.accountId)" "Budgeting App/PlaidSyncEngine.swift"
           git diff --check
       - name: Commit fix
         run: |
@@ -91,6 +53,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "TIM-80: avoid portfolio account resolver shadowing"
+            git commit -m "TIM-80: unwrap Plaid holding account ID"
             git push
           fi
