@@ -290,7 +290,10 @@ private extension BudgetModel {
         }
 
         let groupedPlaidHoldings = Dictionary(grouping: displayableHoldings) { holding in
-            let securityIdentity = holding.securityId ?? normalizedTicker(holding.ticker) ?? holding.name
+            let normalizedSecurityId = holding.securityId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let securityIdentity = normalizedSecurityId.isEmpty
+                ? (normalizedTicker(holding.ticker) ?? holding.name)
+                : normalizedSecurityId
             return "\(holding.accountId)|\(securityIdentity)"
         }
 
@@ -303,8 +306,8 @@ private extension BudgetModel {
             let portfolioAccountId = portfolioAccountId(forPlaidExternalAccountId: first.accountId)
             let existing = holdings.first { holding in
                 guard holding.ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == ticker else { return false }
-                if let securityId = first.securityId,
-                   holding.plaidMetadata?.securityId == securityId,
+                let securityId = first.securityId
+                if holding.plaidMetadata?.securityId == securityId,
                    holding.plaidMetadata?.accountId == first.accountId {
                     return true
                 }
