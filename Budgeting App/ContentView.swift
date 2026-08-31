@@ -911,14 +911,7 @@ struct ContentView: View {
                 Task { await refreshHomeWatchlist() }
             }
             .task(id: selectedTab) {
-                switch selectedTab {
-                case .home:
-                    await refreshHomeDashboard()
-                case .calendar:
-                    await refreshCalendarFromPlaid(force: false)
-                case .budget, .margin:
-                    break
-                }
+                await refreshSelectedTabIfNeeded()
             }
             .onReceive(budget.objectWillChange.debounce(for: .milliseconds(800), scheduler: RunLoop.main)) { _ in
                 scheduleBudgetNotifications()
@@ -2069,6 +2062,18 @@ struct ContentView: View {
         guard let shifted = calendar.date(byAdding: component, value: offset, to: calendarFocusDate) else { return }
         withAnimation(.snappy) {
             calendarFocusDate = shifted
+        }
+    }
+
+    @MainActor
+    private func refreshSelectedTabIfNeeded() async {
+        switch selectedTab {
+        case .home:
+            await refreshHomeDashboard()
+        case .calendar:
+            await refreshCalendarFromPlaid(force: false)
+        case .budget, .margin:
+            break
         }
     }
 
