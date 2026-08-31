@@ -182,6 +182,7 @@ struct ContentView: View {
     @State private var selectedCalendarDay: CalendarDaySelection?
     @State private var selectedCalendarEventList: CalendarDaySelection?
     @State private var visibleCalendarWeekStart: Date?
+    @State private var calendarMonthAnchor: Date = Date()
     @State private var calendarFocusDate: Date = Date()
     @State private var isCalendarSyncing = false
     @State private var calendarSyncStatus: String?
@@ -893,7 +894,7 @@ struct ContentView: View {
             .onChange(of: budget.recurringPayments) { _, _ in
                 scheduleCalendarEventCacheRebuild()
             }
-            .onChange(of: visibleCalendarWeekStart) { _, _ in
+            .onChange(of: calendarMonthAnchor) { _, _ in
                 scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: calendarFocusDate) { _, _ in
@@ -1547,7 +1548,11 @@ struct ContentView: View {
         .padding(.bottom, 0)
         .background(backgroundView)
         .onChange(of: calendarViewMode) { oldValue, newValue in
-            guard oldValue != newValue, newValue != .month else { return }
+            guard oldValue != newValue else { return }
+            if newValue == .month {
+                calendarMonthAnchor = calendarFocusDate
+                return
+            }
             if Calendar.current.isDate(visibleCalendarMonth, equalTo: Date(), toGranularity: .month) {
                 calendarFocusDate = Date()
             } else {
@@ -1564,6 +1569,10 @@ struct ContentView: View {
         return totalBank + homePortfolioNetValue - totalCredit
     }
 
+    private var calendarNetFlow: Double {
+        calendarVisibleIncome - calendarVisibleOutflow
+    }
+
     private var calendarSummarySection: some View {
         GlassCard(padding: 12) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1573,10 +1582,10 @@ struct ContentView: View {
                     Spacer(minLength: 8)
 
                     calendarMetricPill(
-                        title: "Net Worth",
-                        value: calendarNetWorth,
-                        tint: .mint,
-                        systemImage: "chart.line.uptrend.xyaxis"
+                        title: "Net Flow",
+                        value: calendarNetFlow,
+                        tint: calendarNetFlow >= 0 ? .green : .red,
+                        systemImage: "arrow.left.arrow.right.circle.fill"
                     )
                 }
 
@@ -1676,60 +1685,205 @@ struct ContentView: View {
 
     private var recurringCalendarSection: some View {
         GeometryReader { proxy in
-            ScrollViewReader { scrollProxy in
-                ZStack(alignment: .top) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(calendarWeeks) { week in
-                                calendarWeekRow(
-                                    week,
-                                    availableWidth: proxy.size.width
-                                )
-                                .id(week.startDate)
-                            }
-                        }
-                        .padding(.top, 74)
-                        .scrollTargetLayout()
-                    }
-                    .scrollPosition(id: $visibleCalendarWeekStart, anchor: .top)
-                    .onAppear {
-                        visibleCalendarWeekStart = currentCalendarWeekStart
-                        DispatchQueue.main.async {
-                            scrollProxy.scrollTo(currentCalendarWeekStart, anchor: .top)
-                        }
-                    }
+            ScrollView {
+                VStack(spacing: 0) {
+                    calendarMonthNavigation
+                    calendarWeekdayHeader
 
-                    VStack(spacing: 0) {
-                        calendarWeekdayHeader
-
-                        Button {
-                            visibleCalendarWeekStart = currentCalendarWeekStart
-                            withAnimation(.snappy) {
-                                scrollProxy.scrollTo(currentCalendarWeekStart, anchor: .top)
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(visibleCalendarMonth, format: .dateTime.month(.wide).year())
-                                Image(systemName: "chevron.down")
-                                    .font(.caption.weight(.bold))
-                            }
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(.thinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            )
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7),
+                        spacing: 0
+                    ) {
+                        ForEach(Array(calendarGridDates(for: visibleCalendarMonth).enumerated()), id: \.offset) { _, date in
+                            calendarMonthDayCell(for: date)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.top, 28)
                     }
+                    .padding(.horizontal, 6)
+
+                    HStack(spacing: 12) {
+                        Label("Outflow", systemImage: "arrow.up.right")
+                            .foregroundStyle(.red)
+                        Label("Income", systemImage: "arrow.down.left")
+                            .foregroundStyle(.green)
+                        Label("Card due", systemImage: "creditcard.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, contentBottomPadding)
                 }
+                .frame(minHeight: proxy.size.height, alignment: .top)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private var calendarMonthNavigation: some View {
+        HStack(spacing: 12) {
+            Button { shiftVisibleCalendarMonth(by: -1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            VStack(spacing: 1) {
+                Text(visibleCalendarMonth, format: .dateTime.month(.wide).year())
+                    .font(.subheadline.weight(.bold))
+                Text("Daily cash flow")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+
+            Button { shiftVisibleCalendarMonth(by: 1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private func shiftVisibleCalendarMonth(by offset: Int) {
+        guard let shifted = Calendar.current.date(byAdding: .month, value: offset, to: visibleCalendarMonth) else { return }
+        withAnimation(.snappy) {
+            calendarMonthAnchor = shifted
+        }
+    }
+
+    private struct CalendarMonthDaySummary {
+        let outflow: Double
+        let income: Double
+        let itemCount: Int
+        let dueCount: Int
+        let transferCount: Int
+    }
+
+    private func calendarMonthDaySummary(for date: Date) -> CalendarMonthDaySummary {
+        let events = (calendarEventCache[calendarDayKey(for: date)] ?? []).filter(calendarEventPassesFilters)
+        let outflow = events
+            .filter { !$0.isIncome && !$0.isTransfer && !$0.isCreditDue }
+            .reduce(0) { $0 + $1.amount }
+        let income = events
+            .filter { $0.isIncome && !$0.isTransfer && !$0.isCreditDue }
+            .reduce(0) { $0 + $1.amount }
+        return CalendarMonthDaySummary(
+            outflow: outflow,
+            income: income,
+            itemCount: events.count,
+            dueCount: events.filter(\.isCreditDue).count,
+            transferCount: events.filter(\.isTransfer).count
+        )
+    }
+
+    private func calendarMonthDayCell(for date: Date?) -> some View {
+        Group {
+            if let date {
+                let summary = calendarMonthDaySummary(for: date)
+                let calendar = Calendar.current
+                let isToday = calendar.isDateInToday(date)
+                let isVisibleMonth = calendar.isDate(date, equalTo: visibleCalendarMonth, toGranularity: .month)
+
+                Button {
+                    selectedCalendarEventList = CalendarDaySelection(date: date)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 2) {
+                            Text("\(calendar.component(.day, from: date))")
+                                .font(.subheadline.weight(isToday ? .bold : .semibold))
+                                .foregroundStyle(isToday ? appAccent : (isVisibleMonth ? Color.primary : Color.secondary.opacity(0.45)))
+                            Spacer(minLength: 0)
+                            if isToday {
+                                Circle()
+                                    .fill(appAccent)
+                                    .frame(width: 5, height: 5)
+                            }
+                        }
+
+                        if isVisibleMonth {
+                            if summary.outflow > 0 {
+                                Text("-\(calendarMonthCompactAmount(summary.outflow))")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.red)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.58)
+                            }
+                            if summary.income > 0 {
+                                Text("+\(calendarMonthCompactAmount(summary.income))")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.green)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.58)
+                            }
+
+                            Spacer(minLength: 1)
+
+                            HStack(spacing: 3) {
+                                if summary.dueCount > 0 {
+                                    Image(systemName: "creditcard.fill")
+                                        .foregroundStyle(.orange)
+                                }
+                                if summary.transferCount > 0 {
+                                    Image(systemName: "arrow.left.arrow.right")
+                                        .foregroundStyle(.cyan)
+                                }
+                                Spacer(minLength: 0)
+                                if summary.itemCount > 0 {
+                                    Text("\(summary.itemCount) tx")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.system(size: 8, weight: .semibold))
+                        } else {
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+                    .background(
+                        Rectangle()
+                            .fill(isToday ? appAccent.opacity(0.10) : Color(.secondarySystemGroupedBackground).opacity(isVisibleMonth ? 0.72 : 0.28))
+                            .overlay(
+                                Rectangle()
+                                    .stroke(isToday ? appAccent.opacity(0.45) : Color.primary.opacity(0.07), lineWidth: isToday ? 1.1 : 0.5)
+                            )
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(calendarMonthAccessibilityLabel(date: date, summary: summary))
+            } else {
+                Color.clear
+                    .frame(minHeight: 82)
             }
         }
+    }
+
+    private func calendarMonthCompactAmount(_ amount: Double) -> String {
+        if amount >= 1_000_000 {
+            return String(format: "$%.1fM", amount / 1_000_000)
+        }
+        if amount >= 1_000 {
+            return String(format: "$%.1fK", amount / 1_000)
+        }
+        return String(format: "$%.0f", amount)
+    }
+
+    private func calendarMonthAccessibilityLabel(date: Date, summary: CalendarMonthDaySummary) -> String {
+        var parts = [date.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+        if summary.outflow > 0 { parts.append("Outflow \(summary.outflow.formatted(.currency(code: "USD")))") }
+        if summary.income > 0 { parts.append("Income \(summary.income.formatted(.currency(code: "USD")))") }
+        if summary.dueCount > 0 { parts.append("\(summary.dueCount) card due") }
+        if summary.itemCount > 0 { parts.append("\(summary.itemCount) transactions") }
+        return parts.joined(separator: ", ")
     }
 
     private var calendarActionDate: Date {
@@ -1834,7 +1988,7 @@ struct ContentView: View {
         withAnimation(.snappy) {
             calendarFocusDate = now
             if calendarViewMode == .month {
-                visibleCalendarWeekStart = currentCalendarWeekStart
+                calendarMonthAnchor = now
             }
         }
         scheduleCalendarEventCacheRebuild()
@@ -2817,8 +2971,7 @@ struct ContentView: View {
     }
 
     private var visibleCalendarMonth: Date {
-        guard let visibleCalendarWeekStart else { return currentCalendarMonth }
-        return monthForCalendarWeek(startingAt: visibleCalendarWeekStart)
+        Self.startOfMonth(for: calendarMonthAnchor)
     }
 
     private var visibleCalendarMonthInterval: DateInterval? {
@@ -2896,11 +3049,7 @@ struct ContentView: View {
         var dates: [Date?] = []
         var cursor = firstWeekInterval.start
         while cursor < lastWeekInterval.end {
-            if calendar.isDate(cursor, equalTo: month, toGranularity: .month) {
-                dates.append(cursor)
-            } else {
-                dates.append(nil)
-            }
+            dates.append(cursor)
             guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
             cursor = next
         }
@@ -3146,22 +3295,14 @@ struct ContentView: View {
     }
 
     private var calendarCacheDates: [Date] {
-        let calendar = Calendar.current
-        let anchor = calendarViewMode == .month ? visibleCalendarMonth : calendarFocusDate
-        guard let month = calendar.dateInterval(of: .month, for: anchor),
-              let start = calendar.date(byAdding: .month, value: -1, to: month.start),
-              let end = calendar.date(byAdding: .month, value: 2, to: month.start) else {
-            return [calendarDayKey(for: anchor)]
+        switch calendarViewMode {
+        case .month:
+            return calendarGridDates(for: visibleCalendarMonth).compactMap { $0 }
+        case .week:
+            return focusedCalendarWeekDays
+        case .day:
+            return [calendarDayKey(for: calendarFocusDate)]
         }
-
-        var dates: [Date] = []
-        var cursor = calendar.startOfDay(for: start)
-        while cursor < end {
-            dates.append(cursor)
-            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = next
-        }
-        return dates
     }
 
     private func rebuildCalendarEventCache() {
@@ -3186,14 +3327,16 @@ struct ContentView: View {
         calendarEventCache[calendarDayKey(for: date)] ?? calendarEvents(for: date)
     }
 
+    private func calendarEventPassesFilters(_ event: CalendarEventItem) -> Bool {
+        if event.portfolioTransaction != nil { return calendarShowPortfolio }
+        if event.isCreditDue { return calendarShowCreditDue }
+        if event.cashTransfer != nil { return calendarShowTransfers }
+        if event.isIncome { return calendarShowIncome }
+        return calendarShowExpenses
+    }
+
     private func filteredCalendarEvents(for date: Date) -> [CalendarEventItem] {
-        cachedCalendarEvents(for: date).filter { event in
-            if event.portfolioTransaction != nil { return calendarShowPortfolio }
-            if event.isCreditDue { return calendarShowCreditDue }
-            if event.cashTransfer != nil { return calendarShowTransfers }
-            if event.isIncome { return calendarShowIncome }
-            return calendarShowExpenses
-        }
+        cachedCalendarEvents(for: date).filter(calendarEventPassesFilters)
     }
 
     private func calendarEvents(for date: Date) -> [CalendarEventItem] {
