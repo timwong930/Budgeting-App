@@ -183,6 +183,8 @@ struct ContentView: View {
     @State private var selectedCalendarEventList: CalendarDaySelection?
     @State private var visibleCalendarWeekStart: Date?
     @State private var calendarFocusDate: Date = Date()
+    @State private var isCalendarSyncing = false
+    @State private var calendarSyncStatus: String?
     @AppStorage("calendar.viewMode") private var calendarViewMode: CalendarViewMode = .month
     @AppStorage("calendar.showExpenses") private var calendarShowExpenses = true
     @AppStorage("calendar.showIncome") private var calendarShowIncome = true
@@ -894,8 +896,14 @@ struct ContentView: View {
                 Task { await refreshHomeWatchlist() }
             }
             .task(id: selectedTab) {
-                guard selectedTab == .home else { return }
-                await refreshHomeDashboard()
+                switch selectedTab {
+                case .home:
+                    await refreshHomeDashboard()
+                case .calendar:
+                    await refreshCalendarFromPlaid(force: false)
+                case .budget, .margin:
+                    break
+                }
             }
             .onReceive(budget.objectWillChange.debounce(for: .milliseconds(800), scheduler: RunLoop.main)) { _ in
                 scheduleBudgetNotifications()
@@ -1755,6 +1763,36 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button {
+                    Task { await refreshCalendarFromPlaid(force: true) }
+                } label: {
+                    if isCalendarSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 28, height: 28)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isCalendarSyncing)
+                .accessibilityLabel("Sync calendar transactions")
+            }
+
+            if let calendarSyncStatus {
+                HStack(spacing: 5) {
+                    Image(systemName: calendarSyncStatus.hasPrefix("Sync failed") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(calendarSyncStatus.hasPrefix("Sync failed") ? Color.orange : Color.green)
+                    Text(calendarSyncStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
             }
 
             if calendarViewMode != .month {
@@ -1827,10 +1865,11 @@ struct ContentView: View {
 
     private var focusedCalendarWeekDays: [Date] {
         let calendar = Calendar.current
-        guard let interval = calendar.dateInterval(of: .weekOfYear, for: calendarFocusDate) else {
-            return [calendar.startOfDay(for: calendarFocusDate)]
-        }
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: interval.start) }
+        let focusedDay = calendar.startOfDay(for: calendarFocusDate)
+        let weekday = calendar.component(.weekday, from: focusedDay)
+        let daysSinceSunday = max(weekday - 1, 0)
+        let sunday = calendar.date(byAdding: .day, value: -daysSinceSunday, to: focusedDay) ?? focusedDay
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: sunday) }
     }
 
     private func shiftCalendarFocus(by offset: Int) {
@@ -1842,18 +1881,152 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
+    private func refreshCalendarFromPlaid(force: Bool) async {
+        guard !isCalendarSyncing else { return }
+        isCalendarSyncing = true
+        defer { isCalendarSyncing = false }
+
+        do {
+            _ = try await PlaidSyncCoordinator.shared.sync(budget: budget, force: force)
+            rebuildCalendarEventCache()
+            if let lastSync = PlaidSyncCoordinator.shared.lastSuccessfulSyncAt {
+                calendarSyncStatus = "Synced " + lastSync.formatted(date: .omitted, time: .shortened)
+            }
+        } catch {
+            calendarSyncStatus = "Sync failed — tap refresh to retry"
+        }
+    }
+
     private var calendarWeekAgendaSection: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(focusedCalendarWeekDays, id: \.self) { day in
-                    calendarAgendaDayCard(for: day, showFullDate: false)
+            VStack(spacing: 10) {
+                GlassCard(padding: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(focusedCalendarWeekDays.enumerated()), id: \.element) { index, day in
+                            calendarWeekDayColumn(for: day)
+                            if index < focusedCalendarWeekDays.count - 1 {
+                                Divider()
+                            }
+                        }
+                    }
                 }
+
+                Text("Tap a day for the full transaction list.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 8)
             .padding(.top, 4)
             .padding(.bottom, contentBottomPadding)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private func calendarWeekDayColumn(for date: Date) -> some View {
+        let events = filteredCalendarEvents(for: date)
+        let visibleEvents = Array(events.prefix(4))
+        let hiddenCount = max(events.count - visibleEvents.count, 0)
+        let isToday = Calendar.current.isDateInToday(date)
+
+        return VStack(spacing: 6) {
+            Button {
+                calendarFocusDate = date
+                withAnimation(.snappy) { calendarViewMode = .day }
+            } label: {
+                VStack(spacing: 2) {
+                    Text(date.formatted(.dateTime.weekday(.abbreviated)))
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(date.formatted(.dateTime.day()))
+                        .font(.subheadline.weight(isToday ? .bold : .semibold))
+                        .foregroundStyle(isToday ? appAccent : Color.primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(isToday ? appAccent.opacity(0.10) : Color.clear)
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+
+            if visibleEvents.isEmpty {
+                Circle()
+                    .fill(Color.secondary.opacity(0.20))
+                    .frame(width: 5, height: 5)
+                    .padding(.top, 10)
+            } else {
+                ForEach(visibleEvents) { event in
+                    calendarWeekEventTile(event)
+                }
+            }
+
+            if hiddenCount > 0 {
+                Button("+\(hiddenCount)") {
+                    selectedCalendarEventList = CalendarDaySelection(date: date)
+                }
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 310, alignment: .top)
+        .padding(.horizontal, 2)
+        .background(isToday ? appAccent.opacity(0.035) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedCalendarEventList = CalendarDaySelection(date: date)
+        }
+    }
+
+    private func calendarWeekEventTile(_ event: CalendarEventItem) -> some View {
+        Button {
+            openCalendarEvent(event)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(event.tint)
+                    .frame(height: 3)
+                Image(systemName: event.iconName)
+                    .font(.caption2)
+                    .foregroundStyle(event.tint)
+                Text(event.name)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.62)
+                if event.amount > 0 {
+                    Text(calendarWeekAmountText(for: event))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(event.isIncome ? Color.green : Color.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .topLeading)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 5)
+            .background(event.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func calendarWeekAmountText(for event: CalendarEventItem) -> String {
+        let amount = event.amount
+        let compact: String
+        if amount >= 1_000_000 {
+            compact = String(format: "$%.1fM", amount / 1_000_000)
+        } else if amount >= 1_000 {
+            compact = String(format: "$%.1fK", amount / 1_000)
+        } else {
+            compact = String(format: "$%.0f", amount)
+        }
+        if event.isTransfer { return compact }
+        return (event.isIncome ? "+" : "-") + compact
     }
 
     private var calendarDayAgendaSection: some View {
