@@ -11103,7 +11103,7 @@ struct CreditAccountsView: View {
                     } else {
                         ForEach($budget.creditAccounts) { $account in
                             NavigationLink {
-                                EditCreditAccountView(account: $account)
+                                CreditAccountLedgerView(account: $account, budget: budget)
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(account.name)
@@ -11699,7 +11699,7 @@ struct BankAccountsView: View {
                     } else {
                         ForEach($budget.bankAccounts) { $account in
                             NavigationLink {
-                                EditBankAccountView(account: $account)
+                                BankAccountLedgerView(account: $account, budget: budget)
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(account.name)
