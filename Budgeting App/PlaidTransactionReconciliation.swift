@@ -118,6 +118,12 @@ private extension BudgetModel {
             if let bestMatch {
                 let outflow = transaction.amount > 0 ? transaction : bestMatch.transaction
                 let inflow = transaction.amount < 0 ? transaction : bestMatch.transaction
+
+                // Clean up rows imported by the pre-TIM-82 sign-first behavior before
+                // recording the pair in the transfer ledger.
+                _ = removeReconciledPlaidTransaction(id: transaction.id)
+                _ = removeReconciledPlaidTransaction(id: bestMatch.transaction.id)
+
                 upsertPlaidTransfer(
                     outflow: outflow,
                     inflow: inflow,
@@ -127,8 +133,10 @@ private extension BudgetModel {
                 result.handledTransactionIds.insert(transaction.id)
                 result.handledTransactionIds.insert(bestMatch.transaction.id)
                 result.reconciledTransactions += 2
-                clearPlaidReviewItems(sourceIds: [transaction.id, bestMatch.transaction.id])
             } else {
+                // Do not let a known transfer/payment remain counted as ordinary income
+                // or spending just because the matching account-side delta is absent.
+                _ = removeReconciledPlaidTransaction(id: transaction.id)
                 let added = upsertPlaidReviewItem(
                     sourceId: transaction.id,
                     title: transactionDisplayName(transaction),
@@ -168,7 +176,22 @@ private extension BudgetModel {
     }
 
     func isStrongTransferOrPayment(_ transaction: PlaidSyncedTransaction, accountType: PlaidAccountType) -> Bool {
-        isLikelyBankTransfer(transaction) || isLikelyCreditCardPaymentForReconciliation(transaction)
+        if isLikelyBankTransfer(transaction) {
+            return true
+        }
+        if accountType == .credit {
+            return isLikelyCreditCardPaymentForReconciliation(transaction)
+        }
+
+        // On depository accounts require explicit card-payment language. This avoids
+        // treating ordinary merchant autopay charges as credit-card transfers.
+        let category = (transaction.category ?? "").lowercased()
+        let text = transactionSearchText(transaction)
+        return category.contains("loan_payment") ||
+            category.contains("loan payment") ||
+            text.contains("credit card payment") ||
+            text.contains("card payment") ||
+            text.contains("payment thank you")
     }
 
     func isLikelyBankTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
@@ -395,10 +418,11 @@ private extension BudgetModel {
     func pendingExpenseReplacementIndex(for transaction: PlaidSyncedTransaction) -> Int? {
         guard !transaction.pending else { return nil }
         return expenses.firstIndex { existing in
-            guard existing.plaidMetadata?.transactionId != nil,
+            let wasPending = existing.plaidMetadata?.isPending == true || existing.note == "Plaid pending transaction"
+            guard wasPending,
+                  existing.plaidMetadata?.transactionId != nil,
                   existing.plaidMetadata?.transactionId != transaction.id,
                   existing.plaidMetadata?.accountId == transaction.accountId,
-                  existing.note == "Plaid pending transaction",
                   abs(existing.amount - abs(transaction.amount)) < 0.01,
                   dayDistance(existing.date, transaction.date) <= 3 else {
                 return false
@@ -570,7 +594,8 @@ private extension BudgetModel {
             }
         }
 
-        if namesLikelyMatchForReconciliation(existing.name, imported.name) { score += 0.20 }
+        guard namesLikelyMatchForReconciliation(existing.name, imported.name) else { return nil }
+        score += 0.20
         return score
     }
 
@@ -610,7 +635,8 @@ private extension BudgetModel {
             }
         }
 
-        if namesLikelyMatchForReconciliation(existing.name, imported.name) { score += 0.20 }
+        guard namesLikelyMatchForReconciliation(existing.name, imported.name) else { return nil }
+        score += 0.20
         return score
     }
 
@@ -671,7 +697,8 @@ private extension BudgetModel {
             importedAt: importedAt ?? syncedAt,
             lastSyncedAt: syncedAt,
             status: status,
-            matchConfidence: matchConfidence
+            matchConfidence: matchConfidence,
+            isPending: transaction.pending
         )
     }
 
