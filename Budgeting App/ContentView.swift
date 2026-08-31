@@ -1912,7 +1912,7 @@ struct ContentView: View {
                     }
                 }
 
-                Text("Tap a day for the full transaction list.")
+                Text("Tap a day header for the full day view.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1977,10 +1977,6 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, minHeight: 310, alignment: .top)
         .padding(.horizontal, 2)
         .background(isToday ? appAccent.opacity(0.035) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            selectedCalendarEventList = CalendarDaySelection(date: date)
-        }
     }
 
     private func calendarWeekEventTile(_ event: CalendarEventItem) -> some View {
