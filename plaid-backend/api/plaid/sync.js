@@ -176,14 +176,18 @@ async function fetchAllInvestmentTransactions(client, item, accessToken) {
 
 function isProductUnavailable(error) {
   const code = error?.response?.data?.error_code;
-  return [
+  if ([
     "PRODUCT_NOT_READY",
     "PRODUCT_NOT_ENABLED",
     "PRODUCTS_NOT_SUPPORTED",
     "NO_INVESTMENT_ACCOUNTS",
     "NO_LIABILITY_ACCOUNTS",
     "ACCESS_NOT_GRANTED"
-  ].includes(code);
+  ].includes(code)) {
+    return true;
+  }
+  const message = String(error?.response?.data?.error_message || error?.message || "").toLowerCase();
+  return message.includes("products are not supported") || message.includes("product is not supported");
 }
 function isoDate(date) {
   return date.toISOString().slice(0, 10);

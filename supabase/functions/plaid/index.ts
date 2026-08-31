@@ -734,7 +734,12 @@ function isProductUnavailable(error: unknown, productName: string): boolean {
   }
   const message = error.message.toLowerCase();
   const normalizedProduct = productName.toLowerCase().replace("product_", "");
-  return message.includes("does not have user consent") && message.includes(normalizedProduct);
+  const mentionsProduct = message.includes(normalizedProduct);
+  return mentionsProduct && (
+    message.includes("does not have user consent") ||
+    message.includes("products are not supported") ||
+    message.includes("product is not supported")
+  );
 }
 function encode(value: string): Uint8Array {
   return new TextEncoder().encode(value);
