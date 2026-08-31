@@ -880,7 +880,7 @@ struct ContentView: View {
             }
     }
 
-    private var observedTabContent: some View {
+    private var financialObservedTabContent: some View {
         lifecycleTabContent
             .onChange(of: budget.expenses) { _, _ in
                 updateMonthlyData()
@@ -905,6 +905,10 @@ struct ContentView: View {
             .onChange(of: budget.recurringPayments) { _, _ in
                 scheduleCalendarEventCacheRebuild()
             }
+    }
+
+    private var observedTabContent: some View {
+        financialObservedTabContent
             .onChange(of: calendarMonthAnchor) { _, _ in
                 scheduleCalendarEventCacheRebuild()
             }
@@ -932,7 +936,7 @@ struct ContentView: View {
             }
     }
 
-    private var presentedContent: some View {
+    private var setupPresentedContent: some View {
         NavigationStack {
             observedTabContent
         }
@@ -1007,6 +1011,10 @@ struct ContentView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
+    }
+
+    private var transactionPresentedContent: some View {
+        setupPresentedContent
         .sheet(item: $expenseDraft) { draft in
             AddExpenseView(
                 budget: budget,
@@ -1115,6 +1123,10 @@ struct ContentView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
+    }
+
+    private var presentedContent: some View {
+        transactionPresentedContent
         .sheet(isPresented: $showingAddCashTransfer) {
             CashTransferEditorView(budget: budget, selectedDate: selectedTab == .calendar ? calendarActionDate : selectedMonth)
                 .presentationDetents([.medium])
