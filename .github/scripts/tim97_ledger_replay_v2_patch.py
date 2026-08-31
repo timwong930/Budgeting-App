@@ -3,8 +3,8 @@ from pathlib import Path
 path = Path("supabase/functions/plaid/index.ts")
 text = path.read_text()
 
-old_check = '      if (row.event_type === "cursor-replay-complete") return false;'
-new_check = '      if (row.event_type === "ledger-replay-v2-complete") return false;'
+old_check = '    if (row.event_type === "cursor-replay-complete") return false;'
+new_check = '    if (row.event_type === "ledger-replay-v2-complete") return false;'
 if text.count(old_check) != 1:
     raise SystemExit(f"Expected one replay-complete guard, found {text.count(old_check)}")
 text = text.replace(old_check, new_check)
