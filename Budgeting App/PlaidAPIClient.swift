@@ -273,6 +273,7 @@ final class PlaidSyncCoordinator {
                 configuration: PlaidBackendConfiguration(backendURL: backendURL),
                 syncKey: syncKey
             ).sync()
+            budget.preparePlaidPendingTransactionReplacements(payload)
             let result = budget.applyPlaidSyncReconciled(payload)
             budget.saveNow()
             defaults.set(Date(), forKey: Self.lastSuccessfulSyncKey)
