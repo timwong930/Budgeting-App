@@ -1,0 +1,237 @@
+name: TIM-97 robust cursor replay recovery
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+    paths:
+      - .github/workflows/tim-97-cursor-replay-recovery-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+
+      - name: Patch cursor recovery atomically
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          edge_path = Path("supabase/functions/plaid/index.ts")
+          edge = edge_path.read_text()
+
+          sync_item_pattern = re.compile(
+              r'    const accessToken = await decryptToken\(item\.access_token_cipher\);\n'
+              r'    const institutionName = await refreshInstitutionName\(item, accessToken\);\n'
+              r'    const \[accounts, transactions, creditLiabilities, investments\] = await Promise\.all\(\[\n'
+              r'      fetchAccounts\(item, accessToken, institutionName\),\n'
+              r'      syncTransactions\(item, accessToken\),\n'
+              r'      fetchLiabilities\(item, accessToken\),\n'
+              r'      fetchInvestments\(item, accessToken\)\n'
+              r'    \]\);\n'
+              r'    await logSync\(item\.item_id, "sync", "Plaid sync completed"\);\n'
+              r'    return \{\n'
+              r'      accounts,\n'
+              r'      transactions,\n'
+              r'      creditLiabilities,\n'
+              r'      holdings: investments\.holdings,\n'
+              r'      investmentTransactions: investments\.transactions\n'
+              r'    \};'
+          )
+          sync_item_replacement = (
+              '    const accessToken = await decryptToken(item.access_token_cipher);\n'
+              '    const institutionName = await refreshInstitutionName(item, accessToken);\n'
+              '    const replayTransactions = await shouldReplayTransactionsAfterDiscardedSync(item.item_id);\n'
+              '    const [accounts, transactionResult, creditLiabilities, investments] = await Promise.all([\n'
+              '      fetchAccounts(item, accessToken, institutionName),\n'
+              '      syncTransactions(item, accessToken, replayTransactions),\n'
+              '      fetchLiabilities(item, accessToken),\n'
+              '      fetchInvestments(item, accessToken)\n'
+              '    ]);\n'
+              '    if (transactionResult.nextCursor) {\n'
+              '      await updateCursor(item.item_id, transactionResult.nextCursor);\n'
+              '      if (replayTransactions) {\n'
+              '        await logSync(\n'
+              '          item.item_id,\n'
+              '          "cursor-replay-complete",\n'
+              '          "Replayed transaction history after a previously discarded Plaid sync"\n'
+              '        );\n'
+              '      }\n'
+              '    }\n'
+              '    await logSync(item.item_id, "sync", "Plaid sync completed");\n'
+              '    return {\n'
+              '      accounts,\n'
+              '      transactions: transactionResult.transactions,\n'
+              '      creditLiabilities,\n'
+              '      holdings: investments.holdings,\n'
+              '      investmentTransactions: investments.transactions\n'
+              '    };'
+          )
+          edge, count = sync_item_pattern.subn(sync_item_replacement, edge)
+          if count != 1:
+              raise SystemExit(f"Expected one edge syncItem replacement, got {count}")
+
+          tx_pattern = re.compile(
+              r'async function syncTransactions\(item: PlaidItem, accessToken: string\): Promise<JsonRecord\[]> \{.*?\n\}\nasync function fetchLiabilities',
+              re.S,
+          )
+          tx_replacement = '''async function syncTransactions(
+            item: PlaidItem,
+            accessToken: string,
+            replayFromStart = false
+          ): Promise<{ transactions: JsonRecord[]; nextCursor: string | null }> {
+            try {
+              let cursor = replayFromStart ? undefined : item.transaction_cursor || undefined;
+              let hasMore = true;
+              const transactions: JsonRecord[] = [];
+
+              while (hasMore) {
+                const data = await plaidFetch("/transactions/sync", {
+                  access_token: accessToken,
+                  cursor,
+                  count: 500
+                });
+
+                transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
+                cursor = stringValue(data.next_cursor) || undefined;
+                hasMore = Boolean(data.has_more);
+              }
+
+              return { transactions, nextCursor: cursor || null };
+            } catch (error) {
+              if (isProductUnavailable(error, "transactions")) {
+                const message = error instanceof Error ? error.message : "Transactions unavailable";
+                await logSync(item.item_id, "transactions-unavailable", message);
+                return { transactions: [], nextCursor: null };
+              }
+              throw error;
+            }
+          }
+          async function fetchLiabilities'''
+          edge, count = tx_pattern.subn(tx_replacement, edge)
+          if count != 1:
+              raise SystemExit(f"Expected one edge syncTransactions replacement, got {count}")
+
+          cursor_anchor = 'async function updateCursor(itemId: string, cursor: string): Promise<void> {'
+          replay_helper = '''async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promise<boolean> {
+            const { data, error } = await supabase()
+              .from("plaid_sync_logs")
+              .select("event_type,message,created_at")
+              .eq("item_id", itemId)
+              .order("created_at", { ascending: false })
+              .limit(50);
+            if (error) throw error;
+
+            for (const row of data || []) {
+              if (row.event_type === "cursor-replay-complete") return false;
+              if (
+                row.event_type === "error" &&
+                String(row.message || "").toLowerCase().includes("products are not supported")
+              ) {
+                return true;
+              }
+            }
+            return false;
+          }
+
+          async function updateCursor(itemId: string, cursor: string): Promise<void> {'''
+          if edge.count(cursor_anchor) != 1:
+              raise SystemExit(f"Expected one edge cursor anchor, got {edge.count(cursor_anchor)}")
+          edge = edge.replace(cursor_anchor, replay_helper)
+          edge_path.write_text(edge)
+
+          node_path = Path("plaid-backend/api/plaid/sync.js")
+          node = node_path.read_text()
+
+          node_item_pattern = re.compile(
+              r'(    const \[accounts, transactionResult, creditLiabilities, investments\] = await Promise\.all\(\[\n'
+              r'      fetchAccounts\(client, item, accessToken, institutionName\),\n'
+              r'      syncTransactions\(client, item, accessToken\),\n'
+              r'      fetchLiabilities\(client, item, accessToken\),\n'
+              r'      fetchInvestments\(client, item, accessToken\)\n'
+              r'    \]\);\n)'
+              r'    await logSync\(item\.item_id, "sync", "Plaid sync completed"\);'
+          )
+          node_item_replacement = (
+              r'\1'
+              '    if (transactionResult.nextCursor) {\n'
+              '      await updateCursor(item.item_id, transactionResult.nextCursor);\n'
+              '    }\n'
+              '    await logSync(item.item_id, "sync", "Plaid sync completed");'
+          )
+          node, count = node_item_pattern.subn(node_item_replacement, node)
+          if count != 1:
+              raise SystemExit(f"Expected one legacy syncItem replacement, got {count}")
+
+          node_tx_pattern = re.compile(
+              r'async function syncTransactions\(client, item, accessToken\) \{.*?\n\}\nasync function fetchLiabilities',
+              re.S,
+          )
+          node_tx_replacement = '''async function syncTransactions(client, item, accessToken) {
+            try {
+              let cursor = item.transaction_cursor || undefined;
+              let hasMore = true;
+              const transactions = [];
+
+              while (hasMore) {
+                const response = await client.transactionsSync({
+                  access_token: accessToken,
+                  cursor,
+                  count: 500
+                });
+                const data = response.data;
+                transactions.push(...(data.added || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...(data.modified || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...(data.removed || []).map((tx) =>
+                  normalizeRemovedTransaction(tx.transaction_id, tx.account_id, item.item_id)
+                ));
+                cursor = data.next_cursor;
+                hasMore = Boolean(data.has_more);
+              }
+
+              return { transactions, nextCursor: cursor || null };
+            } catch (error) {
+              if (isProductUnavailable(error)) {
+                await logSync(item.item_id, "transactions-unavailable", error.message);
+                return { transactions: [], nextCursor: null };
+              }
+              throw error;
+            }
+          }
+          async function fetchLiabilities'''
+          node, count = node_tx_pattern.subn(node_tx_replacement, node)
+          if count != 1:
+              raise SystemExit(f"Expected one legacy syncTransactions replacement, got {count}")
+          node_path.write_text(node)
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Validate backend changes
+        shell: bash
+        run: |
+          deno check --no-lock --config supabase/functions/plaid/deno.json supabase/functions/plaid/index.ts
+          node --check plaid-backend/api/plaid/link-token.js
+          node --check plaid-backend/api/plaid/sync.js
+
+      - name: Commit validated changes and remove temporary workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/tim-97-cursor-replay-recovery.yml
+          rm -f .github/workflows/tim-97-cursor-replay-recovery-v2.yml
+          rm -f supabase/functions/plaid/deno.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-97 recover discarded Plaid transaction history safely"
+          git push origin HEAD:timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
