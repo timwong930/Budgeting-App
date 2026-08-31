@@ -543,6 +543,7 @@ function normalizeTransaction(transaction: JsonRecord, itemId: string): JsonReco
     amount: numberOrZero(transaction.amount),
     date: stringValue(transaction.date),
     pending: Boolean(transaction.pending),
+    pendingTransactionId: stringValue(transaction.pending_transaction_id),
     category: stringValue(pfc?.primary) || stringValue(category),
     removed: false
   };
@@ -558,6 +559,7 @@ function normalizeRemovedTransaction(transaction: JsonRecord, itemId: string): J
     amount: 0,
     date: new Date().toISOString(),
     pending: false,
+    pendingTransactionId: null,
     category: null,
     removed: true
   };

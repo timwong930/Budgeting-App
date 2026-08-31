@@ -22,6 +22,7 @@ function normalizeTransaction(transaction, itemId, removed = false) {
     amount: numberOrZero(transaction.amount),
     date: transaction.date,
     pending: Boolean(transaction.pending),
+    pendingTransactionId: transaction.pending_transaction_id || null,
     category: transaction.personal_finance_category?.primary || transaction.category?.[0] || null,
     removed
   };
@@ -37,6 +38,7 @@ function normalizeRemovedTransaction(transactionId, accountId, itemId) {
     amount: 0,
     date: new Date().toISOString(),
     pending: false,
+    pendingTransactionId: null,
     category: null,
     removed: true
   };
