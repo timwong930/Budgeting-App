@@ -34,3 +34,5 @@ jobs:
           git add 'Budgeting App/ContentView.swift'
           git commit -m 'TIM-95: add Budget quick actions'
           git push origin HEAD:feature/tim-95-calendar-redesign
+
+# retry: robust budget snapshot anchor
