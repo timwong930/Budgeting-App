@@ -241,8 +241,12 @@ final class PlaidSyncCoordinator {
     private static let backendURLKey = "plaid.backendURL"
     private static let lastSuccessfulSyncKey = "plaid.lastSuccessfulSyncAt"
     private static let lastSyncErrorKey = "plaid.lastSyncError"
-    private let automaticSyncInterval: TimeInterval = 15 * 60
+    private let automaticSyncInterval: TimeInterval = 5 * 60
     private var isSyncing = false
+
+    var lastSuccessfulSyncAt: Date? {
+        UserDefaults.standard.object(forKey: Self.lastSuccessfulSyncKey) as? Date
+    }
 
     private init() {}
 
