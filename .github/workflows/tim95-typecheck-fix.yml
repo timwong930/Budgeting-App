@@ -1,0 +1,34 @@
+name: TIM-95 Typecheck Fix
+
+on:
+  push:
+    branches:
+      - feature/tim-95-calendar-redesign
+    paths:
+      - .github/workflows/tim95-typecheck-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tim-95-calendar-redesign
+          fetch-depth: 0
+      - name: Apply type-check fix
+        run: python3 scripts/tim95_typecheck_fix.py
+      - name: Validate markers
+        run: |
+          grep -q 'await refreshSelectedTabIfNeeded()' 'Budgeting App/ContentView.swift'
+          grep -q 'private func refreshSelectedTabIfNeeded() async' 'Budgeting App/ContentView.swift'
+          ! grep -q 'switch selectedTab {' <(sed -n '900,925p' 'Budgeting App/ContentView.swift')
+      - name: Commit app changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/ContentView.swift'
+          git commit -m 'TIM-95: simplify selected tab task type checking'
+          git push origin HEAD:feature/tim-95-calendar-redesign
