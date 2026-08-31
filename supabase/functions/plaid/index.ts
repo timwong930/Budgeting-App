@@ -206,8 +206,8 @@ async function syncItem(item: PlaidItem): Promise<{
       if (replayTransactions) {
         await logSync(
           item.item_id,
-          "cursor-replay-complete",
-          "Replayed transaction history after a previously discarded Plaid sync"
+          "ledger-replay-v2-complete",
+          "Replayed transaction history after the account-ledger transfer visibility fix"
         );
       }
     }
@@ -480,7 +480,7 @@ async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promi
   if (error) throw error;
 
   for (const row of data || []) {
-    if (row.event_type === "cursor-replay-complete") return false;
+    if (row.event_type === "ledger-replay-v2-complete") return false;
     if (
       row.event_type === "error" &&
       String(row.message || "").toLowerCase().includes("products are not supported")
