@@ -1775,6 +1775,19 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
+                    resetCalendarToCurrentPeriod()
+                } label: {
+                    Label(calendarCurrentPeriodButtonTitle, systemImage: calendarViewMode == .week ? "calendar" : "location.fill")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .frame(height: 28)
+                        .background(appAccent.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(appAccent)
+                .accessibilityLabel(calendarCurrentPeriodButtonTitle)
+
+                Button {
                     Task { await refreshCalendarFromPlaid(force: true) }
                 } label: {
                     if isCalendarSyncing {
@@ -1812,6 +1825,21 @@ struct ContentView: View {
         }
     }
 
+    private var calendarCurrentPeriodButtonTitle: String {
+        calendarViewMode == .week ? "This Week" : "Today"
+    }
+
+    private func resetCalendarToCurrentPeriod() {
+        let now = Date()
+        withAnimation(.snappy) {
+            calendarFocusDate = now
+            if calendarViewMode == .month {
+                visibleCalendarWeekStart = currentCalendarWeekStart
+            }
+        }
+        scheduleCalendarEventCacheRebuild()
+    }
+
     private var calendarFilterSummary: String {
         let allCoreVisible = calendarShowExpenses && calendarShowIncome && calendarShowTransfers && calendarShowCreditDue
         if allCoreVisible && !calendarShowPortfolio {
@@ -1832,21 +1860,16 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
-            Button {
-                withAnimation(.snappy) { calendarFocusDate = Date() }
-            } label: {
-                VStack(spacing: 1) {
-                    Text(calendarFocusTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text("Tap for today")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+            VStack(spacing: 1) {
+                Text(calendarFocusTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(calendarViewMode == .week ? "Sunday – Saturday" : "Selected day")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
 
             Button { shiftCalendarFocus(by: 1) } label: {
                 Image(systemName: "chevron.right")
