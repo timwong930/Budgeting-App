@@ -76,32 +76,39 @@ async function fetchAccounts(client, item, accessToken, institutionName) {
 }
 
 async function syncTransactions(client, item, accessToken) {
-  let cursor = item.transaction_cursor || undefined;
-  let hasMore = true;
-  const transactions = [];
+  try {
+    let cursor = item.transaction_cursor || undefined;
+    let hasMore = true;
+    const transactions = [];
 
-  while (hasMore) {
-    const response = await client.transactionsSync({
-      access_token: accessToken,
-      cursor,
-      count: 500
-    });
-    const data = response.data;
-    transactions.push(...(data.added || []).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...(data.modified || []).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...(data.removed || []).map((tx) =>
-      normalizeRemovedTransaction(tx.transaction_id, tx.account_id, item.item_id)
-    ));
-    cursor = data.next_cursor;
-    hasMore = Boolean(data.has_more);
-  }
+    while (hasMore) {
+      const response = await client.transactionsSync({
+        access_token: accessToken,
+        cursor,
+        count: 500
+      });
+      const data = response.data;
+      transactions.push(...(data.added || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...(data.modified || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...(data.removed || []).map((tx) =>
+        normalizeRemovedTransaction(tx.transaction_id, tx.account_id, item.item_id)
+      ));
+      cursor = data.next_cursor;
+      hasMore = Boolean(data.has_more);
+    }
 
-  if (cursor) {
-    await updateCursor(item.item_id, cursor);
+    if (cursor) {
+      await updateCursor(item.item_id, cursor);
+    }
+    return { transactions };
+  } catch (error) {
+    if (isProductUnavailable(error)) {
+      await logSync(item.item_id, "transactions-unavailable", error.message);
+      return { transactions: [] };
+    }
+    throw error;
   }
-  return { transactions };
 }
-
 async function fetchLiabilities(client, item, accessToken) {
   try {
     const response = await client.liabilitiesGet({ access_token: accessToken });
@@ -109,7 +116,7 @@ async function fetchLiabilities(client, item, accessToken) {
       normalizeCreditLiability(credit.account_id, item.item_id, credit)
     );
   } catch (error) {
-    if (isProductNotReady(error)) return [];
+    if (isProductUnavailable(error)) return [];
     throw error;
   }
 }
@@ -130,7 +137,7 @@ async function fetchInvestmentHoldings(client, item, accessToken) {
       normalizeHolding(holding, securities.get(holding.security_id), item.item_id)
     );
   } catch (error) {
-    if (isProductNotReady(error)) return [];
+    if (isProductUnavailable(error)) return [];
     throw error;
   }
 }
@@ -162,21 +169,22 @@ async function fetchAllInvestmentTransactions(client, item, accessToken) {
     }
     return transactions;
   } catch (error) {
-    if (isProductNotReady(error)) return [];
+    if (isProductUnavailable(error)) return [];
     throw error;
   }
 }
 
-function isProductNotReady(error) {
+function isProductUnavailable(error) {
   const code = error?.response?.data?.error_code;
   return [
     "PRODUCT_NOT_READY",
     "PRODUCT_NOT_ENABLED",
+    "PRODUCTS_NOT_SUPPORTED",
     "NO_INVESTMENT_ACCOUNTS",
-    "ITEM_LOGIN_REQUIRED"
+    "NO_LIABILITY_ACCOUNTS",
+    "ACCESS_NOT_GRANTED"
   ].includes(code);
 }
-
 function isoDate(date) {
   return date.toISOString().slice(0, 10);
 }

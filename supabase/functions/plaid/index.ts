@@ -213,28 +213,36 @@ async function fetchAccounts(item: PlaidItem, accessToken: string, institutionNa
 }
 
 async function syncTransactions(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
-  let cursor = item.transaction_cursor || undefined;
-  let hasMore = true;
-  const transactions: JsonRecord[] = [];
+  try {
+    let cursor = item.transaction_cursor || undefined;
+    let hasMore = true;
+    const transactions: JsonRecord[] = [];
 
-  while (hasMore) {
-    const data = await plaidFetch("/transactions/sync", {
-      access_token: accessToken,
-      cursor,
-      count: 500
-    });
+    while (hasMore) {
+      const data = await plaidFetch("/transactions/sync", {
+        access_token: accessToken,
+        cursor,
+        count: 500
+      });
 
-    transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
-    cursor = stringValue(data.next_cursor) || undefined;
-    hasMore = Boolean(data.has_more);
+      transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
+      cursor = stringValue(data.next_cursor) || undefined;
+      hasMore = Boolean(data.has_more);
+    }
+
+    if (cursor) await updateCursor(item.item_id, cursor);
+    return transactions;
+  } catch (error) {
+    if (isProductUnavailable(error, "transactions")) {
+      const message = error instanceof Error ? error.message : "Transactions unavailable";
+      await logSync(item.item_id, "transactions-unavailable", message);
+      return [];
+    }
+    throw error;
   }
-
-  if (cursor) await updateCursor(item.item_id, cursor);
-  return transactions;
 }
-
 async function fetchLiabilities(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
   try {
     const data = await plaidFetch("/liabilities/get", { access_token: accessToken });
@@ -705,17 +713,17 @@ function isProductUnavailable(error: unknown, productName: string): boolean {
   if ([
     "PRODUCT_NOT_READY",
     "PRODUCT_NOT_ENABLED",
+    "PRODUCTS_NOT_SUPPORTED",
     "NO_INVESTMENT_ACCOUNTS",
     "NO_LIABILITY_ACCOUNTS",
-    "ACCESS_NOT_GRANTED",
-    "ITEM_LOGIN_REQUIRED"
+    "ACCESS_NOT_GRANTED"
   ].includes(error.errorCode || "")) {
     return true;
   }
   const message = error.message.toLowerCase();
-  return message.includes("does not have user consent") && message.includes(productName.toLowerCase());
+  const normalizedProduct = productName.toLowerCase().replace("product_", "");
+  return message.includes("does not have user consent") && message.includes(normalizedProduct);
 }
-
 function encode(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
