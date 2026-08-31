@@ -1,0 +1,97 @@
+name: TIM-97 exact Wealthfront unsupported-product guard
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+    paths:
+      - .github/workflows/tim-97-exact-wealthfront-guard.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+
+      - name: Add exact unsupported-product message fallback
+        shell: python
+        run: |
+          from pathlib import Path
+
+          edge_path = Path("supabase/functions/plaid/index.ts")
+          edge = edge_path.read_text()
+          old_edge = '''  const message = error.message.toLowerCase();
+            const normalizedProduct = productName.toLowerCase().replace("product_", "");
+            return message.includes("does not have user consent") && message.includes(normalizedProduct);
+          }'''
+          new_edge = '''  const message = error.message.toLowerCase();
+            const normalizedProduct = productName.toLowerCase().replace("product_", "");
+            const mentionsProduct = message.includes(normalizedProduct);
+            return mentionsProduct && (
+              message.includes("does not have user consent") ||
+              message.includes("products are not supported") ||
+              message.includes("product is not supported")
+            );
+          }'''
+          if edge.count(old_edge) != 1:
+              raise SystemExit(f"Expected one Supabase helper match, found {edge.count(old_edge)}")
+          edge_path.write_text(edge.replace(old_edge, new_edge))
+
+          node_path = Path("plaid-backend/api/plaid/sync.js")
+          node = node_path.read_text()
+          old_node = '''function isProductUnavailable(error) {
+            const code = error?.response?.data?.error_code;
+            return [
+              "PRODUCT_NOT_READY",
+              "PRODUCT_NOT_ENABLED",
+              "PRODUCTS_NOT_SUPPORTED",
+              "NO_INVESTMENT_ACCOUNTS",
+              "NO_LIABILITY_ACCOUNTS",
+              "ACCESS_NOT_GRANTED"
+            ].includes(code);
+          }'''
+          new_node = '''function isProductUnavailable(error) {
+            const code = error?.response?.data?.error_code;
+            if ([
+              "PRODUCT_NOT_READY",
+              "PRODUCT_NOT_ENABLED",
+              "PRODUCTS_NOT_SUPPORTED",
+              "NO_INVESTMENT_ACCOUNTS",
+              "NO_LIABILITY_ACCOUNTS",
+              "ACCESS_NOT_GRANTED"
+            ].includes(code)) {
+              return true;
+            }
+            const message = String(error?.response?.data?.error_message || error?.message || "").toLowerCase();
+            return message.includes("products are not supported") || message.includes("product is not supported");
+          }'''
+          if node.count(old_node) != 1:
+              raise SystemExit(f"Expected one Vercel helper match, found {node.count(old_node)}")
+          node_path.write_text(node.replace(old_node, new_node))
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Validate exact branch source
+        shell: bash
+        run: |
+          deno check --no-lock --config supabase/functions/plaid/deno.json supabase/functions/plaid/index.ts
+          node --check plaid-backend/api/plaid/link-token.js
+          node --check plaid-backend/api/plaid/sync.js
+
+      - name: Commit validated product source and remove helpers
+        shell: bash
+        run: |
+          rm -f .github/workflows/tim-97-exact-wealthfront-guard.yml
+          rm -f supabase/functions/plaid/deno.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-97 handle Wealthfront unsupported liabilities without dropping accounts"
+          git push origin HEAD:timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
