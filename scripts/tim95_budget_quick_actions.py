@@ -3,21 +3,13 @@ from pathlib import Path
 path = Path("Budgeting App/ContentView.swift")
 text = path.read_text()
 
-old = '''            budgetHubSnapshotSection
+needle = "                budgetHubSnapshotSection\n"
+if needle not in text:
+    raise SystemExit("budget snapshot anchor not found")
+if "                budgetQuickActionsSection\n" not in text:
+    text = text.replace(needle, needle + "                budgetQuickActionsSection\n", 1)
 
-            if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
-'''
-new = '''            budgetHubSnapshotSection
-            budgetQuickActionsSection
-
-            if budget.income == 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty && budget.expenses.isEmpty {
-'''
-if old not in text:
-    raise SystemExit("budget tab insertion anchor not found")
-text = text.replace(old, new, 1)
-
-anchor = '''    private var budgetSubmenusSection: some View {
-'''
+anchor = "    private var budgetSubmenusSection: some View {\n"
 insert = '''    private var budgetQuickActionsSection: some View {
         GlassCard(padding: 10) {
             HStack(spacing: 8) {
@@ -69,8 +61,9 @@ insert = '''    private var budgetQuickActionsSection: some View {
     }
 
 '''
-if anchor not in text:
-    raise SystemExit("budget submenu anchor not found")
-text = text.replace(anchor, insert + anchor, 1)
+if "private var budgetQuickActionsSection" not in text:
+    if anchor not in text:
+        raise SystemExit("budget submenu anchor not found")
+    text = text.replace(anchor, insert + anchor, 1)
 
 path.write_text(text)
