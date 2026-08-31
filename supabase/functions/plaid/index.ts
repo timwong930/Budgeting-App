@@ -25,10 +25,15 @@ Deno.serve(async (req) => {
 
   try {
     const path = routePath(req.url);
-    if (path === "/plaid/oauth" && req.method === "GET") return oauthPage(req.url);
-    if (path === "/.well-known/apple-app-site-association" && req.method === "GET") {
+    const rawPath = new URL(req.url).pathname;
+
+    // Supabase Edge Functions are normally reached under /functions/v1/<name>/,
+    // but keep AASA compatible with custom-domain/reverse-proxy rewrites too.
+    if ((path === "/.well-known/apple-app-site-association" || rawPath === "/.well-known/apple-app-site-association") && req.method === "GET") {
       return jsonResponse(appleAppSiteAssociation());
     }
+
+    if (path === "/plaid/oauth" && req.method === "GET") return oauthPage(req.url);
     if (path === "/api/plaid/link-token" && req.method === "POST") {
       requireAppSyncKey(req);
       return await createLinkToken(await requestJson(req));
@@ -71,8 +76,10 @@ function routePath(url: string): string {
 
 async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
   const productScope = stringValue(requestBody.productScope) || "banking";
+  const updateItemId = stringValue(requestBody.updateItemId);
   const productConfig = linkProductConfig(productScope);
-  const response = await plaidFetch("/link/token/create", {
+
+  const linkTokenRequest: JsonRecord = {
     user: { client_user_id: "momos-money-personal-user" },
     client_name: "Momo's Money!",
     products: productConfig.products,
@@ -82,14 +89,18 @@ async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
     redirect_uri: requiredEnv("PLAID_REDIRECT_URI"),
     webhook: Deno.env.get("PLAID_WEBHOOK_URL") || undefined,
     transactions: { days_requested: 730 }
-  });
+  };
 
+  if (updateItemId) {
+    linkTokenRequest.update = { item_id: updateItemId };
+  }
+
+  const response = await plaidFetch("/link/token/create", linkTokenRequest);
   return jsonResponse({
     linkToken: response.link_token,
     expiration: response.expiration
   });
 }
-
 function linkProductConfig(productScope: string): {
   products: string[];
   requiredIfSupportedProducts: string[];
@@ -183,23 +194,35 @@ async function syncItem(item: PlaidItem): Promise<{
   try {
     const accessToken = await decryptToken(item.access_token_cipher);
     const institutionName = await refreshInstitutionName(item, accessToken);
-    const [accounts, transactions, creditLiabilities, investments] = await Promise.all([
+    const replayTransactions = await shouldReplayTransactionsAfterDiscardedSync(item.item_id);
+    const [accounts, transactionResult, creditLiabilities, investments] = await Promise.all([
       fetchAccounts(item, accessToken, institutionName),
-      syncTransactions(item, accessToken),
+      syncTransactions(item, accessToken, replayTransactions),
       fetchLiabilities(item, accessToken),
       fetchInvestments(item, accessToken)
     ]);
+    if (transactionResult.nextCursor) {
+      await updateCursor(item.item_id, transactionResult.nextCursor);
+      if (replayTransactions) {
+        await logSync(
+          item.item_id,
+          "ledger-replay-v2-complete",
+          "Replayed transaction history after the account-ledger transfer visibility fix"
+        );
+      }
+    }
     await logSync(item.item_id, "sync", "Plaid sync completed");
     return {
       accounts,
-      transactions,
+      transactions: transactionResult.transactions,
       creditLiabilities,
       holdings: investments.holdings,
       investmentTransactions: investments.transactions
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Plaid sync failed";
-    await markItemError(item.item_id, message);
+    const isLoginRequired = error instanceof PlaidApiError && error.errorCode === "ITEM_LOGIN_REQUIRED";
+    await markItemError(item.item_id, message, isLoginRequired ? "needs_update" : "error");
     await logSync(item.item_id, "error", message);
     return empty;
   }
@@ -212,29 +235,40 @@ async function fetchAccounts(item: PlaidItem, accessToken: string, institutionNa
   return accounts.map((account) => normalizeAccount(account, item.item_id, institutionName));
 }
 
-async function syncTransactions(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
-  let cursor = item.transaction_cursor || undefined;
-  let hasMore = true;
-  const transactions: JsonRecord[] = [];
+async function syncTransactions(
+  item: PlaidItem,
+  accessToken: string,
+  replayFromStart = false
+): Promise<{ transactions: JsonRecord[]; nextCursor: string | null }> {
+  try {
+    let cursor = replayFromStart ? undefined : item.transaction_cursor || undefined;
+    let hasMore = true;
+    const transactions: JsonRecord[] = [];
 
-  while (hasMore) {
-    const data = await plaidFetch("/transactions/sync", {
-      access_token: accessToken,
-      cursor,
-      count: 500
-    });
+    while (hasMore) {
+      const data = await plaidFetch("/transactions/sync", {
+        access_token: accessToken,
+        cursor,
+        count: 500
+      });
 
-    transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
-    transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
-    cursor = stringValue(data.next_cursor) || undefined;
-    hasMore = Boolean(data.has_more);
+      transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
+      transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
+      cursor = stringValue(data.next_cursor) || undefined;
+      hasMore = Boolean(data.has_more);
+    }
+
+    return { transactions, nextCursor: cursor || null };
+  } catch (error) {
+    if (isProductUnavailable(error, "transactions")) {
+      const message = error instanceof Error ? error.message : "Transactions unavailable";
+      await logSync(item.item_id, "transactions-unavailable", message);
+      return { transactions: [], nextCursor: null };
+    }
+    throw error;
   }
-
-  if (cursor) await updateCursor(item.item_id, cursor);
-  return transactions;
 }
-
 async function fetchLiabilities(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
   try {
     const data = await plaidFetch("/liabilities/get", { access_token: accessToken });
@@ -436,6 +470,27 @@ function isPlaidInstitutionId(value: string): boolean {
   return /^ins_[A-Za-z0-9]+$/.test(value);
 }
 
+async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promise<boolean> {
+  const { data, error } = await supabase()
+    .from("plaid_sync_logs")
+    .select("event_type,message,created_at")
+    .eq("item_id", itemId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  for (const row of data || []) {
+    if (row.event_type === "ledger-replay-v2-complete") return false;
+    if (
+      row.event_type === "error" &&
+      String(row.message || "").toLowerCase().includes("products are not supported")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function updateCursor(itemId: string, cursor: string): Promise<void> {
   const { error } = await supabase()
     .from("plaid_items")
@@ -449,10 +504,10 @@ async function updateCursor(itemId: string, cursor: string): Promise<void> {
   if (error) throw error;
 }
 
-async function markItemError(itemId: string, message: string): Promise<void> {
+async function markItemError(itemId: string, message: string, health = "error"): Promise<void> {
   const { error } = await supabase()
     .from("plaid_items")
-    .update({ health: "error", error_message: message, updated_at: new Date().toISOString() })
+    .update({ health, error_message: message, updated_at: new Date().toISOString() })
     .eq("item_id", itemId);
   if (error) throw error;
 }
@@ -705,17 +760,22 @@ function isProductUnavailable(error: unknown, productName: string): boolean {
   if ([
     "PRODUCT_NOT_READY",
     "PRODUCT_NOT_ENABLED",
+    "PRODUCTS_NOT_SUPPORTED",
     "NO_INVESTMENT_ACCOUNTS",
     "NO_LIABILITY_ACCOUNTS",
-    "ACCESS_NOT_GRANTED",
-    "ITEM_LOGIN_REQUIRED"
+    "ACCESS_NOT_GRANTED"
   ].includes(error.errorCode || "")) {
     return true;
   }
   const message = error.message.toLowerCase();
-  return message.includes("does not have user consent") && message.includes(productName.toLowerCase());
+  const normalizedProduct = productName.toLowerCase().replace("product_", "");
+  const mentionsProduct = message.includes(normalizedProduct);
+  return mentionsProduct && (
+    message.includes("does not have user consent") ||
+    message.includes("products are not supported") ||
+    message.includes("product is not supported")
+  );
 }
-
 function encode(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
