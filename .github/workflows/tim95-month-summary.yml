@@ -1,0 +1,36 @@
+name: TIM-95 Month Summary Patch
+
+on:
+  push:
+    branches:
+      - feature/tim-95-calendar-redesign
+    paths:
+      - .github/workflows/tim95-month-summary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tim-95-calendar-redesign
+          fetch-depth: 0
+      - name: Apply month summary patch
+        run: python3 scripts/tim95_month_summary_patch.py
+      - name: Validate month redesign markers
+        run: |
+          grep -q 'private var calendarMonthNavigation' 'Budgeting App/ContentView.swift'
+          grep -q 'private struct CalendarMonthDaySummary' 'Budgeting App/ContentView.swift'
+          grep -q 'return calendarGridDates(for: visibleCalendarMonth).compactMap' 'Budgeting App/ContentView.swift'
+          grep -q 'title: "Net Flow"' 'Budgeting App/ContentView.swift'
+          ! grep -q 'ForEach(calendarWeeks)' 'Budgeting App/ContentView.swift'
+      - name: Commit app changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/ContentView.swift'
+          git commit -m 'TIM-95: redesign month calendar for useful cash flow'
+          git push origin HEAD:feature/tim-95-calendar-redesign
