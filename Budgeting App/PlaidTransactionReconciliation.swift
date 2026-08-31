@@ -14,6 +14,7 @@ private struct PlaidManualMatch {
 
 private struct PlaidTransferReconciliationResult {
     var handledTransactionIds: Set<String> = []
+    var reconciledTransactions = 0
     var reviewItemsAdded = 0
 }
 
@@ -40,7 +41,7 @@ extension BudgetModel {
             accountNamesById: accountNamesById,
             accountTypesById: accountTypesById
         )
-        result.reconciledTransactions += transferResult.handledTransactionIds.count
+        result.reconciledTransactions += transferResult.reconciledTransactions
         result.reviewItems += transferResult.reviewItemsAdded
 
         for transaction in activeTransactions where !transferResult.handledTransactionIds.contains(transaction.id) {
@@ -107,7 +108,7 @@ private extension BudgetModel {
                 var score = 0.55
                 if Calendar.current.isDate(transaction.date, inSameDayAs: candidate.date) { score += 0.20 }
                 if namesLikelyMatchForReconciliation(transactionDisplayName(transaction), transactionDisplayName(candidate)) { score += 0.10 }
-                if isLikelyCreditCardPayment(transaction) || isLikelyCreditCardPayment(candidate) { score += 0.15 }
+                if isLikelyCreditCardPaymentForReconciliation(transaction) || isLikelyCreditCardPaymentForReconciliation(candidate) { score += 0.15 }
 
                 if bestMatch == nil || score > bestMatch!.score {
                     bestMatch = (candidate, score)
@@ -125,6 +126,7 @@ private extension BudgetModel {
                 )
                 result.handledTransactionIds.insert(transaction.id)
                 result.handledTransactionIds.insert(bestMatch.transaction.id)
+                result.reconciledTransactions += 2
                 clearPlaidReviewItems(sourceIds: [transaction.id, bestMatch.transaction.id])
             } else {
                 let added = upsertPlaidReviewItem(
@@ -148,18 +150,25 @@ private extension BudgetModel {
         with rhs: PlaidSyncedTransaction,
         candidateAccountType rhsType: PlaidAccountType
     ) -> Bool {
-        let types = Set([lhsType, rhsType])
-        if types == Set([.depository]) {
+        let bothDepository = lhsType == .depository && rhsType == .depository
+        if bothDepository {
             return isLikelyBankTransfer(lhs) || isLikelyBankTransfer(rhs)
         }
-        if types == Set([.depository, .credit]) {
-            return isLikelyCreditCardPayment(lhs) || isLikelyCreditCardPayment(rhs) || isLikelyBankTransfer(lhs) || isLikelyBankTransfer(rhs)
+
+        let depositoryAndCredit =
+            (lhsType == .depository && rhsType == .credit) ||
+            (lhsType == .credit && rhsType == .depository)
+        if depositoryAndCredit {
+            return isLikelyCreditCardPaymentForReconciliation(lhs) ||
+                isLikelyCreditCardPaymentForReconciliation(rhs) ||
+                isLikelyBankTransfer(lhs) ||
+                isLikelyBankTransfer(rhs)
         }
         return false
     }
 
     func isStrongTransferOrPayment(_ transaction: PlaidSyncedTransaction, accountType: PlaidAccountType) -> Bool {
-        isLikelyBankTransfer(transaction) || (accountType == .credit && isLikelyCreditCardPayment(transaction))
+        isLikelyBankTransfer(transaction) || isLikelyCreditCardPaymentForReconciliation(transaction)
     }
 
     func isLikelyBankTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
@@ -172,7 +181,7 @@ private extension BudgetModel {
             text.contains("ach debit")
     }
 
-    func isLikelyCreditCardPayment(_ transaction: PlaidSyncedTransaction) -> Bool {
+    func isLikelyCreditCardPaymentForReconciliation(_ transaction: PlaidSyncedTransaction) -> Bool {
         let category = (transaction.category ?? "").lowercased()
         let text = transactionSearchText(transaction)
         return category.contains("loan_payment") ||
@@ -196,9 +205,15 @@ private extension BudgetModel {
         let amount = roundedReconciliationCurrency(abs(outflow.amount))
         let date = max(outflow.date, inflow.date)
         let isCardPayment = accountTypesById[inflow.accountId] == .credit || accountTypesById[outflow.accountId] == .credit
+        let sourceMarker = plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
 
         let existingIndex = cashTransfers.firstIndex { existing in
-            guard abs(existing.amount - amount) < 0.01,
+            if existing.note.contains(sourceMarker) {
+                return true
+            }
+
+            guard existing.note.hasPrefix("[PLAID_PAIR:"),
+                  abs(existing.amount - amount) < 0.01,
                   dayDistance(existing.date, date) <= 3 else { return false }
 
             if let existingFromId = existing.fromAccountId,
@@ -219,6 +234,7 @@ private extension BudgetModel {
             cashTransfers[existingIndex].toAccountName = toName
             cashTransfers[existingIndex].fromAccountId = fromId
             cashTransfers[existingIndex].toAccountId = toId
+            cashTransfers[existingIndex].note = "\(sourceMarker) Synced from Plaid transaction pair"
             return
         }
 
@@ -231,9 +247,14 @@ private extension BudgetModel {
                 toAccountName: toName,
                 fromAccountId: fromId,
                 toAccountId: toId,
-                note: "Synced from Plaid transaction pair"
+                note: "\(sourceMarker) Synced from Plaid transaction pair"
             )
         )
+    }
+
+    func plaidTransferSourceMarker(outflowId: String, inflowId: String) -> String {
+        let ids = [outflowId, inflowId].sorted()
+        return "[PLAID_PAIR:\(ids.joined(separator: "|"))]"
     }
 
     // MARK: - Transaction reconciliation
