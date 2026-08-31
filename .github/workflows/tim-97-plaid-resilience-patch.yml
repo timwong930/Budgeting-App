@@ -1,0 +1,162 @@
+name: TIM-97 Plaid product resilience patch
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+    paths:
+      - .github/workflows/tim-97-plaid-resilience-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-plaid-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+
+      - name: Isolate unsupported Plaid products without dropping accounts
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Vercel backend
+          node_path = Path("plaid-backend/api/plaid/sync.js")
+          node = node_path.read_text()
+
+          start = node.index("async function syncTransactions(client, item, accessToken) {")
+          end = node.index("\nasync function fetchLiabilities", start)
+          node_tx = '''async function syncTransactions(client, item, accessToken) {
+            try {
+              let cursor = item.transaction_cursor || undefined;
+              let hasMore = true;
+              const transactions = [];
+
+              while (hasMore) {
+                const response = await client.transactionsSync({
+                  access_token: accessToken,
+                  cursor,
+                  count: 500
+                });
+                const data = response.data;
+                transactions.push(...(data.added || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...(data.modified || []).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...(data.removed || []).map((tx) =>
+                  normalizeRemovedTransaction(tx.transaction_id, tx.account_id, item.item_id)
+                ));
+                cursor = data.next_cursor;
+                hasMore = Boolean(data.has_more);
+              }
+
+              if (cursor) {
+                await updateCursor(item.item_id, cursor);
+              }
+              return { transactions };
+            } catch (error) {
+              if (isProductUnavailable(error)) {
+                await logSync(item.item_id, "transactions-unavailable", error.message);
+                return { transactions: [] };
+              }
+              throw error;
+            }
+          }
+          '''
+          node = node[:start] + node_tx.rstrip() + node[end:]
+          node = node.replace("isProductNotReady(error)", "isProductUnavailable(error)")
+
+          helper_start = node.index("function isProductNotReady(error) {") if "function isProductNotReady(error) {" in node else node.index("function isProductUnavailable(error) {")
+          helper_end = node.index("\nfunction isoDate", helper_start)
+          node_helper = '''function isProductUnavailable(error) {
+            const code = error?.response?.data?.error_code;
+            return [
+              "PRODUCT_NOT_READY",
+              "PRODUCT_NOT_ENABLED",
+              "PRODUCTS_NOT_SUPPORTED",
+              "NO_INVESTMENT_ACCOUNTS",
+              "NO_LIABILITY_ACCOUNTS",
+              "ACCESS_NOT_GRANTED"
+            ].includes(code);
+          }
+          '''
+          node = node[:helper_start] + node_helper.rstrip() + node[helper_end:]
+          node_path.write_text(node)
+
+          # Supabase Edge Function parity
+          edge_path = Path("supabase/functions/plaid/index.ts")
+          edge = edge_path.read_text()
+          start = edge.index("async function syncTransactions(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {")
+          end = edge.index("\nasync function fetchLiabilities", start)
+          edge_tx = '''async function syncTransactions(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
+            try {
+              let cursor = item.transaction_cursor || undefined;
+              let hasMore = true;
+              const transactions: JsonRecord[] = [];
+
+              while (hasMore) {
+                const data = await plaidFetch("/transactions/sync", {
+                  access_token: accessToken,
+                  cursor,
+                  count: 500
+                });
+
+                transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
+                transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
+                cursor = stringValue(data.next_cursor) || undefined;
+                hasMore = Boolean(data.has_more);
+              }
+
+              if (cursor) await updateCursor(item.item_id, cursor);
+              return transactions;
+            } catch (error) {
+              if (isProductUnavailable(error, "transactions")) {
+                const message = error instanceof Error ? error.message : "Transactions unavailable";
+                await logSync(item.item_id, "transactions-unavailable", message);
+                return [];
+              }
+              throw error;
+            }
+          }
+          '''
+          edge = edge[:start] + edge_tx.rstrip() + edge[end:]
+
+          helper_start = edge.index("function isProductUnavailable(error: unknown, productName: string): boolean {")
+          helper_end = edge.index("\nfunction encode", helper_start)
+          edge_helper = '''function isProductUnavailable(error: unknown, productName: string): boolean {
+            if (!(error instanceof PlaidApiError)) return false;
+            if ([
+              "PRODUCT_NOT_READY",
+              "PRODUCT_NOT_ENABLED",
+              "PRODUCTS_NOT_SUPPORTED",
+              "NO_INVESTMENT_ACCOUNTS",
+              "NO_LIABILITY_ACCOUNTS",
+              "ACCESS_NOT_GRANTED"
+            ].includes(error.errorCode || "")) {
+              return true;
+            }
+            const message = error.message.toLowerCase();
+            const normalizedProduct = productName.toLowerCase().replace("product_", "");
+            return message.includes("does not have user consent") && message.includes(normalizedProduct);
+          }
+          '''
+          edge = edge[:helper_start] + edge_helper.rstrip() + edge[helper_end:]
+          edge_path.write_text(edge)
+
+      - name: Run backend syntax checks
+        shell: bash
+        run: |
+          node --check plaid-backend/api/plaid/link-token.js
+          node --check plaid-backend/api/plaid/sync.js
+
+      - name: Commit product changes and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/tim-97-plaid-resilience-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-97 keep account sync alive when optional Plaid products are unavailable"
+          git push origin HEAD:timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
