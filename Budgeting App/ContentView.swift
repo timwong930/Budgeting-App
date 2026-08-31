@@ -903,6 +903,9 @@ struct ContentView: View {
             .onChange(of: calendarViewMode) { _, _ in
                 scheduleCalendarEventCacheRebuild()
             }
+            .onChange(of: calendarShowPortfolio) { _, _ in
+                scheduleCalendarEventCacheRebuild()
+            }
             .onChange(of: budget.watchlistTickers) { _, _ in
                 guard selectedTab == .home else { return }
                 Task { await refreshHomeWatchlist() }
@@ -2992,20 +2995,27 @@ struct ContentView: View {
     }
 
     private var calendarVisibleIncome: Double {
-        let oneTimeIncome = budget.incomes
-            .filter { isInVisibleCalendarMonth($0.date) }
-            .reduce(0) { $0 + $1.amount }
-        let recurringIncome = visibleCalendarMonthDays
-            .flatMap(recurringOccurrences)
-            .filter { $0.payment.kind == .income && !isRecurringOccurrencePaid($0.payment, on: $0.date) }
-            .reduce(0) { $0 + $1.payment.amount }
-        let investmentIncome = budget.portfolioTransactions
-            .filter { isInVisibleCalendarMonth($0.date) && ($0.type == .sell || $0.type == .dividend) }
-            .reduce(0) { $0 + $1.amount }
+        let oneTimeIncome = calendarShowIncome
+            ? budget.incomes
+                .filter { isInVisibleCalendarMonth($0.date) }
+                .reduce(0) { $0 + $1.amount }
+            : 0
+        let recurringIncome = calendarShowIncome
+            ? visibleCalendarMonthDays
+                .flatMap(recurringOccurrences)
+                .filter { $0.payment.kind == .income && !isRecurringOccurrencePaid($0.payment, on: $0.date) }
+                .reduce(0) { $0 + $1.payment.amount }
+            : 0
+        let investmentIncome = calendarShowPortfolio
+            ? budget.portfolioTransactions
+                .filter { isInVisibleCalendarMonth($0.date) && ($0.type == .sell || $0.type == .dividend) }
+                .reduce(0) { $0 + $1.amount }
+            : 0
         return oneTimeIncome + recurringIncome + investmentIncome
     }
 
     private var calendarVisibleOutflow: Double {
+        guard calendarShowExpenses else { return 0 }
         let oneTimeExpenses = budget.expenses
             .filter { isInVisibleCalendarMonth($0.date) && !budget.isCreditCardPayment($0) }
             .reduce(0) { $0 + $1.amount }
@@ -3017,7 +3027,8 @@ struct ContentView: View {
     }
 
     private var calendarVisibleCreditDue: Double {
-        budget.creditAccounts
+        guard calendarShowCreditDue else { return 0 }
+        return budget.creditAccounts
             .filter { account in
                 account.isActive && visibleCalendarMonthDays.contains { date in
                     Calendar.current.component(.day, from: date) == recurringOccurrenceDay(in: date, paymentDay: account.dueDay)
@@ -3410,29 +3421,34 @@ struct ContentView: View {
                     portfolioTransaction: nil
                 )
             }
-        let portfolioItems = budget.portfolioTransactions
-            .filter { calendar.isDate($0.date, inSameDayAs: date) }
-            .map { transaction in
-                CalendarEventItem(
-                    id: transaction.id,
-                    name: portfolioEventName(transaction),
-                    amount: transaction.amount,
-                    isIncome: transaction.type == .sell || transaction.type == .dividend,
-                    date: transaction.date,
-                    recurringPayment: nil,
-                    expense: nil,
-                    income: nil,
-                    cashTransfer: nil,
-                    isPaid: true,
-                    isTransfer: transaction.type == .contribution,
-                    tint: portfolioEventColor(transaction),
-                    isCreditDue: false,
-                    paymentAccount: transaction.fundingBankAccount ?? "Investment Account",
-                    iconName: portfolioEventIcon(transaction),
-                    creditAccount: nil,
-                    portfolioTransaction: transaction
-                )
-            }
+        let portfolioItems: [CalendarEventItem]
+        if calendarShowPortfolio {
+            portfolioItems = budget.portfolioTransactions
+                .filter { calendar.isDate($0.date, inSameDayAs: date) }
+                .map { transaction in
+                    CalendarEventItem(
+                        id: transaction.id,
+                        name: portfolioEventName(transaction),
+                        amount: transaction.amount,
+                        isIncome: transaction.type == .sell || transaction.type == .dividend,
+                        date: transaction.date,
+                        recurringPayment: nil,
+                        expense: nil,
+                        income: nil,
+                        cashTransfer: nil,
+                        isPaid: true,
+                        isTransfer: transaction.type == .contribution,
+                        tint: portfolioEventColor(transaction),
+                        isCreditDue: false,
+                        paymentAccount: transaction.fundingBankAccount ?? "Investment Account",
+                        iconName: portfolioEventIcon(transaction),
+                        creditAccount: nil,
+                        portfolioTransaction: transaction
+                    )
+                }
+        } else {
+            portfolioItems = []
+        }
         let transferItems = budget.cashTransfers
             .filter { calendar.isDate($0.date, inSameDayAs: date) }
             .map { transfer in
