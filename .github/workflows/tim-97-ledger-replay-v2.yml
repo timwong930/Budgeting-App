@@ -41,3 +41,5 @@ jobs:
           git add -A
           git commit -m "TIM-97 replay Wealthfront history once for ledger visibility"
           git push origin HEAD:timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+
+# retrigger after matcher fix
