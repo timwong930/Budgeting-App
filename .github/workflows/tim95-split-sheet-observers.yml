@@ -1,0 +1,35 @@
+name: TIM-95 Split Sheet and Observer Fix
+
+on:
+  push:
+    branches:
+      - feature/tim-95-calendar-redesign
+    paths:
+      - .github/workflows/tim95-split-sheet-observers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tim-95-calendar-redesign
+          fetch-depth: 0
+      - name: Apply presentation split fix
+        run: python3 scripts/tim95_split_sheet_observers.py
+      - name: Validate split markers
+        run: |
+          grep -q 'private var financialObservedTabContent: some View' 'Budgeting App/ContentView.swift'
+          grep -q 'private var setupPresentedContent: some View' 'Budgeting App/ContentView.swift'
+          grep -q 'private var transactionPresentedContent: some View' 'Budgeting App/ContentView.swift'
+          grep -q 'private var presentedContent: some View' 'Budgeting App/ContentView.swift'
+      - name: Commit app changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/ContentView.swift'
+          git commit -m 'TIM-95: split sheet and observer chains'
+          git push origin HEAD:feature/tim-95-calendar-redesign
