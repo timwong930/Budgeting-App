@@ -273,8 +273,10 @@ final class PlaidSyncCoordinator {
                 configuration: PlaidBackendConfiguration(backendURL: backendURL),
                 syncKey: syncKey
             ).sync()
+            let previousReviews = budget.plaidReviewItems
             budget.preparePlaidPendingTransactionReplacements(payload)
-            let result = budget.applyPlaidSyncReconciled(payload)
+            var result = budget.applyPlaidSyncReconciled(payload)
+            result.reviewItems += budget.restoreUnresolvedPlaidReviews(previousReviews, payload: payload)
             budget.saveNow()
             defaults.set(Date(), forKey: Self.lastSuccessfulSyncKey)
             defaults.removeObject(forKey: Self.lastSyncErrorKey)
