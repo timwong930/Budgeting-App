@@ -198,7 +198,7 @@ enum PlaidKeychain {
     private static func read(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: kSecClassGenericPassword,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -273,7 +273,7 @@ final class PlaidSyncCoordinator {
                 configuration: PlaidBackendConfiguration(backendURL: backendURL),
                 syncKey: syncKey
             ).sync()
-            let result = budget.applyPlaidSync(payload)
+            let result = budget.applyPlaidSyncReconciled(payload)
             budget.saveNow()
             defaults.set(Date(), forKey: Self.lastSuccessfulSyncKey)
             defaults.removeObject(forKey: Self.lastSyncErrorKey)
