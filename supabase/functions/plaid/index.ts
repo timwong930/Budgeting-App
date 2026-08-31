@@ -25,10 +25,15 @@ Deno.serve(async (req) => {
 
   try {
     const path = routePath(req.url);
-    if (path === "/plaid/oauth" && req.method === "GET") return oauthPage(req.url);
-    if (path === "/.well-known/apple-app-site-association" && req.method === "GET") {
+    const rawPath = new URL(req.url).pathname;
+
+    // Supabase Edge Functions are normally reached under /functions/v1/<name>/,
+    // but keep AASA compatible with custom-domain/reverse-proxy rewrites too.
+    if ((path === "/.well-known/apple-app-site-association" || rawPath === "/.well-known/apple-app-site-association") && req.method === "GET") {
       return jsonResponse(appleAppSiteAssociation());
     }
+
+    if (path === "/plaid/oauth" && req.method === "GET") return oauthPage(req.url);
     if (path === "/api/plaid/link-token" && req.method === "POST") {
       requireAppSyncKey(req);
       return await createLinkToken(await requestJson(req));
@@ -61,24 +66,34 @@ Deno.serve(async (req) => {
 });
 
 function routePath(url: string): string {
-  const pathname = new URL(url).pathname;
-  const functionMarker = "/plaid/";
-  const markerIndex = pathname.indexOf(functionMarker);
-  if (markerIndex >= 0) return pathname.slice(markerIndex + "/plaid".length);
-  if (pathname.endsWith("/plaid")) return "/";
-  return pathname;
-}
-
-async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
+  const pathnasync function createLinkToken(requestBody: JsonRecord): Promise<Response> {
   const productScope = stringValue(requestBody.productScope) || "banking";
+  const updateItemId = stringValue(requestBody.updateItemId);
   const productConfig = linkProductConfig(productScope);
-  const response = await plaidFetch("/link/token/create", {
+
+  const linkTokenRequest: JsonRecord = {
     user: { client_user_id: "momos-money-personal-user" },
     client_name: "Momo's Money!",
     products: productConfig.products,
     required_if_supported_products: productConfig.requiredIfSupportedProducts,
     country_codes: envList("PLAID_COUNTRY_CODES", "US"),
     language: "en",
+    redirect_uri: requiredEnv("PLAID_REDIRECT_URI"),
+    webhook: Deno.env.get("PLAID_WEBHOOK_URL") || undefined,
+    transactions: { days_requested: 730 }
+  };
+
+  if (updateItemId) {
+    linkTokenRequest.update = { item_id: updateItemId };
+  }
+
+  const response = await plaidFetch("/link/token/create", linkTokenRequest);
+
+  return jsonResponse({
+    linkToken: response.link_token,
+    expiration: response.expiration
+  });
+}
     redirect_uri: requiredEnv("PLAID_REDIRECT_URI"),
     webhook: Deno.env.get("PLAID_WEBHOOK_URL") || undefined,
     transactions: { days_requested: 730 }
@@ -199,7 +214,8 @@ async function syncItem(item: PlaidItem): Promise<{
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Plaid sync failed";
-    await markItemError(item.item_id, message);
+    const isLoginRequired = error instanceof PlaidApiError && error.errorCode === "ITEM_LOGIN_REQUIRED";
+    await markItemError(item.item_id, message, isLoginRequired ? "needs_update" : "error");
     await logSync(item.item_id, "error", message);
     return empty;
   }
@@ -457,10 +473,10 @@ async function updateCursor(itemId: string, cursor: string): Promise<void> {
   if (error) throw error;
 }
 
-async function markItemError(itemId: string, message: string): Promise<void> {
+async function markItemError(itemId: string, message: string, health = "error"): Promise<void> {
   const { error } = await supabase()
     .from("plaid_items")
-    .update({ health: "error", error_message: message, updated_at: new Date().toISOString() })
+    .update({ health, error_message: message, updated_at: new Date().toISOString() })
     .eq("item_id", itemId);
   if (error) throw error;
 }
