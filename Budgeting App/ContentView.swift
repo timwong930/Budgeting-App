@@ -759,8 +759,11 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            activeTabContent
+        presentedContent
+    }
+
+    private var tabChromeContent: some View {
+        activeTabContent
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10)
                     .onChanged { value in
@@ -834,6 +837,10 @@ struct ContentView: View {
                 .padding(.trailing, isTabBarMinimized ? 12 : 0)
                 .padding(.bottom, -16)
             }
+    }
+
+    private var lifecycleTabContent: some View {
+        tabChromeContent
             .onAppear {
                 budget.income = budget.income(for: selectedMonth)
                 budget.applyMonthlyAllocations(for: selectedMonth)
@@ -871,6 +878,10 @@ struct ContentView: View {
             .onChange(of: budget.income) { _, newValue in
                 budget.setIncome(newValue, for: selectedMonth)
             }
+    }
+
+    private var observedTabContent: some View {
+        lifecycleTabContent
             .onChange(of: budget.expenses) { _, _ in
                 updateMonthlyData()
                 scheduleCalendarEventCacheRebuild()
@@ -919,6 +930,11 @@ struct ContentView: View {
             .overlay(alignment: .top) {
                 InAppNotificationOverlay()
             }
+    }
+
+    private var presentedContent: some View {
+        NavigationStack {
+            observedTabContent
         }
         .sheet(isPresented: $showingAddNeedsCategory) {
             AddCategoryView(budget: budget, categoryType: .needs, selectedMonth: selectedMonth)
