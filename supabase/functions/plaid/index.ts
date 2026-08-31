@@ -66,7 +66,15 @@ Deno.serve(async (req) => {
 });
 
 function routePath(url: string): string {
-  const pathnasync function createLinkToken(requestBody: JsonRecord): Promise<Response> {
+  const pathname = new URL(url).pathname;
+  const functionMarker = "/plaid/";
+  const markerIndex = pathname.indexOf(functionMarker);
+  if (markerIndex >= 0) return pathname.slice(markerIndex + "/plaid".length);
+  if (pathname.endsWith("/plaid")) return "/";
+  return pathname;
+}
+
+async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
   const productScope = stringValue(requestBody.productScope) || "banking";
   const updateItemId = stringValue(requestBody.updateItemId);
   const productConfig = linkProductConfig(productScope);
@@ -88,23 +96,11 @@ function routePath(url: string): string {
   }
 
   const response = await plaidFetch("/link/token/create", linkTokenRequest);
-
   return jsonResponse({
     linkToken: response.link_token,
     expiration: response.expiration
   });
 }
-    redirect_uri: requiredEnv("PLAID_REDIRECT_URI"),
-    webhook: Deno.env.get("PLAID_WEBHOOK_URL") || undefined,
-    transactions: { days_requested: 730 }
-  });
-
-  return jsonResponse({
-    linkToken: response.link_token,
-    expiration: response.expiration
-  });
-}
-
 function linkProductConfig(productScope: string): {
   products: string[];
   requiredIfSupportedProducts: string[];
