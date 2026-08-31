@@ -1,0 +1,56 @@
+name: TIM-96 account ledger navigation patch
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-96-add-per-account-transaction-ledgers-for-bank-and-credit
+    paths:
+      - .github/workflows/tim-96-contentview-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-content-view:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-96-add-per-account-transaction-ledgers-for-bank-and-credit
+      - name: Route account rows to transaction ledgers
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("Budgeting App/ContentView.swift")
+          text = path.read_text()
+
+          replacements = {
+              '''NavigationLink {
+                                EditBankAccountView(account: $account)
+                            } label: {''': '''NavigationLink {
+                                BankAccountLedgerView(account: $account, budget: budget)
+                            } label: {''',
+              '''NavigationLink {
+                                EditCreditAccountView(account: $account)
+                            } label: {''': '''NavigationLink {
+                                CreditAccountLedgerView(account: $account, budget: budget)
+                            } label: {''',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match for navigation replacement, found {count}")
+              text = text.replace(old, new)
+
+          path.write_text(text)
+      - name: Commit guarded patch and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/tim-96-contentview-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-96 route bank and credit accounts to ledgers"
+          git push origin HEAD:timothyhwo2000/tim-96-add-per-account-transaction-ledgers-for-bank-and-credit
