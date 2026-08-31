@@ -20,29 +20,27 @@ jobs:
       - name: Route account rows to transaction ledgers
         shell: python
         run: |
+          import re
           from pathlib import Path
 
           path = Path("Budgeting App/ContentView.swift")
           text = path.read_text()
 
-          replacements = {
-              '''NavigationLink {
-                                EditBankAccountView(account: $account)
-                            } label: {''': '''NavigationLink {
-                                BankAccountLedgerView(account: $account, budget: budget)
-                            } label: {''',
-              '''NavigationLink {
-                                EditCreditAccountView(account: $account)
-                            } label: {''': '''NavigationLink {
-                                CreditAccountLedgerView(account: $account, budget: budget)
-                            } label: {''',
-          }
+          replacements = [
+              (
+                  r"NavigationLink\s*\{\s*EditBankAccountView\(account:\s*\$account\)\s*\}\s*label:\s*\{",
+                  "NavigationLink {\n                                BankAccountLedgerView(account: $account, budget: budget)\n                            } label: {",
+              ),
+              (
+                  r"NavigationLink\s*\{\s*EditCreditAccountView\(account:\s*\$account\)\s*\}\s*label:\s*\{",
+                  "NavigationLink {\n                                CreditAccountLedgerView(account: $account, budget: budget)\n                            } label: {",
+              ),
+          ]
 
-          for old, new in replacements.items():
-              count = text.count(old)
+          for pattern, replacement in replacements:
+              text, count = re.subn(pattern, replacement, text, count=1)
               if count != 1:
-                  raise SystemExit(f"Expected exactly one match for navigation replacement, found {count}")
-              text = text.replace(old, new)
+                  raise SystemExit(f"Expected exactly one navigation destination match, found {count}")
 
           path.write_text(text)
       - name: Commit guarded patch and remove temporary workflow
