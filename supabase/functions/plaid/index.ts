@@ -194,16 +194,27 @@ async function syncItem(item: PlaidItem): Promise<{
   try {
     const accessToken = await decryptToken(item.access_token_cipher);
     const institutionName = await refreshInstitutionName(item, accessToken);
-    const [accounts, transactions, creditLiabilities, investments] = await Promise.all([
+    const replayTransactions = await shouldReplayTransactionsAfterDiscardedSync(item.item_id);
+    const [accounts, transactionResult, creditLiabilities, investments] = await Promise.all([
       fetchAccounts(item, accessToken, institutionName),
-      syncTransactions(item, accessToken),
+      syncTransactions(item, accessToken, replayTransactions),
       fetchLiabilities(item, accessToken),
       fetchInvestments(item, accessToken)
     ]);
+    if (transactionResult.nextCursor) {
+      await updateCursor(item.item_id, transactionResult.nextCursor);
+      if (replayTransactions) {
+        await logSync(
+          item.item_id,
+          "cursor-replay-complete",
+          "Replayed transaction history after a previously discarded Plaid sync"
+        );
+      }
+    }
     await logSync(item.item_id, "sync", "Plaid sync completed");
     return {
       accounts,
-      transactions,
+      transactions: transactionResult.transactions,
       creditLiabilities,
       holdings: investments.holdings,
       investmentTransactions: investments.transactions
@@ -224,9 +235,13 @@ async function fetchAccounts(item: PlaidItem, accessToken: string, institutionNa
   return accounts.map((account) => normalizeAccount(account, item.item_id, institutionName));
 }
 
-async function syncTransactions(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
+async function syncTransactions(
+  item: PlaidItem,
+  accessToken: string,
+  replayFromStart = false
+): Promise<{ transactions: JsonRecord[]; nextCursor: string | null }> {
   try {
-    let cursor = item.transaction_cursor || undefined;
+    let cursor = replayFromStart ? undefined : item.transaction_cursor || undefined;
     let hasMore = true;
     const transactions: JsonRecord[] = [];
 
@@ -244,13 +259,12 @@ async function syncTransactions(item: PlaidItem, accessToken: string): Promise<J
       hasMore = Boolean(data.has_more);
     }
 
-    if (cursor) await updateCursor(item.item_id, cursor);
-    return transactions;
+    return { transactions, nextCursor: cursor || null };
   } catch (error) {
     if (isProductUnavailable(error, "transactions")) {
       const message = error instanceof Error ? error.message : "Transactions unavailable";
       await logSync(item.item_id, "transactions-unavailable", message);
-      return [];
+      return { transactions: [], nextCursor: null };
     }
     throw error;
   }
@@ -454,6 +468,27 @@ function needsInstitutionNameRefresh(value: string): boolean {
 
 function isPlaidInstitutionId(value: string): boolean {
   return /^ins_[A-Za-z0-9]+$/.test(value);
+}
+
+async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promise<boolean> {
+  const { data, error } = await supabase()
+    .from("plaid_sync_logs")
+    .select("event_type,message,created_at")
+    .eq("item_id", itemId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  for (const row of data || []) {
+    if (row.event_type === "cursor-replay-complete") return false;
+    if (
+      row.event_type === "error" &&
+      String(row.message || "").toLowerCase().includes("products are not supported")
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function updateCursor(itemId: string, cursor: string): Promise<void> {

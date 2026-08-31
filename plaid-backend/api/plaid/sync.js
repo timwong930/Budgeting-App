@@ -53,6 +53,9 @@ async function syncItem(client, item) {
       fetchLiabilities(client, item, accessToken),
       fetchInvestments(client, item, accessToken)
     ]);
+    if (transactionResult.nextCursor) {
+      await updateCursor(item.item_id, transactionResult.nextCursor);
+    }
     await logSync(item.item_id, "sync", "Plaid sync completed");
     return {
       accounts,
@@ -97,14 +100,11 @@ async function syncTransactions(client, item, accessToken) {
       hasMore = Boolean(data.has_more);
     }
 
-    if (cursor) {
-      await updateCursor(item.item_id, cursor);
-    }
-    return { transactions };
+    return { transactions, nextCursor: cursor || null };
   } catch (error) {
     if (isProductUnavailable(error)) {
       await logSync(item.item_id, "transactions-unavailable", error.message);
-      return { transactions: [] };
+      return { transactions: [], nextCursor: null };
     }
     throw error;
   }
