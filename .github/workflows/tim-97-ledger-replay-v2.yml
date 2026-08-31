@@ -1,0 +1,43 @@
+name: TIM-97 ledger replay v2 validation
+
+on:
+  push:
+    branches:
+      - timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+    paths:
+      - .github/workflows/tim-97-ledger-replay-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
+
+      - name: Apply guarded replay marker patch
+        run: python3 .github/scripts/tim97_ledger_replay_v2_patch.py
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Validate backend
+        run: |
+          deno check --no-lock --config supabase/functions/plaid/deno.json supabase/functions/plaid/index.ts
+          node --check plaid-backend/api/plaid/link-token.js
+          node --check plaid-backend/api/plaid/sync.js
+
+      - name: Commit validated product change
+        run: |
+          rm -f .github/workflows/tim-97-ledger-replay-v2.yml
+          rm -f .github/scripts/tim97_ledger_replay_v2_patch.py
+          rm -f supabase/functions/plaid/deno.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "TIM-97 replay Wealthfront history once for ledger visibility"
+          git push origin HEAD:timothyhwo2000/tim-97-make-plaid-institution-sync-resilient-to-unsupported-product
