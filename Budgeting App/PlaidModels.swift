@@ -76,6 +76,7 @@ struct PlaidSyncedTransaction: Codable, Sendable, Equatable, Identifiable {
     var amount: Double
     var date: Date
     var pending: Bool
+    var pendingTransactionId: String? = nil
     var category: String?
     var removed: Bool
 }
