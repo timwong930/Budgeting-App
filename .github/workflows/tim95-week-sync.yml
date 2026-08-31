@@ -1,0 +1,36 @@
+name: TIM-95 Week and Sync Patch
+
+on:
+  push:
+    branches:
+      - feature/tim-95-calendar-redesign
+    paths:
+      - .github/workflows/tim95-week-sync.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tim-95-calendar-redesign
+
+      - name: Apply patch
+        run: python3 scripts/tim95_week_sync_patch.py
+
+      - name: Validate patch markers
+        run: |
+          grep -q 'private func calendarWeekDayColumn' 'Budgeting App/ContentView.swift'
+          grep -q 'Sync failed — tap refresh to retry' 'Budgeting App/ContentView.swift'
+          grep -q 'automaticSyncInterval: TimeInterval = 5 \* 60' 'Budgeting App/PlaidAPIClient.swift'
+
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Budgeting App/ContentView.swift' 'Budgeting App/PlaidAPIClient.swift'
+          git diff --cached --quiet || git commit -m 'TIM-95: add 7-day week view and calendar sync refresh'
+          git push origin HEAD:feature/tim-95-calendar-redesign
