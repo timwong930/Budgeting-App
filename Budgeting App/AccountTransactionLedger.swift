@@ -107,6 +107,8 @@ extension BudgetModel {
             guard isFrom || isTo else { continue }
 
             let isPlaidPair = transfer.note.hasPrefix("[PLAID_PAIR:")
+            let isPlaidSingle = transfer.note.hasPrefix("[PLAID_SINGLE:")
+            let isPlaidTransfer = isPlaidPair || isPlaidSingle
             let otherName = isFrom ? transfer.toAccountName : transfer.fromAccountName
             let otherKind = isFrom ? ledgerFinancialAccountKind(id: transfer.toAccountId) : ledgerFinancialAccountKind(id: transfer.fromAccountId)
             let isCardPayment = otherKind == .credit
@@ -120,9 +122,9 @@ extension BudgetModel {
                     detail: isCardPayment ? "Credit card payment • \(otherName)" : "\(isFrom ? "To" : "From") \(otherName)",
                     signedAmount: isFrom ? -abs(transfer.amount) : abs(transfer.amount),
                     kind: kind,
-                    isPending: false,
-                    sourceLabel: isPlaidPair ? "Plaid" : "Manual",
-                    plaidStatus: isPlaidPair ? .reconciled : nil,
+                    isPending: isPlaidSingle && transfer.note.contains("[PENDING]"),
+                    sourceLabel: isPlaidTransfer ? "Plaid" : "Manual",
+                    plaidStatus: isPlaidPair ? .reconciled : (isPlaidSingle ? .needsReview : nil),
                     matchConfidence: nil
                 )
             )
@@ -210,6 +212,8 @@ extension BudgetModel {
             guard isFrom || isTo else { continue }
 
             let isPlaidPair = transfer.note.hasPrefix("[PLAID_PAIR:")
+            let isPlaidSingle = transfer.note.hasPrefix("[PLAID_SINGLE:")
+            let isPlaidTransfer = isPlaidPair || isPlaidSingle
             let otherName = isFrom ? transfer.toAccountName : transfer.fromAccountName
             entries.append(
                 AccountLedgerEntry(
@@ -219,9 +223,9 @@ extension BudgetModel {
                     detail: "Payment • \(otherName)",
                     signedAmount: isTo ? abs(transfer.amount) : -abs(transfer.amount),
                     kind: .payment,
-                    isPending: false,
-                    sourceLabel: isPlaidPair ? "Plaid" : "Manual",
-                    plaidStatus: isPlaidPair ? .reconciled : nil,
+                    isPending: isPlaidSingle && transfer.note.contains("[PENDING]"),
+                    sourceLabel: isPlaidTransfer ? "Plaid" : "Manual",
+                    plaidStatus: isPlaidPair ? .reconciled : (isPlaidSingle ? .needsReview : nil),
                     matchConfidence: nil
                 )
             )

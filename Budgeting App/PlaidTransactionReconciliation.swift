@@ -134,13 +134,18 @@ private extension BudgetModel {
                 result.handledTransactionIds.insert(bestMatch.transaction.id)
                 result.reconciledTransactions += 2
             } else {
-                // Do not let a known transfer/payment remain counted as ordinary income
-                // or spending just because the matching account-side delta is absent.
+                // Keep one-sided external transfers visible in the account ledger while
+                // keeping them out of budget income/spending until they are reviewed.
                 _ = removeReconciledPlaidTransaction(id: transaction.id)
+                upsertUnpairedPlaidTransfer(
+                    transaction,
+                    accountName: accountNamesById[transaction.accountId] ?? "Plaid account",
+                    accountType: type
+                )
                 let added = upsertPlaidReviewItem(
                     sourceId: transaction.id,
                     title: transactionDisplayName(transaction),
-                    detail: "Plaid transfer/payment could not be paired to another synced account. Review before counting it as income or spending.",
+                    detail: "Plaid transfer/payment could not be paired to another synced account. It remains visible in the account ledger as an external transfer, but is excluded from income/spending until reviewed.",
                     amount: transaction.amount,
                     date: transaction.date
                 )
@@ -229,6 +234,7 @@ private extension BudgetModel {
         let date = max(outflow.date, inflow.date)
         let isCardPayment = accountTypesById[inflow.accountId] == .credit || accountTypesById[outflow.accountId] == .credit
         let sourceMarker = plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
+        _ = removePlaidSingleTransfers(sourceIds: [outflow.id, inflow.id])
 
         let existingIndex = cashTransfers.firstIndex { existing in
             if existing.note.contains(sourceMarker) {
@@ -273,6 +279,65 @@ private extension BudgetModel {
                 note: "\(sourceMarker) Synced from Plaid transaction pair"
             )
         )
+    }
+
+    func upsertUnpairedPlaidTransfer(
+        _ transaction: PlaidSyncedTransaction,
+        accountName: String,
+        accountType: PlaidAccountType
+    ) {
+        if let pendingTransactionId = transaction.pendingTransactionId {
+            _ = removePlaidSingleTransfers(sourceIds: [pendingTransactionId])
+        }
+
+        let sourceMarker = plaidSingleTransferSourceMarker(transaction.id)
+        let currentAccountId = stableFinancialAccountId(forPlaidAccountId: transaction.accountId)
+        let isOutflow = transaction.amount > 0
+        let amount = roundedReconciliationCurrency(abs(transaction.amount))
+        let externalName = "External account"
+        let pendingMarker = transaction.pending ? " [PENDING]" : ""
+        let isCardPayment = accountType == .credit && isLikelyCreditCardPaymentForReconciliation(transaction)
+        let title = isCardPayment ? "Credit card payment" : transactionDisplayName(transaction)
+        let note = "\(sourceMarker)\(pendingMarker) Unpaired Plaid transfer/payment"
+
+        if let existingIndex = cashTransfers.firstIndex(where: { $0.note.contains(sourceMarker) }) {
+            cashTransfers[existingIndex].name = title
+            cashTransfers[existingIndex].amount = amount
+            cashTransfers[existingIndex].date = transaction.date
+            cashTransfers[existingIndex].fromAccountName = isOutflow ? accountName : externalName
+            cashTransfers[existingIndex].toAccountName = isOutflow ? externalName : accountName
+            cashTransfers[existingIndex].fromAccountId = isOutflow ? currentAccountId : nil
+            cashTransfers[existingIndex].toAccountId = isOutflow ? nil : currentAccountId
+            cashTransfers[existingIndex].note = note
+            return
+        }
+
+        cashTransfers.append(
+            CashTransfer(
+                name: title,
+                amount: amount,
+                date: transaction.date,
+                fromAccountName: isOutflow ? accountName : externalName,
+                toAccountName: isOutflow ? externalName : accountName,
+                fromAccountId: isOutflow ? currentAccountId : nil,
+                toAccountId: isOutflow ? nil : currentAccountId,
+                note: note
+            )
+        )
+    }
+
+    func plaidSingleTransferSourceMarker(_ transactionId: String) -> String {
+        "[PLAID_SINGLE:\(transactionId)]"
+    }
+
+    @discardableResult
+    func removePlaidSingleTransfers(sourceIds: [String]) -> Int {
+        let markers = sourceIds.map(plaidSingleTransferSourceMarker)
+        let oldCount = cashTransfers.count
+        cashTransfers.removeAll { transfer in
+            markers.contains { transfer.note.contains($0) }
+        }
+        return oldCount - cashTransfers.count
     }
 
     func plaidTransferSourceMarker(outflowId: String, inflowId: String) -> String {
@@ -679,8 +744,9 @@ private extension BudgetModel {
         expenses.removeAll { $0.plaidMetadata?.transactionId == id }
         let oldIncomeCount = incomes.count
         incomes.removeAll { $0.plaidMetadata?.transactionId == id }
+        let removedSingleTransfers = removePlaidSingleTransfers(sourceIds: [id])
         clearPlaidReviewItems(sourceIds: [id])
-        return (oldExpenseCount - expenses.count) + (oldIncomeCount - incomes.count)
+        return (oldExpenseCount - expenses.count) + (oldIncomeCount - incomes.count) + removedSingleTransfers
     }
 
     func reconciliationMetadata(
