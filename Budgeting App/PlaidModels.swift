@@ -18,6 +18,7 @@ struct PlaidSourceMetadata: Codable, Sendable, Equatable {
     var lastSyncedAt: Date
     var status: PlaidImportStatus
     var matchConfidence: Double?
+    var isPending: Bool?
 
     init(
         itemId: String,
@@ -29,7 +30,8 @@ struct PlaidSourceMetadata: Codable, Sendable, Equatable {
         importedAt: Date = Date(),
         lastSyncedAt: Date = Date(),
         status: PlaidImportStatus = .imported,
-        matchConfidence: Double? = nil
+        matchConfidence: Double? = nil,
+        isPending: Bool? = nil
     ) {
         self.itemId = itemId
         self.accountId = accountId
@@ -41,6 +43,7 @@ struct PlaidSourceMetadata: Codable, Sendable, Equatable {
         self.lastSyncedAt = lastSyncedAt
         self.status = status
         self.matchConfidence = matchConfidence
+        self.isPending = isPending
     }
 }
 
