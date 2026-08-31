@@ -192,6 +192,7 @@ struct ContentView: View {
     @AppStorage("calendar.showCreditDue") private var calendarShowCreditDue = true
     @AppStorage("calendar.showPortfolio") private var calendarShowPortfolio = false
     @State private var calendarEventCache: [Date: [CalendarEventItem]] = [:]
+    @State private var calendarCacheRefreshTask: Task<Void, Never>?
     @State private var selectedPortfolioTransaction: PortfolioTransaction?
     @State private var editingRecurringPayment: RecurringPayment?
     @State private var showingCreditAccounts = false
@@ -848,6 +849,7 @@ struct ContentView: View {
             .onDisappear {
                 stopHoldingsAutoRefreshLoop()
                 stopWatchlistAlertLoop()
+                calendarCacheRefreshTask?.cancel()
             }
             .onChange(of: selectedMonth) { _, newValue in
                 budget.income = budget.income(for: newValue)
@@ -870,26 +872,35 @@ struct ContentView: View {
             }
             .onChange(of: budget.expenses) { _, _ in
                 updateMonthlyData()
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.incomes) { _, _ in
                 updateMonthlyData()
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.savingsEntries) { _, _ in
                 updateMonthlyData()
             }
             .onChange(of: budget.creditAccounts) { _, _ in
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.portfolioTransactions) { _, _ in
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.cashTransfers) { _, _ in
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.recurringPayments) { _, _ in
-                rebuildCalendarEventCache()
+                scheduleCalendarEventCacheRebuild()
+            }
+            .onChange(of: visibleCalendarWeekStart) { _, _ in
+                scheduleCalendarEventCacheRebuild()
+            }
+            .onChange(of: calendarFocusDate) { _, _ in
+                scheduleCalendarEventCacheRebuild()
+            }
+            .onChange(of: calendarViewMode) { _, _ in
+                scheduleCalendarEventCacheRebuild()
             }
             .onChange(of: budget.watchlistTickers) { _, _ in
                 guard selectedTab == .home else { return }
@@ -3111,16 +3122,45 @@ struct ContentView: View {
         Calendar.current.startOfDay(for: date)
     }
 
+    private var calendarCacheDates: [Date] {
+        let calendar = Calendar.current
+        let anchor = calendarViewMode == .month ? visibleCalendarMonth : calendarFocusDate
+        guard let month = calendar.dateInterval(of: .month, for: anchor),
+              let start = calendar.date(byAdding: .month, value: -1, to: month.start),
+              let end = calendar.date(byAdding: .month, value: 2, to: month.start) else {
+            return [calendarDayKey(for: anchor)]
+        }
+
+        var dates: [Date] = []
+        var cursor = calendar.startOfDay(for: start)
+        while cursor < end {
+            dates.append(cursor)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return dates
+    }
+
     private func rebuildCalendarEventCache() {
+        let dates = calendarCacheDates
         calendarEventCache = Dictionary(
-            uniqueKeysWithValues: calendarWeeks.flatMap(\.days).map { date in
+            uniqueKeysWithValues: dates.map { date in
                 (calendarDayKey(for: date), calendarEvents(for: date))
             }
         )
     }
 
+    private func scheduleCalendarEventCacheRebuild() {
+        calendarCacheRefreshTask?.cancel()
+        calendarCacheRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            rebuildCalendarEventCache()
+        }
+    }
+
     private func cachedCalendarEvents(for date: Date) -> [CalendarEventItem] {
-        calendarEventCache[calendarDayKey(for: date)] ?? []
+        calendarEventCache[calendarDayKey(for: date)] ?? calendarEvents(for: date)
     }
 
     private func filteredCalendarEvents(for date: Date) -> [CalendarEventItem] {
