@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,23 +29,24 @@ jobs:
           grep -q 'Wealthfront does not expose its native Cash Category' 'Budgeting App/BankCashCategories.swift'
 
       - name: Build Momo's Money
+        shell: bash
         run: |
+          set -o pipefail
           xcodebuild \
-            -project 'Budgeting App.xcodeproj' \
-            -scheme 'Budgeting App' \
+            -project "Budgeting App.xcodeproj" \
+            -scheme "Budgeting App" \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: Commit validated product changes
+        shell: bash
         run: |
           rm -f .github/workflows/tim-112-bank-cash-categories-validation.yml
           rm -f .github/scripts/tim112_bank_cash_categories_patch.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m 'TIM-112 add functional local cash categories to bank accounts'
+          git commit -m "TIM-112 add functional local cash categories to bank accounts"
           git push origin HEAD:timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
-
-# Retry after scoping duplicated bank/credit ledger anchors.
