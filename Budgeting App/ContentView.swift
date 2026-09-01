@@ -1474,23 +1474,30 @@ struct ContentView: View {
     }
 
     private var budgetPlanSubmenu: some View {
-        budgetSubmenuPage(title: "Plan", subtitle: "Budget setup and monthly targets.", systemImage: "slider.horizontal.3") {
-            planHighlightsSection
-            overviewSection
-            incomeSection
+        budgetSubmenuPage(title: "Plan", subtitle: "Assign this month's income before you spend it.", systemImage: "slider.horizontal.3") {
+            MonthlyPlanWorkspaceView(
+                budget: budget,
+                selectedMonth: $selectedMonth,
+                onAddNeeds: { showingAddNeedsCategory = true },
+                onAddWants: { showingAddWantsCategory = true },
+                onAddSavings: { showingAddSavingsGoal = true },
+                onEditCategory: { editingCategory = $0 },
+                onEditSavingsGoal: { editingSavingsGoal = $0 }
+            )
             if budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
                 nextStepSection
             }
-            budgetBreakdownSection
+            incomeSection
             needsSection
             wantsSection
             savingsSection
         }
         .onAppear {
-            planHighlightsExpanded = true
-            overviewExpanded = true
             incomeExpanded = true
-            budgetBreakdownExpanded = true
+            needsExpanded = true
+            wantsExpanded = true
+            savingsExpanded = true
+            budget.applyMonthlyAllocations(for: selectedMonth)
         }
     }
 

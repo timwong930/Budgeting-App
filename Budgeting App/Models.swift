@@ -2523,6 +2523,7 @@ class BudgetModel: ObservableObject {
         applyBalanceImpact(for: previousExpense, multiplier: -1)
         let resolved = resolvingAccountReferences(for: updatedExpense)
         expenses[index] = resolved
+        rememberPersistentCategoryRule(for: resolved, aliases: [previousExpense.name])
         applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
@@ -2607,17 +2608,16 @@ class BudgetModel: ObservableObject {
 
     func applyMonthlyAllocations(for date: Date) {
         let key = Self.monthKey(for: date)
-        let previousKey = Self.monthKey(for: Calendar.current.date(byAdding: .month, value: -1, to: date) ?? date)
 
         if incomeByMonth[key] == nil {
-            incomeByMonth[key] = incomeByMonth[previousKey] ?? income
+            incomeByMonth[key] = latestPriorIncome(before: key) ?? income
         }
 
         var needsMonth = needsAllocationsByMonth[key] ?? [:]
         for index in needsCategories.indices {
             let id = needsCategories[index].id
             let value = needsMonth[id]
-                ?? needsAllocationsByMonth[previousKey]?[id]
+                ?? latestPriorAllocation(in: needsAllocationsByMonth, before: key, categoryId: id)
                 ?? needsCategories[index].allocatedAmount
             needsMonth[id] = value
             needsCategories[index].allocatedAmount = value
@@ -2628,12 +2628,30 @@ class BudgetModel: ObservableObject {
         for index in wantsCategories.indices {
             let id = wantsCategories[index].id
             let value = wantsMonth[id]
-                ?? wantsAllocationsByMonth[previousKey]?[id]
+                ?? latestPriorAllocation(in: wantsAllocationsByMonth, before: key, categoryId: id)
                 ?? wantsCategories[index].allocatedAmount
             wantsMonth[id] = value
             wantsCategories[index].allocatedAmount = value
         }
         wantsAllocationsByMonth[key] = wantsMonth
+    }
+
+    private func latestPriorIncome(before monthKey: String) -> Double? {
+        for key in incomeByMonth.keys.filter({ $0 < monthKey }).sorted(by: >) {
+            if let value = incomeByMonth[key] { return value }
+        }
+        return nil
+    }
+
+    private func latestPriorAllocation(
+        in allocations: [String: [UUID: Double]],
+        before monthKey: String,
+        categoryId: UUID
+    ) -> Double? {
+        for key in allocations.keys.filter({ $0 < monthKey }).sorted(by: >) {
+            if let value = allocations[key]?[categoryId] { return value }
+        }
+        return nil
     }
 
     func setAllocation(_ amount: Double, for categoryId: UUID, section: BudgetSection, date: Date) {
@@ -2643,10 +2661,16 @@ class BudgetModel: ObservableObject {
             var month = needsAllocationsByMonth[key] ?? [:]
             month[categoryId] = amount
             needsAllocationsByMonth[key] = month
+            if let index = needsCategories.firstIndex(where: { $0.id == categoryId }) {
+                needsCategories[index].allocatedAmount = amount
+            }
         case .wants:
             var month = wantsAllocationsByMonth[key] ?? [:]
             month[categoryId] = amount
             wantsAllocationsByMonth[key] = month
+            if let index = wantsCategories.firstIndex(where: { $0.id == categoryId }) {
+                wantsCategories[index].allocatedAmount = amount
+            }
         }
     }
 

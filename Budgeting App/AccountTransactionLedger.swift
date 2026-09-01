@@ -308,11 +308,13 @@ extension BudgetModel {
     }
 
     private func ledgerExpenseDetail(_ expense: Expense) -> String {
+        let category = categoryName(for: expense)
+        let categoryLabel = "\(expense.section.title) • \(category)"
         let note = expense.note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty, note != "Plaid pending transaction" {
-            return note
+            return "\(categoryLabel) • \(note)"
         }
-        return expense.section.title
+        return categoryLabel
     }
 
     private func ledgerIsPending(_ metadata: PlaidSourceMetadata?, note: String) -> Bool {
@@ -334,6 +336,7 @@ extension BudgetModel {
 struct BankAccountLedgerView: View {
     @Binding var account: BankAccount
     @ObservedObject var budget: BudgetModel
+    @State private var editingEntry: AccountLedgerEntry?
 
     private var entries: [AccountLedgerEntry] {
         budget.bankLedgerEntries(for: account)
@@ -362,10 +365,15 @@ struct BankAccountLedgerView: View {
                 .padding(.vertical, 4)
             }
 
-            AccountLedgerSection(entries: entries)
+            AccountLedgerSection(entries: entries, onEdit: { editingEntry = $0 })
         }
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editingEntry) { entry in
+            AccountLedgerTransactionEditor(entry: entry, budget: budget)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink("Edit") {
@@ -379,6 +387,7 @@ struct BankAccountLedgerView: View {
 struct CreditAccountLedgerView: View {
     @Binding var account: CreditAccount
     @ObservedObject var budget: BudgetModel
+    @State private var editingEntry: AccountLedgerEntry?
 
     private var entries: [AccountLedgerEntry] {
         budget.creditLedgerEntries(for: account)
@@ -435,10 +444,15 @@ struct CreditAccountLedgerView: View {
                 .padding(.vertical, 4)
             }
 
-            AccountLedgerSection(entries: entries)
+            AccountLedgerSection(entries: entries, onEdit: { editingEntry = $0 })
         }
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editingEntry) { entry in
+            AccountLedgerTransactionEditor(entry: entry, budget: budget)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink("Edit") {
@@ -449,8 +463,63 @@ struct CreditAccountLedgerView: View {
     }
 }
 
+private struct AccountLedgerTransactionEditor: View {
+    let entry: AccountLedgerEntry
+    @ObservedObject var budget: BudgetModel
+
+    private var parts: [Substring] { entry.id.split(separator: "|") }
+    private var sourceKind: String? { parts.first.map(String.init) }
+    private var sourceId: UUID? {
+        guard parts.count > 1 else { return nil }
+        return UUID(uuidString: String(parts[1]))
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let sourceId {
+            switch sourceKind {
+            case "expense", "purchase", "payment":
+                if let expense = budget.expenses.first(where: { $0.id == sourceId }) {
+                    EditExpenseView(budget: budget, expense: expense)
+                } else {
+                    missingTransaction
+                }
+            case "income", "refund":
+                if let income = budget.incomes.first(where: { $0.id == sourceId }) {
+                    EditIncomeView(budget: budget, income: income)
+                } else {
+                    missingTransaction
+                }
+            case "transfer", "card-transfer":
+                if let transfer = budget.cashTransfers.first(where: { $0.id == sourceId }) {
+                    CashTransferEditorView(
+                        budget: budget,
+                        selectedDate: transfer.date,
+                        existingTransfer: transfer
+                    )
+                } else {
+                    missingTransaction
+                }
+            default:
+                missingTransaction
+            }
+        } else {
+            missingTransaction
+        }
+    }
+
+    private var missingTransaction: some View {
+        ContentUnavailableView(
+            "Transaction Unavailable",
+            systemImage: "exclamationmark.triangle",
+            description: Text("This transaction changed during sync. Close this sheet and open it again.")
+        )
+    }
+}
+
 private struct AccountLedgerSection: View {
     let entries: [AccountLedgerEntry]
+    let onEdit: (AccountLedgerEntry) -> Void
 
     var body: some View {
         Section("Transactions") {
@@ -462,7 +531,13 @@ private struct AccountLedgerSection: View {
                 )
             } else {
                 ForEach(entries) { entry in
-                    AccountLedgerRow(entry: entry)
+                    Button {
+                        onEdit(entry)
+                    } label: {
+                        AccountLedgerRow(entry: entry)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens transaction editing")
                 }
             }
         }
@@ -516,6 +591,11 @@ private struct AccountLedgerRow: View {
             Text(entry.signedAmount, format: .currency(code: "USD").sign(strategy: .always()))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(entry.signedAmount > 0 ? .green : .primary)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 3)
         }
         .padding(.vertical, 2)
     }

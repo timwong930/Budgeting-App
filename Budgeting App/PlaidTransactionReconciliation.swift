@@ -463,7 +463,7 @@ private extension BudgetModel {
             return .reconciled
         }
 
-        if transaction.category == nil {
+        if transaction.category == nil && persistentCategoryAssignment(for: transaction) == nil {
             let added = upsertPlaidReviewItem(
                 sourceId: transaction.id,
                 title: expense.name,
@@ -574,7 +574,7 @@ private extension BudgetModel {
         accountName: String,
         syncedAt: Date
     ) -> Expense {
-        let mapped = mappedReconciliationCategory(for: transaction.category)
+        let mapped = persistentCategoryAssignment(for: transaction) ?? mappedReconciliationCategory(for: transaction.category)
         return Expense(
             id: existing.id,
             name: existing.name,
@@ -607,7 +607,7 @@ private extension BudgetModel {
     }
 
     func makeReconciledExpense(from transaction: PlaidSyncedTransaction, accountName: String, syncedAt: Date) -> Expense {
-        let mapped = mappedReconciliationCategory(for: transaction.category)
+        let mapped = persistentCategoryAssignment(for: transaction) ?? mappedReconciliationCategory(for: transaction.category)
         return Expense(
             name: transactionDisplayName(transaction),
             amount: roundedReconciliationCurrency(abs(transaction.amount)),
