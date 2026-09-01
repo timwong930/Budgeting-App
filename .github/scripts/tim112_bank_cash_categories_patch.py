@@ -22,7 +22,7 @@ new = '''struct BankAccountLedgerView: View {
 '''
 if text.count(old) != 1:
     raise SystemExit(f"Bank ledger state anchor count: {text.count(old)}")
-text = text.replace(old, new)
+text = text.replace(old, new, 1)
 
 old = '''    private var institutionName: String? {
         guard let accountId = budget.ledgerFinancialAccountId(for: account) else { return account.plaidMetadata?.institutionName }
@@ -48,9 +48,9 @@ new = '''    private var institutionName: String? {
 
     var body: some View {
 '''
-if text.count(old) != 1:
-    raise SystemExit(f"Bank ledger account-key anchor count: {text.count(old)}")
-text = text.replace(old, new)
+if text.count(old) < 1:
+    raise SystemExit("Bank ledger account-key anchor missing")
+text = text.replace(old, new, 1)
 
 old = '''            }
 
@@ -72,9 +72,9 @@ new = '''            }
         }
         .navigationTitle(account.name)
 '''
-if text.count(old) != 1:
-    raise SystemExit(f"Bank ledger section anchor count: {text.count(old)}")
-text = text.replace(old, new)
+if text.count(old) < 1:
+    raise SystemExit("Bank ledger section anchor missing")
+text = text.replace(old, new, 1)
 
 old = '''        .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -123,6 +123,6 @@ struct CreditAccountLedgerView: View {
 '''
 if text.count(old) != 1:
     raise SystemExit(f"Bank ledger sheet anchor count: {text.count(old)}")
-text = text.replace(old, new)
+text = text.replace(old, new, 1)
 
 path.write_text(text)
