@@ -1,4 +1,4 @@
-name: TIM-112 bank cash categories diagnostic 2
+name: TIM-112 bank cash categories validation
 
 on:
   push:
@@ -11,27 +11,31 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  validate:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
           ref: timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
 
-      - name: Apply first compiler fix
+      - name: Apply known compiler fixes
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
           path = Path('Budgeting App/BankCashCategories.swift')
           text = path.read_text()
-          old = 'format: .currency(code: \\"USD\\")'
-          if old in text:
-              text = text.replace(old, 'format: .currency(code: "USD")', 1)
+          if 'import Combine' not in text:
+              text = text.replace('import SwiftUI\n', 'import SwiftUI\nimport Combine\n', 1)
+          text = text.replace(
+              '.foregroundStyle(unallocated >= 0 ? .primary : .red)',
+              '.foregroundStyle(unallocated >= 0 ? Color.primary : Color.red)'
+          )
           path.write_text(text)
           PY
+          rm -f TIM112_BUILD_ERRORS.txt TIM112_BUILD_ERRORS2.txt TIM112_BUILD_ERRORS3.txt
 
-      - name: Capture next compiler diagnostics
+      - name: Build and persist result
         shell: bash
         run: |
           set +e
@@ -43,18 +47,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build > /tmp/tim112-build.log 2>&1
           status=$?
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$status" -eq 0 ]; then
+            rm -f .github/workflows/tim-112-bank-cash-categories-validation.yml
+            rm -f .github/scripts/tim112_bank_cash_categories_patch.py
+            rm -f TIM112_BUILD_ERRORS.txt TIM112_BUILD_ERRORS2.txt TIM112_BUILD_ERRORS3.txt
+            git add -A
+            git commit -m "TIM-112 validate local bank cash categories"
+            git push origin HEAD:timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
+            exit 0
+          fi
+
           {
             echo "xcodebuild exit status: $status"
             echo "--- compiler diagnostics ---"
             grep -E "error:|warning:" /tmp/tim112-build.log | tail -160 || true
-          } > TIM112_BUILD_ERRORS2.txt
-          exit 0
-
-      - name: Commit diagnostic snapshot
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "TIM-112 capture second build diagnostics"
+          } > TIM112_BUILD_ERRORS3.txt
+          git add 'Budgeting App/BankCashCategories.swift' TIM112_BUILD_ERRORS3.txt TIM112_BUILD_ERRORS.txt TIM112_BUILD_ERRORS2.txt 2>/dev/null || true
+          git commit -m "TIM-112 capture remaining build diagnostics"
           git push origin HEAD:timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
+          exit "$status"
