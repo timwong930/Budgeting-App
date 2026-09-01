@@ -1,4 +1,4 @@
-name: TIM-112 bank cash categories final validation
+name: TIM-112 bank cash categories diagnostic 2
 
 on:
   push:
@@ -11,14 +11,14 @@ permissions:
   contents: write
 
 jobs:
-  validate:
+  diagnose:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
           ref: timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
 
-      - name: Fix captured Swift interpolation typo
+      - name: Apply first compiler fix
         shell: bash
         run: |
           python3 <<'PY'
@@ -26,32 +26,35 @@ jobs:
           path = Path('Budgeting App/BankCashCategories.swift')
           text = path.read_text()
           old = 'format: .currency(code: \\"USD\\")'
-          if old not in text:
-              raise SystemExit('expected escaped USD interpolation not found')
-          path.write_text(text.replace(old, 'format: .currency(code: "USD")', 1))
+          if old in text:
+              text = text.replace(old, 'format: .currency(code: "USD")', 1)
+          path.write_text(text)
           PY
-          rm -f TIM112_BUILD_ERRORS.txt
 
-      - name: Build Momo's Money
+      - name: Capture next compiler diagnostics
         shell: bash
         run: |
-          set -o pipefail
+          set +e
           xcodebuild \
             -project "Budgeting App.xcodeproj" \
             -scheme "Budgeting App" \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build > /tmp/tim112-build.log 2>&1
+          status=$?
+          {
+            echo "xcodebuild exit status: $status"
+            echo "--- compiler diagnostics ---"
+            grep -E "error:|warning:" /tmp/tim112-build.log | tail -160 || true
+          } > TIM112_BUILD_ERRORS2.txt
+          exit 0
 
-      - name: Commit validated product changes and cleanup
+      - name: Commit diagnostic snapshot
         shell: bash
         run: |
-          rm -f .github/workflows/tim-112-bank-cash-categories-validation.yml
-          rm -f .github/scripts/tim112_bank_cash_categories_patch.py
-          rm -f TIM112_BUILD_ERRORS.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "TIM-112 validate local bank cash categories"
+          git commit -m "TIM-112 capture second build diagnostics"
           git push origin HEAD:timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
