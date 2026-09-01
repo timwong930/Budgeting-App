@@ -125,7 +125,7 @@ struct BankCashCategoriesSection: View {
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.primary)
                                     if category.targetAmount > 0 {
-                                        Text("Target \(category.targetAmount, format: .currency(code: \"USD\"))")
+                                        Text("Target \(category.targetAmount, format: .currency(code: "USD"))")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     } else {
