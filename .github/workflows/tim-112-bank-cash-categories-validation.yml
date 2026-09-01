@@ -47,3 +47,5 @@ jobs:
           git add -A
           git commit -m 'TIM-112 add functional local cash categories to bank accounts'
           git push origin HEAD:timothyhwo2000/tim-112-add-local-cash-categoriesbuckets-inside-bank-accounts
+
+# Retry after scoping duplicated bank/credit ledger anchors.
