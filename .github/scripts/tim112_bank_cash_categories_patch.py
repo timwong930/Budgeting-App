@@ -6,12 +6,14 @@ text = path.read_text()
 old = '''struct BankAccountLedgerView: View {
     @Binding var account: BankAccount
     @ObservedObject var budget: BudgetModel
+    @State private var editingEntry: AccountLedgerEntry?
 
     private var entries: [AccountLedgerEntry] {
 '''
 new = '''struct BankAccountLedgerView: View {
     @Binding var account: BankAccount
     @ObservedObject var budget: BudgetModel
+    @State private var editingEntry: AccountLedgerEntry?
     @StateObject private var cashCategoryStore = BankCashCategoryStore()
     @State private var showingAddCashCategory = false
     @State private var editingCashCategory: BankCashCategory?
@@ -52,7 +54,7 @@ text = text.replace(old, new)
 
 old = '''            }
 
-            AccountLedgerSection(entries: entries, onSelect: editLedgerEntry)
+            AccountLedgerSection(entries: entries, onEdit: { editingEntry = $0 })
         }
         .navigationTitle(account.name)
 '''
@@ -66,7 +68,7 @@ new = '''            }
                 onEdit: { editingCashCategory = $0 }
             )
 
-            AccountLedgerSection(entries: entries, onSelect: editLedgerEntry)
+            AccountLedgerSection(entries: entries, onEdit: { editingEntry = $0 })
         }
         .navigationTitle(account.name)
 '''
@@ -82,6 +84,9 @@ old = '''        .toolbar {
             }
         }
     }
+}
+
+struct CreditAccountLedgerView: View {
 '''
 new = '''        .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -112,6 +117,9 @@ new = '''        .toolbar {
             .presentationDragIndicator(.visible)
         }
     }
+}
+
+struct CreditAccountLedgerView: View {
 '''
 if text.count(old) != 1:
     raise SystemExit(f"Bank ledger sheet anchor count: {text.count(old)}")
