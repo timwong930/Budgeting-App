@@ -14,6 +14,7 @@ struct CuanMarketModelsTests {
         testPlaidBackendDecoderAcceptsPlaidDateOnlyStrings()
         testPlaidTransactionImportDedupesManualExpense()
         testPlaidCreditAccountUpdateUsesLiabilityFields()
+        testPlaidSyncPreservesUserRenamedAccountDisplayNames()
         testPlaidHoldingsSnapshotPreservesTickerMetadata()
         testPlaidWatchlistImportDedupesAndUppercases()
         testPlaidOptionHoldingsDoNotImportAsStockTickers()
@@ -280,6 +281,58 @@ struct CuanMarketModelsTests {
         assert(account?.startingBalance == 321.12, "Expected current balance to update starting balance for Plaid-managed card")
         assert(account?.creditLimit == 5_000, "Expected credit limit to come from Plaid")
         assert(account?.expectedAmount == 35, "Expected minimum payment to update expected amount")
+    }
+
+    private static func testPlaidSyncPreservesUserRenamedAccountDisplayNames() {
+        let budget = BudgetModel()
+        let initialPayload = PlaidSyncPayload(
+            accounts: [
+                PlaidSyncedAccount(id: "bank-rename", itemId: "item-bank", name: "Plaid Checking", type: .depository, subtype: "checking", currentBalance: 1_000, availableBalance: 900, creditLimit: nil, institutionName: "Example Bank"),
+                PlaidSyncedAccount(id: "card-rename", itemId: "item-card", name: "Plaid Credit", type: .credit, subtype: "credit card", currentBalance: 250, availableBalance: nil, creditLimit: 5_000, institutionName: "Example Card Bank")
+            ],
+            transactions: [],
+            creditLiabilities: [
+                PlaidSyncedCreditLiability(accountId: "card-rename", itemId: "item-card", minimumPaymentAmount: 30, nextPaymentDueDate: Date(timeIntervalSince1970: 1_780_500_000), lastStatementBalance: 200, lastStatementIssueDate: nil, aprPercentage: 20)
+            ],
+            holdings: [],
+            investmentTransactions: [],
+            connectionStatuses: []
+        )
+        _ = budget.applyPlaidSync(initialPayload)
+
+        guard let bankIndex = budget.bankAccounts.firstIndex(where: { $0.plaidMetadata?.accountId == "bank-rename" }),
+              let cardIndex = budget.creditAccounts.firstIndex(where: { $0.plaidMetadata?.accountId == "card-rename" }) else {
+            assertionFailure("Expected Plaid accounts to exist before rename")
+            return
+        }
+
+        budget.bankAccounts[bankIndex].name = "Emergency Cash"
+        budget.creditAccounts[cardIndex].name = "Daily Card"
+
+        let refreshedPayload = PlaidSyncPayload(
+            accounts: [
+                PlaidSyncedAccount(id: "bank-rename", itemId: "item-bank", name: "Plaid Checking", type: .depository, subtype: "checking", currentBalance: 1_250, availableBalance: 1_100, creditLimit: nil, institutionName: "Example Bank"),
+                PlaidSyncedAccount(id: "card-rename", itemId: "item-card", name: "Plaid Credit", type: .credit, subtype: "credit card", currentBalance: 300, availableBalance: nil, creditLimit: 6_000, institutionName: "Example Card Bank")
+            ],
+            transactions: [],
+            creditLiabilities: [
+                PlaidSyncedCreditLiability(accountId: "card-rename", itemId: "item-card", minimumPaymentAmount: 40, nextPaymentDueDate: Date(timeIntervalSince1970: 1_781_000_000), lastStatementBalance: 275, lastStatementIssueDate: nil, aprPercentage: 20)
+            ],
+            holdings: [],
+            investmentTransactions: [],
+            connectionStatuses: []
+        )
+        _ = budget.applyPlaidSync(refreshedPayload)
+
+        assert(budget.bankAccounts[bankIndex].name == "Emergency Cash", "Expected Plaid sync to preserve user-renamed bank display name")
+        assert(budget.creditAccounts[cardIndex].name == "Daily Card", "Expected Plaid sync to preserve user-renamed credit-card display name")
+        assert(budget.bankAccounts[bankIndex].balance == 1_250, "Expected Plaid bank balance to keep refreshing after rename")
+        assert(budget.creditAccounts[cardIndex].startingBalance == 300, "Expected Plaid credit balance to keep refreshing after rename")
+        assert(budget.creditAccounts[cardIndex].creditLimit == 6_000, "Expected Plaid credit limit to keep refreshing after rename")
+        assert(budget.bankAccounts.filter { $0.plaidMetadata?.accountId == "bank-rename" }.count == 1, "Expected renamed bank account to stay deduplicated by Plaid account ID")
+        assert(budget.creditAccounts.filter { $0.plaidMetadata?.accountId == "card-rename" }.count == 1, "Expected renamed credit account to stay deduplicated by Plaid account ID")
+        assert(budget.financialAccounts.first(where: { $0.externalAccountId == "bank-rename" })?.name == "Emergency Cash", "Expected canonical bank account display name to follow the local rename")
+        assert(budget.financialAccounts.first(where: { $0.externalAccountId == "card-rename" })?.name == "Daily Card", "Expected canonical credit account display name to follow the local rename")
     }
 
     private static func testPlaidHoldingsSnapshotPreservesTickerMetadata() {

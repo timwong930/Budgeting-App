@@ -11,16 +11,17 @@ extension BudgetModel {
         var plaidInvestmentCash = 0.0
 
         for account in payload.accounts {
-            accountNamesById[account.id] = account.name
+            let displayName = localDisplayName(for: account) ?? account.name
+            accountNamesById[account.id] = displayName
             accountTypesById[account.id] = account.type
-            upsertPlaidFinancialAccount(account, syncedAt: now)
+            upsertPlaidFinancialAccount(account, displayName: displayName, syncedAt: now)
             switch account.type {
             case .depository:
-                upsertPlaidBankAccount(account, syncedAt: now)
+                upsertPlaidBankAccount(account, displayName: displayName, syncedAt: now)
                 result.updatedAccounts += 1
             case .credit:
                 let liability = payload.creditLiabilities.first { $0.accountId == account.id }
-                upsertPlaidCreditAccount(account, liability: liability, syncedAt: now)
+                upsertPlaidCreditAccount(account, displayName: displayName, liability: liability, syncedAt: now)
                 result.updatedAccounts += 1
             case .investment:
                 plaidInvestmentValue += account.currentBalance ?? 0
@@ -86,7 +87,32 @@ private enum PlaidTransactionImportResult {
 }
 
 private extension BudgetModel {
-    func upsertPlaidFinancialAccount(_ account: PlaidSyncedAccount, syncedAt: Date) {
+    func localDisplayName(for account: PlaidSyncedAccount) -> String? {
+        let candidate: String?
+        switch account.type {
+        case .depository:
+            candidate = bankAccounts.first(where: { $0.plaidMetadata?.accountId == account.id })?.name
+                ?? financialAccounts.first(where: { $0.externalAccountId == account.id })?.name
+        case .credit:
+            candidate = creditAccounts.first(where: { $0.plaidMetadata?.accountId == account.id })?.name
+                ?? financialAccounts.first(where: { $0.externalAccountId == account.id })?.name
+        case .investment:
+            if let financialAccount = financialAccounts.first(where: { $0.externalAccountId == account.id }) {
+                candidate = portfolioAccounts.first(where: { $0.financialAccountId == financialAccount.id })?.name
+                    ?? financialAccount.name
+            } else {
+                candidate = nil
+            }
+        case .loan, .other:
+            candidate = financialAccounts.first(where: { $0.externalAccountId == account.id })?.name
+        }
+
+        guard let candidate else { return nil }
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : candidate
+    }
+
+    func upsertPlaidFinancialAccount(_ account: PlaidSyncedAccount, displayName: String, syncedAt: Date) {
         let kind: FinancialAccountKind
         switch account.type {
         case .depository: kind = .depository
@@ -98,7 +124,7 @@ private extension BudgetModel {
 
         let financialAccountId: UUID
         if let index = financialAccounts.firstIndex(where: { $0.externalAccountId == account.id }) {
-            financialAccounts[index].name = account.name
+            financialAccounts[index].name = displayName
             financialAccounts[index].institutionName = account.institutionName
             financialAccounts[index].kind = kind
             financialAccounts[index].source = .plaid
@@ -108,7 +134,7 @@ private extension BudgetModel {
             financialAccountId = financialAccounts[index].id
         } else {
             let financialAccount = FinancialAccount(
-                name: account.name,
+                name: displayName,
                 institutionName: account.institutionName,
                 kind: kind,
                 source: .plaid,
@@ -141,7 +167,7 @@ private extension BudgetModel {
         }
     }
 
-    func upsertPlaidBankAccount(_ account: PlaidSyncedAccount, syncedAt: Date) {
+    func upsertPlaidBankAccount(_ account: PlaidSyncedAccount, displayName: String, syncedAt: Date) {
         let metadata = PlaidSourceMetadata(
             itemId: account.itemId,
             accountId: account.id,
@@ -150,7 +176,7 @@ private extension BudgetModel {
         )
         let balance = roundedCurrency(account.currentBalance ?? account.availableBalance ?? 0)
         if let index = bankAccounts.firstIndex(where: { $0.plaidMetadata?.accountId == account.id || normalized($0.name) == normalized(account.name) }) {
-            bankAccounts[index].name = account.name
+            bankAccounts[index].name = displayName
             bankAccounts[index].balance = balance
             bankAccounts[index].plaidMetadata = metadata
             if bankAccounts[index].note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -160,7 +186,7 @@ private extension BudgetModel {
         } else {
             bankAccounts.append(
                 BankAccount(
-                    name: account.name,
+                    name: displayName,
                     balance: balance,
                     note: account.institutionName.map { "Synced from \($0)" } ?? "",
                     plaidMetadata: metadata
@@ -169,7 +195,7 @@ private extension BudgetModel {
         }
     }
 
-    func upsertPlaidCreditAccount(_ account: PlaidSyncedAccount, liability: PlaidSyncedCreditLiability?, syncedAt: Date) {
+    func upsertPlaidCreditAccount(_ account: PlaidSyncedAccount, displayName: String, liability: PlaidSyncedCreditLiability?, syncedAt: Date) {
         let metadata = PlaidSourceMetadata(
             itemId: account.itemId,
             accountId: account.id,
@@ -182,7 +208,7 @@ private extension BudgetModel {
             liability?.aprPercentage.map { "APR \($0)%" }
         ].compactMap { $0 }
         if let index = creditAccounts.firstIndex(where: { $0.plaidMetadata?.accountId == account.id || normalized($0.name) == normalized(account.name) }) {
-            creditAccounts[index].name = account.name
+            creditAccounts[index].name = displayName
             creditAccounts[index].startingBalance = roundedCurrency(account.currentBalance ?? creditAccounts[index].startingBalance)
             creditAccounts[index].expectedAmount = roundedCurrency(liability?.minimumPaymentAmount ?? creditAccounts[index].expectedAmount)
             creditAccounts[index].creditLimit = max(account.creditLimit ?? creditAccounts[index].creditLimit, 0)
@@ -195,7 +221,7 @@ private extension BudgetModel {
         } else {
             creditAccounts.append(
                 CreditAccount(
-                    name: account.name,
+                    name: displayName,
                     closingDay: 1,
                     dueDay: dueDay,
                     startingBalance: roundedCurrency(account.currentBalance ?? 0),
