@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct BankCashCategory: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
@@ -155,11 +156,11 @@ struct BankCashCategoriesSection: View {
 
             HStack {
                 Label(unallocated >= 0 ? "Unallocated" : "Overallocated", systemImage: unallocated >= 0 ? "circle.dashed" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(unallocated >= 0 ? .primary : .red)
+                    .foregroundStyle(unallocated >= 0 ? Color.primary : Color.red)
                 Spacer()
                 Text(unallocated, format: .currency(code: "USD"))
                     .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(unallocated >= 0 ? .primary : .red)
+                    .foregroundStyle(unallocated >= 0 ? Color.primary : Color.red)
             }
 
             if unallocated < -0.005 {
