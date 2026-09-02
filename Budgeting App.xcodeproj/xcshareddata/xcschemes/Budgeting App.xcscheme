@@ -16,8 +16,22 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "1BAFE93B2F1B518D0082AFEF"
-               BuildableName = "Budgeting App.app"
+               BuildableName = "Momo&apos;s Money.app"
                BlueprintName = "Budgeting App"
+               ReferencedContainer = "container:Budgeting App.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "TST000062F4000000082AFEF"
+               BuildableName = "Budgeting AppTests.xctest"
+               BlueprintName = "Budgeting AppTests"
                ReferencedContainer = "container:Budgeting App.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -28,7 +42,20 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldAutocreateTestPlan = "NO">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "TST000062F4000000082AFEF"
+               BuildableName = "Budgeting AppTests.xctest"
+               BlueprintName = "Budgeting AppTests"
+               ReferencedContainer = "container:Budgeting App.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -45,7 +72,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1BAFE93B2F1B518D0082AFEF"
-            BuildableName = "Budgeting App.app"
+            BuildableName = "Momo&apos;s Money.app"
             BlueprintName = "Budgeting App"
             ReferencedContainer = "container:Budgeting App.xcodeproj">
          </BuildableReference>
@@ -62,7 +89,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1BAFE93B2F1B518D0082AFEF"
-            BuildableName = "Budgeting App.app"
+            BuildableName = "Momo&apos;s Money.app"
             BlueprintName = "Budgeting App"
             ReferencedContainer = "container:Budgeting App.xcodeproj">
          </BuildableReference>
