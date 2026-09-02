@@ -18,6 +18,15 @@ struct MonthlyPlanWorkspaceView: View {
         budget.income(for: selectedMonth)
     }
 
+    private var incomeBinding: Binding<Double> {
+        Binding(
+            get: { budget.income(for: selectedMonth) },
+            set: { value in
+                budget.setIncome(max(value, 0), for: selectedMonth)
+            }
+        )
+    }
+
     private var plannedNeeds: Double {
         budget.needsCategories.reduce(0) { $0 + allocation(for: $1, section: .needs) }
     }
@@ -84,14 +93,17 @@ struct MonthlyPlanWorkspaceView: View {
             )
             savingsSection
 
-            Text("Your category list, monthly targets, and Plaid merchant category choices carry forward automatically. You can still change a single month's target without rewriting older months.")
+            Text("Categories stay available every month. Only each month's planned amounts change, and your latest plan carries forward as the starting point for a new month.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
         }
         .onAppear {
-            budget.applyMonthlyAllocations(for: selectedMonth)
+            ensureMonthlyPlan(for: selectedMonth)
+        }
+        .onChange(of: selectedMonth) { _, month in
+            ensureMonthlyPlan(for: month)
         }
     }
 
@@ -154,7 +166,7 @@ struct MonthlyPlanWorkspaceView: View {
                         .foregroundStyle(.secondary)
                     TextField(
                         "0",
-                        value: $budget.income,
+                        value: incomeBinding,
                         format: .number.precision(.fractionLength(0...2))
                     )
                     .keyboardType(.decimalPad)
@@ -374,9 +386,65 @@ struct MonthlyPlanWorkspaceView: View {
         Binding(
             get: { allocation(for: category, section: section) },
             set: { value in
-                budget.setAllocation(max(value, 0), for: category.id, section: section, date: selectedMonth)
+                let amount = max(value, 0)
+                switch section {
+                case .needs:
+                    var month = budget.needsAllocationsByMonth[monthKey] ?? [:]
+                    month[category.id] = amount
+                    budget.needsAllocationsByMonth[monthKey] = month
+                case .wants:
+                    var month = budget.wantsAllocationsByMonth[monthKey] ?? [:]
+                    month[category.id] = amount
+                    budget.wantsAllocationsByMonth[monthKey] = month
+                }
             }
         )
+    }
+
+    private func ensureMonthlyPlan(for date: Date) {
+        let key = BudgetModel.monthKey(for: date)
+
+        if budget.incomeByMonth[key] == nil {
+            let priorIncome = budget.incomeByMonth.keys
+                .filter { $0 < key }
+                .sorted(by: >)
+                .compactMap { budget.incomeByMonth[$0] }
+                .first
+            budget.incomeByMonth[key] = priorIncome ?? budget.income
+        }
+
+        var needsMonth = budget.needsAllocationsByMonth[key] ?? [:]
+        for category in budget.needsCategories where needsMonth[category.id] == nil {
+            needsMonth[category.id] = latestPriorAllocation(
+                in: budget.needsAllocationsByMonth,
+                before: key,
+                categoryId: category.id
+            ) ?? category.allocatedAmount
+        }
+        budget.needsAllocationsByMonth[key] = needsMonth
+
+        var wantsMonth = budget.wantsAllocationsByMonth[key] ?? [:]
+        for category in budget.wantsCategories where wantsMonth[category.id] == nil {
+            wantsMonth[category.id] = latestPriorAllocation(
+                in: budget.wantsAllocationsByMonth,
+                before: key,
+                categoryId: category.id
+            ) ?? category.allocatedAmount
+        }
+        budget.wantsAllocationsByMonth[key] = wantsMonth
+    }
+
+    private func latestPriorAllocation(
+        in allocations: [String: [UUID: Double]],
+        before monthKey: String,
+        categoryId: UUID
+    ) -> Double? {
+        for key in allocations.keys.filter({ $0 < monthKey }).sorted(by: >) {
+            if let value = allocations[key]?[categoryId] {
+                return value
+            }
+        }
+        return nil
     }
 
     private func spent(for categoryId: UUID, section: BudgetSection) -> Double {
