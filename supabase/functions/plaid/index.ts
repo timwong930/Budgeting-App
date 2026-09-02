@@ -167,6 +167,7 @@ async function sync(): Promise<Response> {
     creditLiabilities: [] as JsonRecord[],
     holdings: [] as JsonRecord[],
     investmentTransactions: [] as JsonRecord[],
+    holdingSnapshotAccountIds: [] as string[],
     connectionStatuses: [] as JsonRecord[]
   };
 
@@ -177,8 +178,10 @@ async function sync(): Promise<Response> {
     payload.creditLiabilities.push(...result.creditLiabilities);
     payload.holdings.push(...result.holdings);
     payload.investmentTransactions.push(...result.investmentTransactions);
+    payload.holdingSnapshotAccountIds.push(...result.holdingSnapshotAccountIds);
   }
 
+  payload.holdingSnapshotAccountIds = Array.from(new Set(payload.holdingSnapshotAccountIds));
   payload.connectionStatuses = (await refreshMissingInstitutionNames(await listItems())).map(normalizeConnection);
   return jsonResponse(payload);
 }
@@ -189,8 +192,16 @@ async function syncItem(item: PlaidItem): Promise<{
   creditLiabilities: JsonRecord[];
   holdings: JsonRecord[];
   investmentTransactions: JsonRecord[];
+  holdingSnapshotAccountIds: string[];
 }> {
-  const empty = { accounts: [], transactions: [], creditLiabilities: [], holdings: [], investmentTransactions: [] };
+  const empty = {
+    accounts: [] as JsonRecord[],
+    transactions: [] as JsonRecord[],
+    creditLiabilities: [] as JsonRecord[],
+    holdings: [] as JsonRecord[],
+    investmentTransactions: [] as JsonRecord[],
+    holdingSnapshotAccountIds: [] as string[]
+  };
   try {
     const accessToken = await decryptToken(item.access_token_cipher);
     const institutionName = await refreshInstitutionName(item, accessToken);
@@ -217,7 +228,8 @@ async function syncItem(item: PlaidItem): Promise<{
       transactions: transactionResult.transactions,
       creditLiabilities,
       holdings: investments.holdings,
-      investmentTransactions: investments.transactions
+      investmentTransactions: investments.transactions,
+      holdingSnapshotAccountIds: investments.holdingSnapshotAccountIds
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Plaid sync failed";
@@ -292,28 +304,53 @@ async function fetchLiabilities(item: PlaidItem, accessToken: string): Promise<J
 async function fetchInvestments(item: PlaidItem, accessToken: string): Promise<{
   holdings: JsonRecord[];
   transactions: JsonRecord[];
+  holdingSnapshotAccountIds: string[];
 }> {
-  const result = { holdings: [] as JsonRecord[], transactions: [] as JsonRecord[] };
+  const result = {
+    holdings: [] as JsonRecord[],
+    transactions: [] as JsonRecord[],
+    holdingSnapshotAccountIds: [] as string[]
+  };
 
-  const [holdings, transactions] = await Promise.all([
+  const [holdingResult, transactions] = await Promise.all([
     fetchInvestmentHoldings(item, accessToken),
     fetchAllInvestmentTransactions(item, accessToken)
   ]);
-  result.holdings = holdings;
+  result.holdings = holdingResult.holdings;
+  result.holdingSnapshotAccountIds = holdingResult.holdingSnapshotAccountIds;
   result.transactions = transactions;
 
   return result;
 }
 
-async function fetchInvestmentHoldings(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
+async function fetchInvestmentHoldings(item: PlaidItem, accessToken: string): Promise<{
+  holdings: JsonRecord[];
+  holdingSnapshotAccountIds: string[];
+}> {
   try {
     const data = await plaidFetch("/investments/holdings/get", { access_token: accessToken });
     const securities = securitiesById(arrayValue(data.securities));
-    return arrayValue(data.holdings).map((holding) =>
+    const holdings = arrayValue(data.holdings).map((holding) =>
       normalizeHolding(holding, securities.get(stringValue(holding.security_id) || ""), item.item_id)
     );
+    const accountIds = arrayValue(data.accounts).flatMap((account) => {
+      const accountId = stringValue(account.account_id);
+      return accountId ? [accountId] : [];
+    });
+    const holdingAccountIds = holdings.flatMap((holding) => {
+      const accountId = stringValue(holding.accountId);
+      return accountId ? [accountId] : [];
+    });
+    return {
+      holdings,
+      holdingSnapshotAccountIds: Array.from(new Set([...accountIds, ...holdingAccountIds]))
+    };
   } catch (error) {
-    if (isProductUnavailable(error, "PRODUCT_INVESTMENTS")) return [];
+    if (isProductUnavailable(error, "PRODUCT_INVESTMENTS")) {
+      const message = error instanceof Error ? error.message : "Investment holdings unavailable";
+      await logSync(item.item_id, "investment-holdings-unavailable", message);
+      return { holdings: [], holdingSnapshotAccountIds: [] };
+    }
     throw error;
   }
 }
