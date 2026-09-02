@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT="Budgeting App.xcodeproj"
-SCHEME="Budgeting App"
+SCHEME="Budgeting AppTests"
 
 if ! command -v xcodebuild >/dev/null 2>&1; then
   echo "error: xcodebuild is required. Run this script on a Mac with Xcode installed." >&2
@@ -11,6 +11,21 @@ fi
 
 if ! command -v xcrun >/dev/null 2>&1; then
   echo "error: xcrun is required. Run this script on a Mac with Xcode installed." >&2
+  exit 1
+fi
+
+SCHEME_LIST="$(xcodebuild -project "${PROJECT}" -list 2>&1)" || {
+  echo "error: Xcode could not read ${PROJECT}." >&2
+  echo "${SCHEME_LIST}" >&2
+  exit 1
+}
+
+if ! grep -Fq "${SCHEME}" <<<"${SCHEME_LIST}"; then
+  echo "error: shared scheme '${SCHEME}' is not visible to xcodebuild." >&2
+  echo "Pull the latest TIM-88 branch, close/reopen Xcode, then retry." >&2
+  echo >&2
+  echo "xcodebuild currently reports:" >&2
+  echo "${SCHEME_LIST}" >&2
   exit 1
 fi
 
@@ -33,7 +48,7 @@ if [[ -z "${DEVICE_ID}" ]]; then
   exit 1
 fi
 
-echo "Running ${SCHEME} tests on simulator ${DEVICE_ID}"
+echo "Running ${SCHEME} on simulator ${DEVICE_ID}"
 exec xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \
