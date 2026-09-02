@@ -86,20 +86,59 @@ extension BudgetModel {
         let displayName = transaction.merchantName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? transaction.merchantName!
             : transaction.name
-        guard let rule = TransactionCategoryRuleStore.rule(for: displayName) else { return nil }
 
-        switch rule.section {
-        case .needs:
-            guard needsCategories.contains(where: { $0.id == rule.categoryId }) else {
-                TransactionCategoryRuleStore.removeRule(for: displayName)
-                return nil
+        if let rule = TransactionCategoryRuleStore.rule(for: displayName) {
+            switch rule.section {
+            case .needs:
+                if needsCategories.contains(where: { $0.id == rule.categoryId }) {
+                    return (rule.section, rule.categoryId)
+                }
+            case .wants:
+                if wantsCategories.contains(where: { $0.id == rule.categoryId }) {
+                    return (rule.section, rule.categoryId)
+                }
             }
-        case .wants:
-            guard wantsCategories.contains(where: { $0.id == rule.categoryId }) else {
-                TransactionCategoryRuleStore.removeRule(for: displayName)
-                return nil
-            }
+            TransactionCategoryRuleStore.removeRule(for: displayName)
         }
-        return (rule.section, rule.categoryId)
+
+        return uncategorizedCategoryAssignment(for: transaction)
+    }
+
+    private func uncategorizedCategoryAssignment(
+        for transaction: PlaidSyncedTransaction
+    ) -> (section: BudgetSection, categoryId: UUID) {
+        let plaidCategory = (transaction.category ?? "").lowercased()
+        let section: BudgetSection = (
+            plaidCategory.contains("travel") ||
+            plaidCategory.contains("entertainment") ||
+            plaidCategory.contains("recreation") ||
+            plaidCategory.contains("shops")
+        ) ? .wants : .needs
+
+        switch section {
+        case .needs:
+            if let existing = needsCategories.first(where: { $0.name.caseInsensitiveCompare("Uncategorized") == .orderedSame }) {
+                return (.needs, existing.id)
+            }
+            if let legacyIndex = needsCategories.firstIndex(where: { $0.name.caseInsensitiveCompare("Plaid Needs") == .orderedSame }) {
+                needsCategories[legacyIndex].name = "Uncategorized"
+                return (.needs, needsCategories[legacyIndex].id)
+            }
+            let category = Category(name: "Uncategorized", allocatedAmount: 0)
+            needsCategories.append(category)
+            return (.needs, category.id)
+
+        case .wants:
+            if let existing = wantsCategories.first(where: { $0.name.caseInsensitiveCompare("Uncategorized") == .orderedSame }) {
+                return (.wants, existing.id)
+            }
+            if let legacyIndex = wantsCategories.firstIndex(where: { $0.name.caseInsensitiveCompare("Plaid Wants") == .orderedSame }) {
+                wantsCategories[legacyIndex].name = "Uncategorized"
+                return (.wants, wantsCategories[legacyIndex].id)
+            }
+            let category = Category(name: "Uncategorized", allocatedAmount: 0)
+            wantsCategories.append(category)
+            return (.wants, category.id)
+        }
     }
 }
