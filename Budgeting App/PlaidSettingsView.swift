@@ -6,17 +6,14 @@ struct PlaidSettingsView: View {
     @AppStorage("plaid.backendURL") private var backendURL = ""
 
     @StateObject private var linkCoordinator = PlaidLinkCoordinator()
-    @State private var syncKey = PlaidKeychain.readSyncKey()
+    @State private var ownerUserID: String?
     @State private var isWorking = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
     @State private var lastResult: PlaidSyncResult?
 
     private var client: PlaidAPIClient {
-        PlaidAPIClient(
-            configuration: PlaidBackendConfiguration(backendURL: backendURL),
-            syncKey: syncKey
-        )
+        PlaidAPIClient(configuration: PlaidBackendConfiguration(backendURL: backendURL))
     }
 
     var body: some View {
@@ -28,14 +25,18 @@ struct PlaidSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
 
-                    SecureField("App sync key", text: $syncKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-
-                    Button("Save Sync Key") {
-                        saveSyncKey()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Authenticated Plaid access", systemImage: "lock.shield")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Plaid requests use a device-bound Supabase user session stored in Keychain. The old shared sync key is only used once to claim existing connections, then removed from this device.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let ownerUserID {
+                            Text("Owner \(shortOwnerID(ownerUserID))")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .disabled(syncKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
                 Section("Sync") {
@@ -162,20 +163,10 @@ struct PlaidSettingsView: View {
         }
     }
 
-    private func saveSyncKey() {
-        do {
-            try PlaidKeychain.saveSyncKey(syncKey)
-            statusMessage = "Sync key saved to Keychain."
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     private func connectAccount(productScope: PlaidLinkProductScope) {
         Task {
             await runWork {
-                try PlaidKeychain.saveSyncKey(syncKey)
+                _ = try await prepareAuthenticatedClient()
                 let token = try await client.createLinkToken(productScope: productScope)
                 await MainActor.run {
                     linkCoordinator.open(
@@ -198,6 +189,7 @@ struct PlaidSettingsView: View {
     private func exchangePublicToken(_ publicToken: String, institutionName: String?) {
         Task {
             await runWork {
+                _ = try await prepareAuthenticatedClient()
                 let response = try await client.exchangePublicToken(
                     PlaidExchangePublicTokenRequest(publicToken: publicToken, institutionName: institutionName)
                 )
@@ -210,22 +202,23 @@ struct PlaidSettingsView: View {
     private func syncNow() {
         Task {
             await runWork {
-                try PlaidKeychain.saveSyncKey(syncKey)
                 try await performSync()
             }
         }
     }
 
     private func loadConnections() {
-        guard !backendURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !syncKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
+        guard !backendURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         Task {
             await runWork {
+                let claimed = try await prepareAuthenticatedClient()
                 let response = try await client.connections()
                 budget.plaidConnectionStatuses = response.connections
-                statusMessage = "Loaded \(response.connections.count) Plaid connection\(response.connections.count == 1 ? "" : "s")."
+                if claimed > 0 {
+                    statusMessage = "Secured \(claimed) existing Plaid connection\(claimed == 1 ? "" : "s") to this authenticated owner."
+                } else {
+                    statusMessage = "Loaded \(response.connections.count) Plaid connection\(response.connections.count == 1 ? "" : "s")."
+                }
             }
         }
     }
@@ -233,6 +226,7 @@ struct PlaidSettingsView: View {
     private func disconnect(_ connection: PlaidConnectionStatus) {
         Task {
             await runWork {
+                _ = try await prepareAuthenticatedClient()
                 let response = try await client.disconnect(itemId: connection.itemId)
                 budget.plaidConnectionStatuses = response.connections
                 statusMessage = "Disconnected \(connection.institutionName)."
@@ -241,10 +235,27 @@ struct PlaidSettingsView: View {
     }
 
     private func performSync() async throws {
+        _ = try await prepareAuthenticatedClient()
         let result = try await PlaidSyncCoordinator.shared.sync(budget: budget, force: true)
         lastResult = result
-        statusMessage = "Synced Plaid accounts."
+        statusMessage = "Synced Plaid accounts with authenticated ownership."
         errorMessage = nil
+    }
+
+    @discardableResult
+    private func prepareAuthenticatedClient() async throws -> Int {
+        let userID = try await PlaidAuthSessionStore.shared.userId()
+        let claim = try await client.claimLegacyOwnershipIfNeeded()
+        ownerUserID = userID
+        if let claim {
+            budget.plaidConnectionStatuses = claim.connections
+        }
+        return claim?.claimed ?? 0
+    }
+
+    private func shortOwnerID(_ value: String) -> String {
+        guard value.count > 12 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(4))"
     }
 
     private func runWork(_ operation: @escaping () async throws -> Void) async {

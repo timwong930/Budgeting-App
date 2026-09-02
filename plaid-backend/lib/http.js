@@ -1,5 +1,3 @@
-const { appSyncKey } = require("./config");
-
 function sendJson(res, status, body) {
   res.setHeader("Content-Type", "application/json");
   res.status(status).json(body);
@@ -18,13 +16,13 @@ function requireMethod(req, res, method) {
   return true;
 }
 
-function requireAppKey(req, res) {
-  const provided = req.headers["x-app-sync-key"];
-  if (!provided || provided !== appSyncKey()) {
-    sendError(res, 401, "Unauthorized Plaid sync request");
-    return false;
-  }
-  return true;
+function requireAppKey(_req, res) {
+  sendError(
+    res,
+    410,
+    "The legacy Vercel Plaid backend is retired. Use the authenticated Supabase Plaid backend."
+  );
+  return false;
 }
 
 function handleApiError(res, error) {

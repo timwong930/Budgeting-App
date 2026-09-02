@@ -3,7 +3,6 @@ import Security
 
 enum PlaidClientError: LocalizedError {
     case missingBackendURL
-    case missingSyncKey
     case invalidBackendURL
     case invalidResponse
     case server(String)
@@ -12,8 +11,6 @@ enum PlaidClientError: LocalizedError {
         switch self {
         case .missingBackendURL:
             return "Add your Plaid backend URL in Settings."
-        case .missingSyncKey:
-            return "Add your Plaid sync key in Settings."
         case .invalidBackendURL:
             return "Plaid backend URL is invalid."
         case .invalidResponse:
@@ -55,9 +52,13 @@ struct PlaidConnectionsResponse: Codable, Sendable, Equatable {
     var connections: [PlaidConnectionStatus]
 }
 
+struct PlaidLegacyOwnershipClaimResponse: Codable, Sendable, Equatable {
+    var connections: [PlaidConnectionStatus]
+    var claimed: Int
+}
+
 struct PlaidAPIClient {
     var configuration: PlaidBackendConfiguration
-    var syncKey: String
     var session: URLSession = .shared
 
     func createLinkToken(productScope: PlaidLinkProductScope) async throws -> PlaidLinkTokenResponse {
@@ -77,17 +78,31 @@ struct PlaidAPIClient {
     }
 
     func disconnect(itemId: String) async throws -> PlaidConnectionsResponse {
-        try await send(path: "/api/plaid/items/\(itemId)", method: "DELETE", body: Optional<EmptyRequest>.none)
+        let encodedItemId = itemId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? itemId
+        return try await send(path: "/api/plaid/items/\(encodedItemId)", method: "DELETE", body: Optional<EmptyRequest>.none)
+    }
+
+    @discardableResult
+    func claimLegacyOwnershipIfNeeded() async throws -> PlaidLegacyOwnershipClaimResponse? {
+        let legacyKey = PlaidKeychain.readSyncKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !legacyKey.isEmpty else { return nil }
+
+        let response: PlaidLegacyOwnershipClaimResponse = try await send(
+            path: "/api/plaid/claim-legacy",
+            method: "POST",
+            body: EmptyRequest(),
+            legacySyncKey: legacyKey
+        )
+        PlaidKeychain.deleteSyncKey()
+        return response
     }
 
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         method: String,
-        body: RequestBody?
+        body: RequestBody?,
+        legacySyncKey: String? = nil
     ) async throws -> ResponseBody {
-        let cleanKey = syncKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanKey.isEmpty else { throw PlaidClientError.missingSyncKey }
-
         var urlString = configuration.backendURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !urlString.isEmpty else { throw PlaidClientError.missingBackendURL }
         if urlString.hasSuffix("/") {
@@ -97,10 +112,14 @@ struct PlaidAPIClient {
             throw PlaidClientError.invalidBackendURL
         }
 
+        let accessToken = try await PlaidAuthSessionStore.shared.accessToken()
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(cleanKey, forHTTPHeaderField: "X-App-Sync-Key")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        if let legacySyncKey, !legacySyncKey.isEmpty {
+            request.setValue(legacySyncKey, forHTTPHeaderField: "X-App-Sync-Key")
+        }
         if let body {
             request.httpBody = try JSONEncoder.plaidBackend.encode(body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -191,8 +210,13 @@ enum PlaidKeychain {
         read(account: syncKeyAccount) ?? ""
     }
 
-    static func saveSyncKey(_ value: String) throws {
-        try save(value, account: syncKeyAccount)
+    static func deleteSyncKey() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: syncKeyAccount
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     private static func read(account: String) -> String? {
@@ -207,30 +231,6 @@ enum PlaidKeychain {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
-    }
-
-    private static func save(_ value: String, account: String) throws {
-        let data = Data(value.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            var addQuery = query
-            addQuery.merge(attributes) { _, new in new }
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw PlaidClientError.server("Could not save Plaid sync key to Keychain.")
-            }
-        } else if status != errSecSuccess {
-            throw PlaidClientError.server("Could not update Plaid sync key in Keychain.")
-        }
     }
 }
 
@@ -256,8 +256,7 @@ final class PlaidSyncCoordinator {
         let defaults = UserDefaults.standard
         let backendURL = defaults.string(forKey: Self.backendURLKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let syncKey = PlaidKeychain.readSyncKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !backendURL.isEmpty, !syncKey.isEmpty else { return nil }
+        guard !backendURL.isEmpty else { return nil }
 
         if !force,
            let lastSync = defaults.object(forKey: Self.lastSuccessfulSyncKey) as? Date,
@@ -269,10 +268,9 @@ final class PlaidSyncCoordinator {
         defer { isSyncing = false }
 
         do {
-            let payload = try await PlaidAPIClient(
-                configuration: PlaidBackendConfiguration(backendURL: backendURL),
-                syncKey: syncKey
-            ).sync()
+            let client = PlaidAPIClient(configuration: PlaidBackendConfiguration(backendURL: backendURL))
+            _ = try await client.claimLegacyOwnershipIfNeeded()
+            let payload = try await client.sync()
             let previousReviews = budget.plaidReviewItems
             budget.preparePlaidPendingTransactionReplacements(payload)
             var result = budget.applyPlaidSyncReconciled(payload)
