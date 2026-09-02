@@ -1,15 +1,21 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { decodeProtectedHeader, importJWK, jwtVerify } from "npm:jose@6";
 
 type JsonRecord = Record<string, unknown>;
 
 type PlaidItem = {
   item_id: string;
+  owner_user_id: string | null;
   access_token_cipher: string;
   institution_name: string;
   transaction_cursor: string | null;
   health: string;
   error_message: string | null;
   updated_at: string | null;
+};
+
+type AuthenticatedOwner = {
+  id: string;
 };
 
 const corsHeaders = {
@@ -27,36 +33,40 @@ Deno.serve(async (req) => {
     const path = routePath(req.url);
     const rawPath = new URL(req.url).pathname;
 
-    // Supabase Edge Functions are normally reached under /functions/v1/<name>/,
-    // but keep AASA compatible with custom-domain/reverse-proxy rewrites too.
     if ((path === "/.well-known/apple-app-site-association" || rawPath === "/.well-known/apple-app-site-association") && req.method === "GET") {
       return jsonResponse(appleAppSiteAssociation());
     }
 
     if (path === "/plaid/oauth" && req.method === "GET") return oauthPage(req.url);
+
+    if (path === "/api/plaid/webhook" && req.method === "POST") {
+      const rawBody = await req.text();
+      await verifyPlaidWebhook(req, rawBody);
+      return await webhook(parseJsonRecord(rawBody));
+    }
+
+    const owner = await authenticatedOwner(req);
+
+    if (path === "/api/plaid/claim-legacy" && req.method === "POST") {
+      requireLegacyAppSyncKey(req);
+      return await claimLegacyOwnership(owner.id);
+    }
     if (path === "/api/plaid/link-token" && req.method === "POST") {
-      requireAppSyncKey(req);
-      return await createLinkToken(await requestJson(req));
+      return await createLinkToken(owner.id, await requestJson(req));
     }
     if (path === "/api/plaid/exchange-public-token" && req.method === "POST") {
-      requireAppSyncKey(req);
-      return await exchangePublicToken(await requestJson(req));
+      return await exchangePublicToken(owner.id, await requestJson(req));
     }
     if (path === "/api/plaid/connections" && req.method === "GET") {
-      requireAppSyncKey(req);
-      return await connections();
+      return await connections(owner.id);
     }
     if (path === "/api/plaid/sync" && req.method === "POST") {
-      requireAppSyncKey(req);
-      return await sync();
+      return await sync(owner.id);
     }
     if (path.startsWith("/api/plaid/items/") && req.method === "DELETE") {
-      requireAppSyncKey(req);
-      return await deleteItem(decodeURIComponent(path.slice("/api/plaid/items/".length)));
+      return await deleteItem(owner.id, decodeURIComponent(path.slice("/api/plaid/items/".length)));
     }
-    if (path === "/api/plaid/webhook" && req.method === "POST") {
-      return await webhook(await requestJson(req));
-    }
+
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -74,13 +84,49 @@ function routePath(url: string): string {
   return pathname;
 }
 
-async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
+async function authenticatedOwner(req: Request): Promise<AuthenticatedOwner> {
+  const authorization = req.headers.get("Authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) throw new HttpError(401, "Missing authenticated Plaid session.");
+
+  const token = match[1].trim();
+  const { data, error } = await supabase().auth.getUser(token);
+  if (error || !data.user) throw new HttpError(401, "Plaid session is invalid or expired.");
+  return { id: data.user.id };
+}
+
+function requireLegacyAppSyncKey(req: Request): void {
+  const expected = requiredEnv("APP_SYNC_KEY");
+  const actual = req.headers.get("X-App-Sync-Key") || "";
+  if (!actual || actual !== expected) throw new HttpError(401, "Legacy Plaid ownership claim is unauthorized.");
+}
+
+async function claimLegacyOwnership(ownerUserId: string): Promise<Response> {
+  const { data, error } = await supabase()
+    .from("plaid_items")
+    .update({ owner_user_id: ownerUserId, updated_at: new Date().toISOString() })
+    .is("owner_user_id", null)
+    .select("item_id");
+  if (error) throw error;
+
+  const claimed = data?.length ?? 0;
+  await logSync(null, "ownership-claim", `Claimed ${claimed} legacy Plaid Item(s) for authenticated owner ${ownerUserId}`);
+  const response = await connectionPayload(ownerUserId);
+  return jsonResponse({ ...response, claimed });
+}
+
+async function createLinkToken(ownerUserId: string, requestBody: JsonRecord): Promise<Response> {
   const productScope = stringValue(requestBody.productScope) || "banking";
   const updateItemId = stringValue(requestBody.updateItemId);
   const productConfig = linkProductConfig(productScope);
 
+  if (updateItemId) {
+    const ownedItem = await getItem(updateItemId, ownerUserId);
+    if (!ownedItem) throw new HttpError(404, "Plaid Item not found for this user.");
+  }
+
   const linkTokenRequest: JsonRecord = {
-    user: { client_user_id: "momos-money-personal-user" },
+    user: { client_user_id: ownerUserId },
     client_name: "Momo's Money!",
     products: productConfig.products,
     required_if_supported_products: productConfig.requiredIfSupportedProducts,
@@ -91,9 +137,7 @@ async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
     transactions: { days_requested: 730 }
   };
 
-  if (updateItemId) {
-    linkTokenRequest.update = { item_id: updateItemId };
-  }
+  if (updateItemId) linkTokenRequest.update = { item_id: updateItemId };
 
   const response = await plaidFetch("/link/token/create", linkTokenRequest);
   return jsonResponse({
@@ -101,66 +145,68 @@ async function createLinkToken(requestBody: JsonRecord): Promise<Response> {
     expiration: response.expiration
   });
 }
-function linkProductConfig(productScope: string): {
-  products: string[];
-  requiredIfSupportedProducts: string[];
-} {
-  if (productScope === "investments") {
-    return {
-      products: ["investments"],
-      requiredIfSupportedProducts: ["transactions"]
-    };
-  }
 
-  return {
-    products: ["transactions"],
-    requiredIfSupportedProducts: ["liabilities"]
-  };
+function linkProductConfig(productScope: string): { products: string[]; requiredIfSupportedProducts: string[] } {
+  if (productScope === "investments") {
+    return { products: ["investments"], requiredIfSupportedProducts: ["transactions"] };
+  }
+  return { products: ["transactions"], requiredIfSupportedProducts: ["liabilities"] };
 }
 
-async function exchangePublicToken(body: JsonRecord): Promise<Response> {
+async function exchangePublicToken(ownerUserId: string, body: JsonRecord): Promise<Response> {
   const publicToken = stringValue(body.publicToken);
   if (!publicToken) throw new HttpError(400, "Missing publicToken");
 
-  const exchange = await plaidFetch("/item/public_token/exchange", {
-    public_token: publicToken
-  });
-
+  const exchange = await plaidFetch("/item/public_token/exchange", { public_token: publicToken });
   const accessToken = stringValue(exchange.access_token);
   const itemId = stringValue(exchange.item_id);
   if (!accessToken || !itemId) throw new HttpError(502, "Plaid did not return an access token.");
+
+  const existing = await getItemUnscoped(itemId);
+  if (existing?.owner_user_id && existing.owner_user_id !== ownerUserId) {
+    throw new HttpError(409, "This Plaid Item already belongs to another user.");
+  }
 
   const linkInstitutionName = stringValue(body.institutionName);
   const institutionName = linkInstitutionName && !isPlaidInstitutionId(linkInstitutionName)
     ? linkInstitutionName
     : await resolveInstitutionName(accessToken, linkInstitutionName || "Plaid Institution");
 
-  await upsertItem(itemId, await encryptToken(accessToken), institutionName);
+  await upsertItem(itemId, ownerUserId, await encryptToken(accessToken), institutionName);
   const accounts = await plaidFetch("/accounts/balance/get", { access_token: accessToken });
   await upsertAccounts(itemId, arrayValue(accounts.accounts));
 
-  return connections();
+  return connections(ownerUserId);
 }
 
-async function connections(): Promise<Response> {
-  const items = await refreshMissingInstitutionNames(await listItems());
-  return jsonResponse({ connections: items.map(normalizeConnection) });
+async function connections(ownerUserId: string): Promise<Response> {
+  return jsonResponse(await connectionPayload(ownerUserId));
 }
 
-async function deleteItem(itemId: string): Promise<Response> {
-  const item = await getItem(itemId);
+async function connectionPayload(ownerUserId: string): Promise<{ connections: JsonRecord[] }> {
+  const items = await refreshMissingInstitutionNames(await listItems(ownerUserId));
+  return { connections: items.map(normalizeConnection) };
+}
+
+async function deleteItem(ownerUserId: string, itemId: string): Promise<Response> {
+  const item = await getItem(itemId, ownerUserId);
   if (item) {
     try {
       await plaidFetch("/item/remove", { access_token: await decryptToken(item.access_token_cipher) });
     } catch {
-      // If Plaid has already removed the Item, local cleanup should still finish.
+      // If Plaid has already removed the Item, owner-scoped local cleanup should still finish.
     }
-    await supabase().from("plaid_items").delete().eq("item_id", itemId);
+    const { error } = await supabase()
+      .from("plaid_items")
+      .delete()
+      .eq("item_id", itemId)
+      .eq("owner_user_id", ownerUserId);
+    if (error) throw error;
   }
-  return connections();
+  return connections(ownerUserId);
 }
 
-async function sync(): Promise<Response> {
+async function sync(ownerUserId: string): Promise<Response> {
   const payload = {
     accounts: [] as JsonRecord[],
     transactions: [] as JsonRecord[],
@@ -171,7 +217,8 @@ async function sync(): Promise<Response> {
     connectionStatuses: [] as JsonRecord[]
   };
 
-  const itemResults = await Promise.all((await listItems()).map(syncItem));
+  const items = await listItems(ownerUserId);
+  const itemResults = await Promise.all(items.map(syncItem));
   for (const result of itemResults) {
     payload.accounts.push(...result.accounts);
     payload.transactions.push(...result.transactions);
@@ -182,7 +229,7 @@ async function sync(): Promise<Response> {
   }
 
   payload.holdingSnapshotAccountIds = Array.from(new Set(payload.holdingSnapshotAccountIds));
-  payload.connectionStatuses = (await refreshMissingInstitutionNames(await listItems())).map(normalizeConnection);
+  payload.connectionStatuses = (await refreshMissingInstitutionNames(await listItems(ownerUserId))).map(normalizeConnection);
   return jsonResponse(payload);
 }
 
@@ -202,6 +249,7 @@ async function syncItem(item: PlaidItem): Promise<{
     investmentTransactions: [] as JsonRecord[],
     holdingSnapshotAccountIds: [] as string[]
   };
+
   try {
     const accessToken = await decryptToken(item.access_token_cipher);
     const institutionName = await refreshInstitutionName(item, accessToken);
@@ -212,16 +260,15 @@ async function syncItem(item: PlaidItem): Promise<{
       fetchLiabilities(item, accessToken),
       fetchInvestments(item, accessToken)
     ]);
+
     if (transactionResult.nextCursor) {
       await updateCursor(item.item_id, transactionResult.nextCursor);
       if (replayTransactions) {
-        await logSync(
-          item.item_id,
-          "ledger-replay-v2-complete",
-          "Replayed transaction history after the account-ledger transfer visibility fix"
-        );
+        await logSync(item.item_id, "ledger-replay-v2-complete", "Replayed transaction history after the account-ledger transfer visibility fix");
       }
     }
+
+    await markItemConnected(item.item_id);
     await logSync(item.item_id, "sync", "Plaid sync completed");
     return {
       accounts,
@@ -271,8 +318,6 @@ async function syncTransactions(
       hasMore = Boolean(data.has_more);
     }
 
-    // Persist the normalized delta before the caller is allowed to promote the Plaid cursor.
-    // If the client crashes after the cursor moves, the durable rows are replayed on the next sync.
     await persistTransactionDeliveries(item.item_id, fetchedTransactions);
     return {
       transactions: await listTransactionDeliveries(item.item_id),
@@ -290,6 +335,7 @@ async function syncTransactions(
     throw error;
   }
 }
+
 async function fetchLiabilities(item: PlaidItem, accessToken: string): Promise<JsonRecord[]> {
   try {
     const data = await plaidFetch("/liabilities/get", { access_token: accessToken });
@@ -306,21 +352,15 @@ async function fetchInvestments(item: PlaidItem, accessToken: string): Promise<{
   transactions: JsonRecord[];
   holdingSnapshotAccountIds: string[];
 }> {
-  const result = {
-    holdings: [] as JsonRecord[],
-    transactions: [] as JsonRecord[],
-    holdingSnapshotAccountIds: [] as string[]
-  };
-
   const [holdingResult, transactions] = await Promise.all([
     fetchInvestmentHoldings(item, accessToken),
     fetchAllInvestmentTransactions(item, accessToken)
   ]);
-  result.holdings = holdingResult.holdings;
-  result.holdingSnapshotAccountIds = holdingResult.holdingSnapshotAccountIds;
-  result.transactions = transactions;
-
-  return result;
+  return {
+    holdings: holdingResult.holdings,
+    transactions,
+    holdingSnapshotAccountIds: holdingResult.holdingSnapshotAccountIds
+  };
 }
 
 async function fetchInvestmentHoldings(item: PlaidItem, accessToken: string): Promise<{
@@ -363,6 +403,7 @@ async function fetchAllInvestmentTransactions(item: PlaidItem, accessToken: stri
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
   const transactions: JsonRecord[] = [];
+
   try {
     while (offset < total) {
       const data = await plaidFetch("/investments/transactions/get", {
@@ -373,9 +414,11 @@ async function fetchAllInvestmentTransactions(item: PlaidItem, accessToken: stri
       });
       const page = arrayValue(data.investment_transactions);
       const securities = securitiesById(arrayValue(data.securities));
-      transactions.push(...page.map((tx) =>
-        normalizeInvestmentTransaction(tx, securities.get(stringValue(tx.security_id) || ""), item.item_id)
-      ));
+      transactions.push(...page.map((tx) => normalizeInvestmentTransaction(
+        tx,
+        securities.get(stringValue(tx.security_id) || ""),
+        item.item_id
+      )));
       total = numberOrNull(data.total_investment_transactions) ?? page.length;
       if (page.length === 0) break;
       offset += page.length;
@@ -387,14 +430,66 @@ async function fetchAllInvestmentTransactions(item: PlaidItem, accessToken: stri
   }
 }
 
+async function verifyPlaidWebhook(req: Request, rawBody: string): Promise<void> {
+  const verification = req.headers.get("Plaid-Verification") || req.headers.get("plaid-verification");
+  if (!verification) throw new HttpError(401, "Missing Plaid webhook signature.");
+
+  let protectedHeader: ReturnType<typeof decodeProtectedHeader>;
+  try {
+    protectedHeader = decodeProtectedHeader(verification);
+  } catch {
+    throw new HttpError(401, "Invalid Plaid webhook signature header.");
+  }
+
+  if (protectedHeader.alg !== "ES256" || !protectedHeader.kid) {
+    throw new HttpError(401, "Unsupported Plaid webhook signature.");
+  }
+
+  const keyResponse = await plaidFetch("/webhook_verification_key/get", { key_id: protectedHeader.kid });
+  const jwk = keyResponse.key as JsonRecord | undefined;
+  if (!jwk || stringValue(jwk.alg) !== "ES256" || stringValue(jwk.kid) !== protectedHeader.kid) {
+    throw new HttpError(401, "Plaid webhook verification key mismatch.");
+  }
+  if (stringValue(jwk.kty) !== "EC" || stringValue(jwk.crv) !== "P-256" || stringValue(jwk.use) !== "sig") {
+    throw new HttpError(401, "Plaid webhook verification key is invalid.");
+  }
+
+  try {
+    const key = await importJWK(jwk, "ES256");
+    const verified = await jwtVerify(verification, key, { algorithms: ["ES256"] });
+    const issuedAt = typeof verified.payload.iat === "number" ? verified.payload.iat : null;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (!issuedAt || issuedAt < nowSeconds - 300 || issuedAt > nowSeconds + 60) {
+      throw new Error("Plaid webhook timestamp is outside the allowed window.");
+    }
+
+    const expectedHash = typeof verified.payload.request_body_sha256 === "string"
+      ? verified.payload.request_body_sha256.toLowerCase()
+      : "";
+    const actualHash = await sha256Hex(rawBody);
+    if (!expectedHash || !constantTimeEqual(expectedHash, actualHash)) {
+      throw new Error("Plaid webhook body hash mismatch.");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Plaid webhook signature verification failed.";
+    throw new HttpError(401, message);
+  }
+}
+
 async function webhook(body: JsonRecord): Promise<Response> {
   const itemId = stringValue(body.item_id);
   const webhookType = stringValue(body.webhook_type) || "UNKNOWN";
   const webhookCode = stringValue(body.webhook_code) || "UNKNOWN";
 
-  await logSync(itemId, `webhook:${webhookType}`, webhookCode);
-  if (itemId && webhookCode === "ITEM_LOGIN_REQUIRED") {
-    await markItemError(itemId, "Plaid item requires account re-authentication.");
+  if (itemId) {
+    const item = await getItemUnscoped(itemId);
+    if (!item) return jsonResponse({ ok: true });
+    await logSync(itemId, `webhook:${webhookType}`, webhookCode);
+    if (webhookCode === "ITEM_LOGIN_REQUIRED") {
+      await markItemError(itemId, "Plaid item requires account re-authentication.", "needs_update");
+    }
+  } else {
+    await logSync(null, `webhook:${webhookType}`, webhookCode);
   }
 
   return jsonResponse({ ok: true });
@@ -431,14 +526,20 @@ function plaidBaseURL(): string {
 function supabase() {
   const url = requiredEnv("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || requiredEnv("SUPABASE_SECRET_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-async function upsertItem(itemId: string, accessTokenCipher: string, institutionName: string): Promise<void> {
+async function upsertItem(itemId: string, ownerUserId: string, accessTokenCipher: string, institutionName: string): Promise<void> {
+  const existing = await getItemUnscoped(itemId);
+  if (existing?.owner_user_id && existing.owner_user_id !== ownerUserId) {
+    throw new HttpError(409, "This Plaid Item belongs to another authenticated user.");
+  }
+
   const { error } = await supabase()
     .from("plaid_items")
     .upsert({
       item_id: itemId,
+      owner_user_id: ownerUserId,
       access_token_cipher: accessTokenCipher,
       institution_name: institutionName || "Plaid Institution",
       health: "connected",
@@ -448,16 +549,28 @@ async function upsertItem(itemId: string, accessTokenCipher: string, institution
   if (error) throw error;
 }
 
-async function listItems(): Promise<PlaidItem[]> {
+async function listItems(ownerUserId: string): Promise<PlaidItem[]> {
   const { data, error } = await supabase()
     .from("plaid_items")
     .select("*")
+    .eq("owner_user_id", ownerUserId)
     .order("institution_name");
   if (error) throw error;
   return (data || []) as PlaidItem[];
 }
 
-async function getItem(itemId: string): Promise<PlaidItem | null> {
+async function getItem(itemId: string, ownerUserId: string): Promise<PlaidItem | null> {
+  const { data, error } = await supabase()
+    .from("plaid_items")
+    .select("*")
+    .eq("item_id", itemId)
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+  if (error) throw error;
+  return data as PlaidItem | null;
+}
+
+async function getItemUnscoped(itemId: string): Promise<PlaidItem | null> {
   const { data, error } = await supabase()
     .from("plaid_items")
     .select("*")
@@ -527,10 +640,7 @@ async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promi
 
   for (const row of data || []) {
     if (row.event_type === "ledger-replay-v2-complete") return false;
-    if (
-      row.event_type === "error" &&
-      String(row.message || "").toLowerCase().includes("products are not supported")
-    ) {
+    if (row.event_type === "error" && String(row.message || "").toLowerCase().includes("products are not supported")) {
       return true;
     }
   }
@@ -540,12 +650,7 @@ async function shouldReplayTransactionsAfterDiscardedSync(itemId: string): Promi
 async function updateCursor(itemId: string, cursor: string): Promise<void> {
   const { error } = await supabase()
     .from("plaid_items")
-    .update({
-      transaction_cursor: cursor,
-      health: "connected",
-      error_message: null,
-      updated_at: new Date().toISOString()
-    })
+    .update({ transaction_cursor: cursor, updated_at: new Date().toISOString() })
     .eq("item_id", itemId);
   if (error) throw error;
 }
@@ -559,20 +664,13 @@ async function persistTransactionDeliveries(itemId: string, transactions: JsonRe
   const rows = transactions.flatMap((transaction) => {
     const transactionId = stringValue(transaction.id);
     if (!transactionId) return [];
-    return [{
-      item_id: itemId,
-      transaction_id: transactionId,
-      payload: transaction,
-      updated_at: now
-    }];
+    return [{ item_id: itemId, transaction_id: transactionId, payload: transaction, updated_at: now }];
   });
 
   for (let offset = 0; offset < rows.length; offset += transactionDeliveryPageSize) {
     const { error } = await supabase()
       .from("plaid_transaction_deliveries")
-      .upsert(rows.slice(offset, offset + transactionDeliveryPageSize), {
-        onConflict: "item_id,transaction_id"
-      });
+      .upsert(rows.slice(offset, offset + transactionDeliveryPageSize), { onConflict: "item_id,transaction_id" });
     if (error) throw error;
   }
 }
@@ -593,16 +691,21 @@ async function listTransactionDeliveries(itemId: string): Promise<JsonRecord[]> 
     const page = data || [];
     for (const row of page) {
       const payload = row.payload;
-      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-        transactions.push(payload as JsonRecord);
-      }
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) transactions.push(payload as JsonRecord);
     }
-
     if (page.length < transactionDeliveryPageSize) break;
     offset += page.length;
   }
 
   return transactions;
+}
+
+async function markItemConnected(itemId: string): Promise<void> {
+  const { error } = await supabase()
+    .from("plaid_items")
+    .update({ health: "connected", error_message: null, updated_at: new Date().toISOString() })
+    .eq("item_id", itemId);
+  if (error) throw error;
 }
 
 async function markItemError(itemId: string, message: string, health = "error"): Promise<void> {
@@ -646,9 +749,11 @@ async function logSync(itemId: string | null | undefined, eventType: string, mes
 async function encryptToken(value: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await encryptionKey();
-  const encrypted = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, encode(value) as BufferSource)
-  );
+  const encrypted = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    encode(value) as BufferSource
+  ));
   return `${base64Encode(iv)}.${base64Encode(encrypted)}`;
 }
 
@@ -665,10 +770,7 @@ async function decryptToken(value: string): Promise<string> {
 }
 
 async function encryptionKey(): Promise<CryptoKey> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    encode(requiredEnv("PLAID_TOKEN_ENCRYPTION_KEY")) as BufferSource
-  );
+  const hash = await crypto.subtle.digest("SHA-256", encode(requiredEnv("PLAID_TOKEN_ENCRYPTION_KEY")) as BufferSource);
   return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
@@ -787,12 +889,10 @@ function appleAppSiteAssociation(): JsonRecord {
   return {
     applinks: {
       apps: [],
-      details: [
-        {
-          appID: `${teamId}.${bundleId}`,
-          paths: ["/plaid/oauth", "/plaid/oauth/*", "/functions/v1/plaid/plaid/oauth", "/functions/v1/plaid/plaid/oauth/*"]
-        }
-      ]
+      details: [{
+        appID: `${teamId}.${bundleId}`,
+        paths: ["/plaid/oauth", "/plaid/oauth/*", "/functions/v1/plaid/plaid/oauth", "/functions/v1/plaid/plaid/oauth/*"]
+      }]
     }
   };
 }
@@ -813,10 +913,13 @@ async function requestJson(req: Request): Promise<JsonRecord> {
   return await req.json().catch(() => ({}));
 }
 
-function requireAppSyncKey(req: Request): void {
-  const expected = requiredEnv("APP_SYNC_KEY");
-  const actual = req.headers.get("X-App-Sync-Key") || "";
-  if (actual !== expected) throw new HttpError(401, "Unauthorized");
+function parseJsonRecord(raw: string): JsonRecord {
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+  } catch {
+    throw new HttpError(400, "Invalid JSON payload.");
+  }
 }
 
 function requiredEnv(name: string): string {
@@ -849,7 +952,9 @@ function numberOrZero(value: unknown): number {
 }
 
 function arrayValue(value: unknown): JsonRecord[] {
-  return Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(item) && typeof item === "object") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is JsonRecord => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
 }
 
 function isoDate(date: Date): string {
@@ -865,9 +970,8 @@ function isProductUnavailable(error: unknown, productName: string): boolean {
     "NO_INVESTMENT_ACCOUNTS",
     "NO_LIABILITY_ACCOUNTS",
     "ACCESS_NOT_GRANTED"
-  ].includes(error.errorCode || "")) {
-    return true;
-  }
+  ].includes(error.errorCode || "")) return true;
+
   const message = error.message.toLowerCase();
   const normalizedProduct = productName.toLowerCase().replace("product_", "");
   const mentionsProduct = message.includes(normalizedProduct);
@@ -877,6 +981,21 @@ function isProductUnavailable(error: unknown, productName: string): boolean {
     message.includes("product is not supported")
   );
 }
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encode(value) as BufferSource));
+  return Array.from(digest).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(lhs: string, rhs: string): boolean {
+  if (lhs.length !== rhs.length) return false;
+  let difference = 0;
+  for (let index = 0; index < lhs.length; index += 1) {
+    difference |= lhs.charCodeAt(index) ^ rhs.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
 function encode(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
