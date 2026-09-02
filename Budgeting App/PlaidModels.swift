@@ -163,6 +163,7 @@ struct PlaidSyncPayload: Codable, Sendable, Equatable {
     var holdings: [PlaidSyncedHolding]
     var investmentTransactions: [PlaidSyncedInvestmentTransaction]
     var connectionStatuses: [PlaidConnectionStatus]
+    var holdingSnapshotAccountIds: [String]? = nil
 }
 
 struct PlaidSyncResult: Codable, Sendable, Equatable {
