@@ -276,6 +276,7 @@ final class PlaidSyncCoordinator {
             let previousReviews = budget.plaidReviewItems
             budget.preparePlaidPendingTransactionReplacements(payload)
             var result = budget.applyPlaidSyncReconciled(payload)
+            budget.finalizePlaidHoldingSnapshots(payload)
             result.reviewItems += budget.restoreUnresolvedPlaidReviews(previousReviews, payload: payload)
             budget.saveNow()
             defaults.set(Date(), forKey: Self.lastSuccessfulSyncKey)
