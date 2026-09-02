@@ -1186,7 +1186,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingCreditAccounts) {
             CreditAccountsView(budget: budget)
-                .presentationDetents([.medium])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $selectedCreditAccount) { account in
@@ -1201,7 +1201,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingBankAccounts) {
             BankAccountsView(budget: budget)
-                .presentationDetents([.medium])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAppSettings) {
@@ -1474,23 +1474,30 @@ struct ContentView: View {
     }
 
     private var budgetPlanSubmenu: some View {
-        budgetSubmenuPage(title: "Plan", subtitle: "Budget setup and monthly targets.", systemImage: "slider.horizontal.3") {
-            planHighlightsSection
-            overviewSection
-            incomeSection
+        budgetSubmenuPage(title: "Plan", subtitle: "Assign this month's income before you spend it.", systemImage: "slider.horizontal.3") {
+            MonthlyPlanWorkspaceView(
+                budget: budget,
+                selectedMonth: $selectedMonth,
+                onAddNeeds: { showingAddNeedsCategory = true },
+                onAddWants: { showingAddWantsCategory = true },
+                onAddSavings: { showingAddSavingsGoal = true },
+                onEditCategory: { editingCategory = $0 },
+                onEditSavingsGoal: { editingSavingsGoal = $0 }
+            )
             if budget.income > 0 && budget.needsCategories.isEmpty && budget.wantsCategories.isEmpty && budget.savingsGoals.isEmpty {
                 nextStepSection
             }
-            budgetBreakdownSection
+            incomeSection
             needsSection
             wantsSection
             savingsSection
         }
         .onAppear {
-            planHighlightsExpanded = true
-            overviewExpanded = true
             incomeExpanded = true
-            budgetBreakdownExpanded = true
+            needsExpanded = true
+            wantsExpanded = true
+            savingsExpanded = true
+            budget.applyMonthlyAllocations(for: selectedMonth)
         }
     }
 
@@ -3855,16 +3862,10 @@ struct ContentView: View {
                 valueLabel: nil,
                 value: nil
             ) {
-                Menu("Manage") {
-                    Button("Transfer Cash") {
-                        showingAddCashTransfer = true
-                    }
-                    Button("Banks") {
-                        showingBankAccounts = true
-                    }
-                    Button("Cards") {
-                        showingCreditAccounts = true
-                    }
+                Button {
+                    showingAddCashTransfer = true
+                } label: {
+                    Label("Transfer", systemImage: "arrow.left.arrow.right")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -3886,38 +3887,72 @@ struct ContentView: View {
             }
 
             if !budget.bankAccounts.isEmpty {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Bank Accounts")
-                            .font(.headline)
-                        ForEach(budget.bankAccounts) { account in
+                Button {
+                    showingBankAccounts = true
+                } label: {
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text(account.name)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Bank Accounts")
+                                        .font(.headline)
+                                    Text("View transactions & manage accounts")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                                 Spacer()
-                                Text(account.balance, format: .currency(code: "USD"))
+                                Image(systemName: "chevron.right")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.subheadline)
+                            ForEach(budget.bankAccounts) { account in
+                                HStack {
+                                    Text(account.name)
+                                    Spacer()
+                                    Text(account.balance, format: .currency(code: "USD"))
+                                }
+                                .font(.subheadline)
+                            }
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open bank accounts")
             }
 
             if !budget.creditAccounts.isEmpty {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Credit Cards")
-                            .font(.headline)
-                        ForEach(budget.creditAccounts.filter(\.isActive)) { account in
+                Button {
+                    showingCreditAccounts = true
+                } label: {
+                    GlassCard {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text(account.name)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Credit Cards")
+                                        .font(.headline)
+                                    Text("View transactions & manage cards")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                                 Spacer()
-                                Text(creditAccountActualBalance(account), format: .currency(code: "USD"))
-                                    .foregroundStyle(.red)
+                                Image(systemName: "chevron.right")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.subheadline)
+                            ForEach(budget.creditAccounts.filter(\.isActive)) { account in
+                                HStack {
+                                    Text(account.name)
+                                    Spacer()
+                                    Text(creditAccountActualBalance(account), format: .currency(code: "USD"))
+                                        .foregroundStyle(.red)
+                                }
+                                .font(.subheadline)
+                            }
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open credit cards")
             }
 
             if !budget.consolidatedHoldings.isEmpty {
@@ -11103,7 +11138,7 @@ struct CreditAccountsView: View {
                     } else {
                         ForEach($budget.creditAccounts) { $account in
                             NavigationLink {
-                                EditCreditAccountView(account: $account)
+                                CreditAccountLedgerView(account: $account, budget: budget)
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(account.name)
@@ -11699,7 +11734,7 @@ struct BankAccountsView: View {
                     } else {
                         ForEach($budget.bankAccounts) { $account in
                             NavigationLink {
-                                EditBankAccountView(account: $account)
+                                BankAccountLedgerView(account: $account, budget: budget)
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(account.name)
