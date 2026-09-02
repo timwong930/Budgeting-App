@@ -151,15 +151,14 @@ private extension BudgetModel {
         let cashBalance = roundedCurrency(max(availableBalance, 0))
         let marginBalance = roundedCurrency(max(-availableBalance, 0))
         if let index = portfolioAccounts.firstIndex(where: { $0.financialAccountId == financialAccountId }) {
-            portfolioAccounts[index].name = account.name
+            portfolioAccounts[index].name = displayName
             portfolioAccounts[index].cashBalance = cashBalance
             portfolioAccounts[index].marginBalance = marginBalance
-            portfolioAccounts[index].isActive = true
         } else {
             portfolioAccounts.append(
                 PortfolioAccount(
                     financialAccountId: financialAccountId,
-                    name: account.name,
+                    name: displayName,
                     cashBalance: cashBalance,
                     marginBalance: marginBalance
                 )
@@ -179,10 +178,6 @@ private extension BudgetModel {
             bankAccounts[index].name = displayName
             bankAccounts[index].balance = balance
             bankAccounts[index].plaidMetadata = metadata
-            if bankAccounts[index].note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               let institutionName = account.institutionName {
-                bankAccounts[index].note = "Synced from \(institutionName)"
-            }
         } else {
             bankAccounts.append(
                 BankAccount(
@@ -212,12 +207,7 @@ private extension BudgetModel {
             creditAccounts[index].startingBalance = roundedCurrency(account.currentBalance ?? creditAccounts[index].startingBalance)
             creditAccounts[index].expectedAmount = roundedCurrency(liability?.minimumPaymentAmount ?? creditAccounts[index].expectedAmount)
             creditAccounts[index].creditLimit = max(account.creditLimit ?? creditAccounts[index].creditLimit, 0)
-            creditAccounts[index].dueDay = min(max(dueDay, 1), 31)
-            creditAccounts[index].isActive = true
             creditAccounts[index].plaidMetadata = metadata
-            if !noteParts.isEmpty {
-                creditAccounts[index].note = noteParts.joined(separator: "\n")
-            }
         } else {
             creditAccounts.append(
                 CreditAccount(
@@ -238,13 +228,23 @@ private extension BudgetModel {
     func upsertPlaidTransaction(_ transaction: PlaidSyncedTransaction, accountName: String, accountType: PlaidAccountType, syncedAt: Date) -> PlaidTransactionImportResult {
         if let expenseIndex = expenses.firstIndex(where: { $0.plaidMetadata?.transactionId == transaction.id }) {
             if transaction.amount >= 0 {
-                expenses[expenseIndex] = makeExpense(from: transaction, accountName: accountName, existingId: expenses[expenseIndex].id, syncedAt: syncedAt)
+                expenses[expenseIndex] = refreshedPlaidExpense(
+                    from: transaction,
+                    accountName: accountName,
+                    existing: expenses[expenseIndex],
+                    syncedAt: syncedAt
+                )
             }
             return .imported
         }
         if let incomeIndex = incomes.firstIndex(where: { $0.plaidMetadata?.transactionId == transaction.id }) {
             if transaction.amount < 0 {
-                incomes[incomeIndex] = makeIncome(from: transaction, accountName: accountName, existingId: incomes[incomeIndex].id, syncedAt: syncedAt)
+                incomes[incomeIndex] = refreshedPlaidIncome(
+                    from: transaction,
+                    accountName: accountName,
+                    existing: incomes[incomeIndex],
+                    syncedAt: syncedAt
+                )
             }
             return .imported
         }
@@ -420,6 +420,19 @@ private extension BudgetModel {
         )
     }
 
+    func refreshedPlaidIncome(from transaction: PlaidSyncedTransaction, accountName: String, existing: IncomeEntry, syncedAt: Date) -> IncomeEntry {
+        let source = makeIncome(from: transaction, accountName: accountName, existingId: existing.id, syncedAt: syncedAt)
+        return IncomeEntry(
+            id: existing.id,
+            name: source.name,
+            amount: source.amount,
+            date: source.date,
+            bankName: existing.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? accountName : existing.bankName,
+            bankAccountId: existing.bankAccountId,
+            plaidMetadata: source.plaidMetadata
+        )
+    }
+
     func makeExpense(from transaction: PlaidSyncedTransaction, accountName: String, existingId: UUID = UUID(), syncedAt: Date) -> Expense {
         let mapped = mappedBudgetCategory(for: transaction.category)
         return Expense(
@@ -432,6 +445,24 @@ private extension BudgetModel {
             paymentAccount: accountName,
             note: transaction.pending ? "Plaid pending transaction" : "",
             plaidMetadata: metadata(for: transaction, syncedAt: syncedAt)
+        )
+    }
+
+    func refreshedPlaidExpense(from transaction: PlaidSyncedTransaction, accountName: String, existing: Expense, syncedAt: Date) -> Expense {
+        let source = makeExpense(from: transaction, accountName: accountName, existingId: existing.id, syncedAt: syncedAt)
+        return Expense(
+            id: existing.id,
+            name: source.name,
+            amount: source.amount,
+            date: source.date,
+            section: existing.section,
+            categoryId: existing.categoryId,
+            paymentAccount: existing.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? accountName : existing.paymentAccount,
+            paymentAccountId: existing.paymentAccountId,
+            note: existing.note,
+            creditCardPaymentTarget: existing.creditCardPaymentTarget,
+            creditCardPaymentTargetId: existing.creditCardPaymentTargetId,
+            plaidMetadata: source.plaidMetadata
         )
     }
 
