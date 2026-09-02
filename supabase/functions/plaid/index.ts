@@ -243,7 +243,7 @@ async function syncTransactions(
   try {
     let cursor = replayFromStart ? undefined : item.transaction_cursor || undefined;
     let hasMore = true;
-    const transactions: JsonRecord[] = [];
+    const fetchedTransactions: JsonRecord[] = [];
 
     while (hasMore) {
       const data = await plaidFetch("/transactions/sync", {
@@ -252,19 +252,28 @@ async function syncTransactions(
         count: 500
       });
 
-      transactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
-      transactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
-      transactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
+      fetchedTransactions.push(...arrayValue(data.added).map((tx) => normalizeTransaction(tx, item.item_id)));
+      fetchedTransactions.push(...arrayValue(data.modified).map((tx) => normalizeTransaction(tx, item.item_id)));
+      fetchedTransactions.push(...arrayValue(data.removed).map((tx) => normalizeRemovedTransaction(tx, item.item_id)));
       cursor = stringValue(data.next_cursor) || undefined;
       hasMore = Boolean(data.has_more);
     }
 
-    return { transactions, nextCursor: cursor || null };
+    // Persist the normalized delta before the caller is allowed to promote the Plaid cursor.
+    // If the client crashes after the cursor moves, the durable rows are replayed on the next sync.
+    await persistTransactionDeliveries(item.item_id, fetchedTransactions);
+    return {
+      transactions: await listTransactionDeliveries(item.item_id),
+      nextCursor: cursor || null
+    };
   } catch (error) {
     if (isProductUnavailable(error, "transactions")) {
       const message = error instanceof Error ? error.message : "Transactions unavailable";
       await logSync(item.item_id, "transactions-unavailable", message);
-      return { transactions: [], nextCursor: null };
+      return {
+        transactions: await listTransactionDeliveries(item.item_id),
+        nextCursor: null
+      };
     }
     throw error;
   }
@@ -502,6 +511,61 @@ async function updateCursor(itemId: string, cursor: string): Promise<void> {
     })
     .eq("item_id", itemId);
   if (error) throw error;
+}
+
+const transactionDeliveryPageSize = 500;
+
+async function persistTransactionDeliveries(itemId: string, transactions: JsonRecord[]): Promise<void> {
+  if (transactions.length === 0) return;
+
+  const now = new Date().toISOString();
+  const rows = transactions.flatMap((transaction) => {
+    const transactionId = stringValue(transaction.id);
+    if (!transactionId) return [];
+    return [{
+      item_id: itemId,
+      transaction_id: transactionId,
+      payload: transaction,
+      updated_at: now
+    }];
+  });
+
+  for (let offset = 0; offset < rows.length; offset += transactionDeliveryPageSize) {
+    const { error } = await supabase()
+      .from("plaid_transaction_deliveries")
+      .upsert(rows.slice(offset, offset + transactionDeliveryPageSize), {
+        onConflict: "item_id,transaction_id"
+      });
+    if (error) throw error;
+  }
+}
+
+async function listTransactionDeliveries(itemId: string): Promise<JsonRecord[]> {
+  const transactions: JsonRecord[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase()
+      .from("plaid_transaction_deliveries")
+      .select("transaction_id,payload")
+      .eq("item_id", itemId)
+      .order("transaction_id", { ascending: true })
+      .range(offset, offset + transactionDeliveryPageSize - 1);
+    if (error) throw error;
+
+    const page = data || [];
+    for (const row of page) {
+      const payload = row.payload;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        transactions.push(payload as JsonRecord);
+      }
+    }
+
+    if (page.length < transactionDeliveryPageSize) break;
+    offset += page.length;
+  }
+
+  return transactions;
 }
 
 async function markItemError(itemId: string, message: string, health = "error"): Promise<void> {
