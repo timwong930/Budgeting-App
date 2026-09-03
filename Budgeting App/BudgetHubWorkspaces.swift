@@ -807,11 +807,11 @@ struct BudgetAccountsWorkspaceView: View {
         nextAccountDate(day: account.dueDay, relativeTo: Date())
     }
 
-    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+    private func nextAccountDate(day: Int, relativeTo referenceDate: Date) -> Date {
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: date)
+        let start = calendar.startOfDay(for: referenceDate)
 
-        func date(in month: Date) -> Date {
+        func dateForMonth(_ month: Date) -> Date {
             let monthRange = calendar.range(of: .day, in: .month, for: month)
             let safeDay = min(max(day, 1), monthRange?.count ?? 28)
             var components = calendar.dateComponents([.year, .month], from: month)
@@ -819,10 +819,10 @@ struct BudgetAccountsWorkspaceView: View {
             return calendar.date(from: components) ?? month
         }
 
-        let candidate = date(in: start)
+        let candidate = dateForMonth(start)
         if candidate >= start { return candidate }
         let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
-        return date(in: nextMonth)
+        return dateForMonth(nextMonth)
     }
 
     private func actualBalance(for account: CreditAccount) -> Double {
@@ -1348,11 +1348,11 @@ private struct BudgetCreditAccountsWorkspaceView: View {
         nextAccountDate(day: account.dueDay, relativeTo: Date())
     }
 
-    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+    private func nextAccountDate(day: Int, relativeTo referenceDate: Date) -> Date {
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: date)
+        let start = calendar.startOfDay(for: referenceDate)
 
-        func date(in month: Date) -> Date {
+        func dateForMonth(_ month: Date) -> Date {
             let monthRange = calendar.range(of: .day, in: .month, for: month)
             let safeDay = min(max(day, 1), monthRange?.count ?? 28)
             var components = calendar.dateComponents([.year, .month], from: month)
@@ -1360,10 +1360,10 @@ private struct BudgetCreditAccountsWorkspaceView: View {
             return calendar.date(from: components) ?? month
         }
 
-        let candidate = date(in: start)
+        let candidate = dateForMonth(start)
         if candidate >= start { return candidate }
         let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
-        return date(in: nextMonth)
+        return dateForMonth(nextMonth)
     }
 
     private func actualBalance(for account: CreditAccount) -> Double {
@@ -1507,11 +1507,11 @@ private struct BudgetCreditCardWorkspaceDetail: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+    private func nextAccountDate(day: Int, relativeTo referenceDate: Date) -> Date {
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: date)
+        let start = calendar.startOfDay(for: referenceDate)
 
-        func date(in month: Date) -> Date {
+        func dateForMonth(_ month: Date) -> Date {
             let monthRange = calendar.range(of: .day, in: .month, for: month)
             let safeDay = min(max(day, 1), monthRange?.count ?? 28)
             var components = calendar.dateComponents([.year, .month], from: month)
@@ -1519,10 +1519,10 @@ private struct BudgetCreditCardWorkspaceDetail: View {
             return calendar.date(from: components) ?? month
         }
 
-        let candidate = date(in: start)
+        let candidate = dateForMonth(start)
         if candidate >= start { return candidate }
         let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
-        return date(in: nextMonth)
+        return dateForMonth(nextMonth)
     }
 }
 
