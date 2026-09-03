@@ -10,41 +10,69 @@ struct MonthlyPlanWorkspaceView: View {
     let onEditCategory: (Category) -> Void
     let onEditSavingsGoal: (SavingsGoal) -> Void
 
+    private enum PlanBucket: String, Hashable {
+        case needs
+        case wants
+        case savings
+    }
+
+    @State private var expandedBuckets: Set<PlanBucket> = []
+
     private var monthKey: String {
         BudgetModel.monthKey(for: selectedMonth)
     }
 
-    private var plannedIncome: Double {
+    private var incomePerPayPeriod: Double {
         budget.income(for: selectedMonth)
+    }
+
+    private var monthlyIncomeMultiplier: Double {
+        budget.payFrequency.multiplier / 12.0
+    }
+
+    private var plannedIncome: Double {
+        incomePerPayPeriod * monthlyIncomeMultiplier
     }
 
     private var incomeBinding: Binding<Double> {
         Binding(
-            get: { budget.income(for: selectedMonth) },
+            get: { plannedIncome },
             set: { value in
-                budget.setIncome(max(value, 0), for: selectedMonth)
+                let multiplier = max(monthlyIncomeMultiplier, 0.0001)
+                budget.setIncome(max(value, 0) / multiplier, for: selectedMonth)
             }
         )
     }
 
-    private var plannedNeeds: Double {
+    // Parent buckets are the source of truth. Categories only divide them further.
+    private var needsTarget: Double { plannedIncome * 0.50 }
+    private var wantsTarget: Double { plannedIncome * 0.20 }
+    private var savingsTarget: Double { plannedIncome * 0.30 }
+
+    private var categorizedNeeds: Double {
         budget.needsCategories.reduce(0) { $0 + allocation(for: $1, section: .needs) }
     }
 
-    private var plannedWants: Double {
+    private var categorizedWants: Double {
         budget.wantsCategories.reduce(0) { $0 + allocation(for: $1, section: .wants) }
     }
 
-    private var plannedSavings: Double {
+    private var categorizedSavings: Double {
         budget.savingsGoals.reduce(0) { $0 + max($1.monthlyContribution, 0) }
     }
 
-    private var totalAssigned: Double {
-        plannedNeeds + plannedWants + plannedSavings
+    private var needsAllocationOverage: Double { max(categorizedNeeds - needsTarget, 0) }
+    private var wantsAllocationOverage: Double { max(categorizedWants - wantsTarget, 0) }
+    private var savingsAllocationOverage: Double { max(categorizedSavings - savingsTarget, 0) }
+
+    private var totalAllocationOverage: Double {
+        needsAllocationOverage + wantsAllocationOverage + savingsAllocationOverage
     }
 
-    private var unassigned: Double {
-        plannedIncome - totalAssigned
+    private var totalUncategorized: Double {
+        max(needsTarget - categorizedNeeds, 0)
+        + max(wantsTarget - categorizedWants, 0)
+        + max(savingsTarget - categorizedSavings, 0)
     }
 
     private var monthExpenses: [Expense] {
@@ -68,36 +96,46 @@ struct MonthlyPlanWorkspaceView: View {
             .reduce(0) { $0 + $1.amount }
     }
 
+    private var planStatus: (title: String, message: String, systemImage: String, tint: Color) {
+        if plannedIncome <= 0 {
+            return (
+                "Add monthly income",
+                "Your plan will fill automatically once income is set.",
+                "dollarsign.circle.fill",
+                .orange
+            )
+        }
+
+        if totalAllocationOverage > 0.01 {
+            return (
+                "Breakdown needs attention",
+                "Categories are \(totalAllocationOverage.formatted(.currency(code: "USD"))) over their parent buckets.",
+                "exclamationmark.triangle.fill",
+                .red
+            )
+        }
+
+        if totalUncategorized > 0.01 {
+            return (
+                "Monthly plan ready",
+                "Everything is funded. Categorize the rest only when it is useful.",
+                "checkmark.circle.fill",
+                .green
+            )
+        }
+
+        return (
+            "Monthly plan ready",
+            "Everything is funded and fully categorized.",
+            "checkmark.circle.fill",
+            .green
+        )
+    }
+
     var body: some View {
         VStack(spacing: 12) {
-            monthNavigator
-            assignmentSummary
-            planTotals
-            categorySection(
-                title: "Needs",
-                subtitle: "Required monthly spending",
-                systemImage: "house.fill",
-                tint: .blue,
-                categories: budget.needsCategories,
-                section: .needs,
-                onAdd: onAddNeeds
-            )
-            categorySection(
-                title: "Wants",
-                subtitle: "Flexible monthly spending",
-                systemImage: "sparkles",
-                tint: .orange,
-                categories: budget.wantsCategories,
-                section: .wants,
-                onAdd: onAddWants
-            )
-            savingsSection
-
-            Text("Categories stay available every month. Only each month's planned amounts change, and your latest plan carries forward as the starting point for a new month.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
+            planHeader
+            planBuckets
         }
         .onAppear {
             ensureMonthlyPlan(for: selectedMonth)
@@ -107,268 +145,515 @@ struct MonthlyPlanWorkspaceView: View {
         }
     }
 
-    private var monthNavigator: some View {
-        GlassCard(padding: 10) {
-            HStack(spacing: 10) {
-                Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Previous month")
+    private var planHeader: some View {
+        let status = planStatus
 
-                VStack(spacing: 2) {
-                    Text(selectedMonth, format: .dateTime.month(.wide).year())
-                        .font(.headline)
-                    Text("Monthly plan")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-
-                Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Next month")
-            }
-        }
-    }
-
-    private var assignmentSummary: some View {
-        GlassCard(padding: 14) {
+        return GlassCard(padding: 14) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(unassigned >= 0 ? "Unassigned" : "Over planned")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(abs(unassigned), format: .currency(code: "USD"))
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(unassigned >= 0 ? Color.primary : Color.red)
+                HStack(spacing: 10) {
+                    monthButton(systemImage: "chevron.left", label: "Previous month") {
+                        shiftMonth(-1)
                     }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Assigned")
-                            .font(.caption.weight(.semibold))
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(selectedMonth, format: .dateTime.month(.wide).year())
+                            .font(.headline)
+                        Text("Monthly plan")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text(totalAssigned, format: .currency(code: "USD"))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    monthButton(systemImage: "chevron.right", label: "Next month") {
+                        shiftMonth(1)
+                    }
+                }
+
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Expected income")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 3) {
+                            Text("$")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField(
+                                "0",
+                                value: incomeBinding,
+                                format: .number.precision(.fractionLength(0...2))
+                            )
+                            .keyboardType(.decimalPad)
+                            .font(.title3.weight(.bold).monospacedDigit())
+                        }
+
+                        Text("\(budget.payFrequency.rawValue) · \(incomePerPayPeriod.formatted(.currency(code: "USD"))) / paycheck")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("Rule")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("50 · 20 · 30")
                             .font(.headline.monospacedDigit())
+                        Text("Needs · Wants · Save")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .padding(11)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                HStack(spacing: 8) {
-                    Text("Income")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("$")
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "0",
-                        value: incomeBinding,
-                        format: .number.precision(.fractionLength(0...2))
-                    )
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(.subheadline.monospacedDigit())
-                    .frame(width: 110)
-                }
-                .padding(.top, 2)
+                HStack(spacing: 9) {
+                    Image(systemName: status.systemImage)
+                        .foregroundStyle(status.tint)
 
-                if plannedIncome > 0 {
-                    ProgressView(value: min(max(totalAssigned / plannedIncome, 0), 1))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(status.title)
+                            .font(.caption.weight(.semibold))
+                        Text(status.message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
                 }
             }
         }
     }
 
-    private var planTotals: some View {
-        HStack(spacing: 8) {
-            planTotalCard(title: "Needs", planned: plannedNeeds, actual: needsSpent, tint: .blue)
-            planTotalCard(title: "Wants", planned: plannedWants, actual: wantsSpent, tint: .orange)
-            planTotalCard(title: "Savings", planned: plannedSavings, actual: savingsLogged, tint: .mint)
+    private func monthButton(
+        systemImage: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 32, height: 32)
+                .background(.thinMaterial, in: Circle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
-    private func planTotalCard(title: String, planned: Double, actual: Double, tint: Color) -> some View {
-        GlassCard(padding: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                Text(planned, format: .currency(code: "USD"))
-                    .font(.subheadline.weight(.bold).monospacedDigit())
-                    .minimumScaleFactor(0.7)
-                    .lineLimit(1)
-                Text("\(actual.formatted(.currency(code: "USD"))) used")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .minimumScaleFactor(0.65)
-                    .lineLimit(1)
+    private var planBuckets: some View {
+        GlassCard(padding: 0) {
+            VStack(spacing: 0) {
+                bucketSection(
+                    bucket: .needs,
+                    title: "Needs",
+                    percent: "50%",
+                    systemImage: "house.fill",
+                    tint: .blue,
+                    target: needsTarget,
+                    categorized: categorizedNeeds,
+                    actual: needsSpent,
+                    actionWord: "spent",
+                    categories: budget.needsCategories,
+                    section: .needs,
+                    onAdd: onAddNeeds
+                )
+
+                Divider().padding(.leading, 52)
+
+                bucketSection(
+                    bucket: .wants,
+                    title: "Wants",
+                    percent: "20%",
+                    systemImage: "sparkles",
+                    tint: .orange,
+                    target: wantsTarget,
+                    categorized: categorizedWants,
+                    actual: wantsSpent,
+                    actionWord: "spent",
+                    categories: budget.wantsCategories,
+                    section: .wants,
+                    onAdd: onAddWants
+                )
+
+                Divider().padding(.leading, 52)
+
+                savingsBucketSection
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func categorySection(
+    private func bucketSection(
+        bucket: PlanBucket,
         title: String,
-        subtitle: String,
+        percent: String,
         systemImage: String,
         tint: Color,
+        target: Double,
+        categorized: Double,
+        actual: Double,
+        actionWord: String,
         categories: [Category],
         section: BudgetSection,
         onAdd: @escaping () -> Void
     ) -> some View {
-        GlassCard(padding: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 9) {
+        let isExpanded = expandedBuckets.contains(bucket)
+
+        return VStack(spacing: 0) {
+            bucketSummaryRow(
+                bucket: bucket,
+                title: title,
+                percent: percent,
+                systemImage: systemImage,
+                tint: tint,
+                target: target,
+                categorized: categorized,
+                actual: actual,
+                actionWord: actionWord
+            )
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    allocationStrip(
+                        title: title,
+                        target: target,
+                        categorized: categorized,
+                        tint: tint,
+                        noun: "categories"
+                    )
+
+                    if categories.isEmpty {
+                        emptyBreakdown(
+                            title: "No subcategories yet",
+                            message: "The full \(title) amount is already planned. Add detail only when you want it."
+                        )
+                    } else {
+                        ForEach(categories) { category in
+                            categoryRow(category, section: section, tint: tint)
+                        }
+                    }
+
+                    Button(action: onAdd) {
+                        Label("Add \(title) subcategory", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(tint)
+                    .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var savingsBucketSection: some View {
+        let bucket = PlanBucket.savings
+        let isExpanded = expandedBuckets.contains(bucket)
+
+        return VStack(spacing: 0) {
+            bucketSummaryRow(
+                bucket: bucket,
+                title: "Savings",
+                percent: "30%",
+                systemImage: "banknote.fill",
+                tint: .mint,
+                target: savingsTarget,
+                categorized: categorizedSavings,
+                actual: savingsLogged,
+                actionWord: "saved"
+            )
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    allocationStrip(
+                        title: "Savings",
+                        target: savingsTarget,
+                        categorized: categorizedSavings,
+                        tint: .mint,
+                        noun: "goals"
+                    )
+
+                    if budget.savingsGoals.isEmpty {
+                        emptyBreakdown(
+                            title: "No savings goals yet",
+                            message: "Your savings target is already planned. Add goals later to split it up."
+                        )
+                    } else {
+                        ForEach(budget.savingsGoals) { goal in
+                            savingsGoalRow(goal)
+                        }
+                    }
+
+                    Button(action: onAddSavings) {
+                        Label("Add savings goal", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.mint)
+                    .background(Color.mint.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func bucketSummaryRow(
+        bucket: PlanBucket,
+        title: String,
+        percent: String,
+        systemImage: String,
+        tint: Color,
+        target: Double,
+        categorized: Double,
+        actual: Double,
+        actionWord: String
+    ) -> some View {
+        let isExpanded = expandedBuckets.contains(bucket)
+        let remaining = target - actual
+        let uncategorized = max(target - categorized, 0)
+        let allocationOverage = max(categorized - target, 0)
+        let progress = target > 0 ? min(max(actual / target, 0), 1) : 0
+
+        return Button {
+            toggle(bucket)
+        } label: {
+            VStack(spacing: 9) {
+                HStack(spacing: 10) {
                     Image(systemName: systemImage)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(tint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.headline)
-                        Text(subtitle)
+                        .frame(width: 34, height: 34)
+                        .background(tint.opacity(0.12), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(percent)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(tint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(tint.opacity(0.10), in: Capsule())
+                        }
+
+                        Text(bucketDetailText(
+                            uncategorized: uncategorized,
+                            allocationOverage: allocationOverage,
+                            remaining: remaining
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(allocationOverage > 0.01 || remaining < 0 ? Color.red : Color.secondary)
+                        .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(target, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.primary)
+                        Text("\(actual.formatted(.currency(code: "USD"))) \(actionWord)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Button(action: onAdd) {
-                        Image(systemName: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 30, height: 30)
-                            .background(tint.opacity(0.12), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Add \(title) category")
+
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
 
-                if categories.isEmpty {
-                    Text("No categories yet. Add one to start assigning this month's income.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 4)
-                } else {
-                    ForEach(categories) { category in
-                        Divider()
-                        categoryRow(category, section: section, tint: tint)
-                    }
+                if target > 0 {
+                    ProgressView(value: progress)
+                        .tint(remaining >= 0 ? tint : .red)
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(target.formatted(.currency(code: "USD"))) planned")
+        .accessibilityHint(isExpanded ? "Collapse details" : "Expand details")
+    }
+
+    private func bucketDetailText(
+        uncategorized: Double,
+        allocationOverage: Double,
+        remaining: Double
+    ) -> String {
+        if allocationOverage > 0.01 {
+            return "\(allocationOverage.formatted(.currency(code: "USD"))) over-allocated"
+        }
+        if remaining < -0.01 {
+            return "\(abs(remaining).formatted(.currency(code: "USD"))) over budget"
+        }
+        if uncategorized > 0.01 {
+            return "\(uncategorized.formatted(.currency(code: "USD"))) uncategorized"
+        }
+        return "Fully categorized"
+    }
+
+    private func allocationStrip(
+        title: String,
+        target: Double,
+        categorized: Double,
+        tint: Color,
+        noun: String
+    ) -> some View {
+        let uncategorized = max(target - categorized, 0)
+        let overage = max(categorized - target, 0)
+        let progress = target > 0 ? min(max(categorized / target, 0), 1) : 0
+
+        return VStack(spacing: 7) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(overage > 0.01 ? "Over-allocated" : "Breakdown")
+                        .font(.caption.weight(.semibold))
+                    Text(overage > 0.01
+                         ? "Your \(noun) exceed the \(title) bucket."
+                         : "\(categorized.formatted(.currency(code: "USD"))) categorized · \(uncategorized.formatted(.currency(code: "USD"))) open")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if overage > 0.01 {
+                    Text(overage, format: .currency(code: "USD"))
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(.red)
+                }
+            }
+
+            if target > 0 {
+                ProgressView(value: progress)
+                    .tint(overage > 0.01 ? .red : tint)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func emptyBreakdown(title: String, message: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
     }
 
     private func categoryRow(_ category: Category, section: BudgetSection, tint: Color) -> some View {
         let planned = allocation(for: category, section: section)
         let spent = spent(for: category.id, section: section)
         let remaining = planned - spent
+        let progress = planned > 0 ? min(max(spent / planned, 0), 1) : 0
 
-        return VStack(alignment: .leading, spacing: 7) {
+        return VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Button {
                     onEditCategory(category)
                 } label: {
-                    HStack(spacing: 6) {
-                        Text(category.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Image(systemName: "pencil")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(category.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
 
-                Spacer()
-
-                Text("$")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 TextField(
                     "0",
                     value: allocationBinding(for: category, section: section),
-                    format: .number.precision(.fractionLength(0...2))
+                    format: .currency(code: "USD")
                 )
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
-                .font(.subheadline.monospacedDigit())
-                .frame(width: 90)
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .frame(width: 105)
             }
 
             HStack {
-                Text("Spent \(spent.formatted(.currency(code: "USD")))")
+                Text("\(spent.formatted(.currency(code: "USD"))) spent")
                 Spacer()
-                Text("\(remaining >= 0 ? "Left" : "Over") \(abs(remaining).formatted(.currency(code: "USD")))")
+                Text(remaining >= 0
+                     ? "\(remaining.formatted(.currency(code: "USD"))) left"
+                     : "\(abs(remaining).formatted(.currency(code: "USD"))) over")
                     .foregroundStyle(remaining >= 0 ? Color.secondary : Color.red)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
 
             if planned > 0 {
-                ProgressView(value: min(max(spent / planned, 0), 1))
+                ProgressView(value: progress)
                     .tint(remaining >= 0 ? tint : .red)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 5)
     }
 
-    private var savingsSection: some View {
-        GlassCard(padding: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 9) {
-                    Image(systemName: "banknote.fill")
-                        .foregroundStyle(.mint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Savings")
-                            .font(.headline)
-                        Text("Monthly contributions toward your goals")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button(action: onAddSavings) {
-                        Image(systemName: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 30, height: 30)
-                            .background(Color.mint.opacity(0.12), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Add savings goal")
-                }
+    private func savingsGoalRow(_ goal: SavingsGoal) -> some View {
+        let saved = savedThisMonth(for: goal.id)
+        let planned = max(goal.monthlyContribution, 0)
+        let remaining = planned - saved
+        let progress = planned > 0 ? min(max(saved / planned, 0), 1) : 0
 
-                if budget.savingsGoals.isEmpty {
-                    Text("No savings goals yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 4)
-                } else {
-                    ForEach(budget.savingsGoals) { goal in
-                        Divider()
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Button {
-                                    onEditSavingsGoal(goal)
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text(goal.displayName)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                        Image(systemName: "pencil")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                Text("\(savedThisMonth(for: goal.id).formatted(.currency(code: "USD"))) saved this month")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(goal.monthlyContribution, format: .currency(code: "USD"))
-                                .font(.subheadline.weight(.semibold).monospacedDigit())
-                        }
-                    }
+        return VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button {
+                    onEditSavingsGoal(goal)
+                } label: {
+                    Text(goal.displayName)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+
+                Text(planned, format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+            }
+
+            HStack {
+                Text("\(saved.formatted(.currency(code: "USD"))) saved")
+                Spacer()
+                Text(remaining >= 0
+                     ? "\(remaining.formatted(.currency(code: "USD"))) left"
+                     : "\(abs(remaining).formatted(.currency(code: "USD"))) ahead")
+                    .foregroundStyle(remaining >= 0 ? Color.secondary : Color.green)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+            if planned > 0 {
+                ProgressView(value: progress)
+                    .tint(.mint)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private func toggle(_ bucket: PlanBucket) {
+        withAnimation(.snappy) {
+            if expandedBuckets.contains(bucket) {
+                expandedBuckets.remove(bucket)
+            } else {
+                expandedBuckets.insert(bucket)
             }
         }
     }
@@ -387,6 +672,7 @@ struct MonthlyPlanWorkspaceView: View {
             get: { allocation(for: category, section: section) },
             set: { value in
                 let amount = max(value, 0)
+
                 switch section {
                 case .needs:
                     var month = budget.needsAllocationsByMonth[monthKey] ?? [:]
@@ -464,6 +750,7 @@ struct MonthlyPlanWorkspaceView: View {
 
     private func shiftMonth(_ offset: Int) {
         guard let shifted = Calendar.current.date(byAdding: .month, value: offset, to: selectedMonth) else { return }
+
         withAnimation(.snappy) {
             selectedMonth = shifted
         }
