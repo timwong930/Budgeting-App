@@ -1,134 +1,104 @@
-# TIM-118 — Budget Hub subpage UX
+# TIM-118 — Budget Hub workspace redesign
 
-## Why this iteration exists
+## Mental model
 
-TIM-95 improved the Budget Hub entry point, but the four subpages still feel too similar. Each one currently opens with the same generic page wrapper and mostly stacks pre-existing expandable sections. That creates navigation depth without creating a stronger reason to visit the destination.
+Budget Hub should answer four different questions instead of rendering four variations of the same card stack:
 
-The redesign should make every subpage answer one distinct financial question within the first screenful.
+- **Plan — Where should this month’s money go?**
+- **Activity — What changed this month?**
+- **Accounts — Where is my money and what needs attention?**
+- **Reports — How am I doing?**
 
-## Information architecture
+The top-level destination should answer its question quickly. Secondary screens should provide detail only when the user deliberately drills in.
 
-### Plan — Where should this month's money go?
+## Plan
 
-Primary job: finish the monthly plan before spending happens.
+Plan is the monthly allocation workspace.
 
-Above the fold:
-- Month selector
-- Plan status: balanced / money still unassigned / over-planned / missing income
-- Expected income
-- Assigned amount and assignment progress
-- Needs / Wants / Savings planned-vs-actual cards
+- Expected monthly income uses the existing pay-frequency model.
+- Needs / Wants / Savings are authoritative parent buckets using the existing 50 / 20 / 30 rule.
+- Subcategories and savings goals are optional breakdowns rather than prerequisites.
+- Uncategorized money remains planned inside its parent bucket.
+- Subcategories that exceed the parent target show an allocation error instead of silently increasing the budget.
+- The default UI is one compact Plan card with expandable parent buckets.
+- Category and savings-goal editing appears only after expansion.
 
-Main content:
-- Editable Needs categories
-- Editable Wants categories
-- Savings contribution goals
+## Activity
 
-Remove from the Plan destination:
-- Duplicate legacy Income section
-- Duplicate legacy Needs section
-- Duplicate legacy Wants section
-- Duplicate legacy Savings section
+Activity answers what moved this month before showing charts.
 
-`MonthlyPlanWorkspaceView` should become the canonical planning surface.
+### Main workspace
+- Month selector.
+- Net movement hero.
+- Inflow / spending / savings metrics.
+- Expense / income / savings quick actions.
+- Recent activity preview.
 
-### Activity — What changed this month?
+### Drill-downs
+- **Transactions** — full selected-month ledger with direct editing.
+- **Recurring** — active repeating income and expenses, monthly totals, direct editing.
+- **Trends** — daily spending and income charts plus average/peak spending context.
 
-Primary job: understand recent money movement and find transactions that need attention.
+## Accounts
 
-Above the fold:
-- Inflow
-- Outflow
-- Net movement
-- Transaction count
-- One primary action: Log transaction
+Accounts summarizes financial position and surfaces attention items before presenting account lists.
 
-Then:
-1. Recent transactions, newest first
-2. Recurring charges / upcoming obligations
-3. Trends and range selector
+### Main workspace
+- Net financial position.
+- Cash / credit debt / investment net metrics.
+- Transfer / Banks / Cards quick actions.
+- Attention area for card utilization and Plaid review items.
 
-Avoid leading with charts. The first screen should answer what happened before explaining the trend.
+### Drill-downs
+- **Banks** — available cash and individual balances, with a direct Manage action.
+- **Credit** — total card debt, overall utilization, individual utilization/available credit.
+- **Credit card detail** — balance, available credit, utilization, statement close, due day, purchases and payments.
+- **Investments** — net investment value, margin exposure, portfolio cash and holdings.
 
-### Accounts — Where is my money and what needs attention?
+## Reports
 
-Primary job: understand liquidity, debt, and investment balances.
+Reports is read-oriented. Editing belongs in Plan or Activity.
 
-Above the fold:
-- Cash
-- Credit-card debt
-- Investments
-- Net financial position
+### Main workspace
+- Selected month.
+- Remaining after spending and savings.
+- Income / spent / saved metrics.
+- Savings rate.
+- Largest category insight.
 
-Attention area:
-- Cards with upcoming due dates
-- High utilization / balance attention where the data is available
-- Accounts that failed or need Plaid reconnect when sync health is available
-
-Then:
-- Bank account group
-- Credit-card group
-- Investment group
-- Transfer action
-
-Avoid making the page feel like an extra tap just to see the same account cards that already exist elsewhere.
-
-### Reports — How am I doing?
-
-Primary job: turn historical budget data into an answer, not another set of expandable cards.
-
-Above the fold:
-- Budget vs actual for the selected month
-- Savings rate
-- Remaining / overspent status
-- Change versus prior month when enough data exists
-
-Then:
-- Category drivers: top categories and largest overages
-- Needs / Wants / Savings allocation comparison
-- Month-end totals
-- Trend details
-
-Reports should be read-oriented. Editing belongs in Plan or Activity.
+### Drill-downs
+- **Category performance** — planned vs actual by Needs/Wants category.
+- **50 / 20 / 30** — parent targets vs actual spending/saving.
+- **Month comparison** — spending, income, and savings compared with the previous month.
 
 ## Interaction rules
 
-- Keep the selected month consistent when moving between Budget Hub workspaces.
-- Put one primary action near the top of each workspace.
-- Prefer summary bands and rows over nested GlassCards inside GlassCards.
-- Expandable sections should be used only for genuinely secondary detail.
-- Keep transaction editing, account management, Plaid behavior, persistence, and calculations unchanged.
-- Reuse the existing Cuan / Glass design language and Dynamic Type conventions.
+- Keep the selected month consistent across Plan, Activity, and Reports.
+- Put one clear action or answer near the top of each destination.
+- Prefer compact summary rows over nested card grids.
+- Reveal detail progressively instead of expanding everything by default.
+- Keep editing in Plan / Activity / account-management screens; Reports remains analytical.
+- Preserve BudgetModel, Plaid reconciliation, persistence, Cuan/Glass styling, and accessibility conventions.
 
-## Implementation slices
+## Implementation status
 
-### Slice 1 — Plan workspace
-- Add plan health/status messaging.
-- Make unassigned / over-planned money visually explicit.
-- Improve planned-vs-actual cards and category progress.
-- Improve savings contribution progress.
-- Remove duplicate legacy sections from `budgetPlanSubmenu` once the parent is edited.
+Implemented on `tim-118-budget-hub-workspaces`:
 
-### Slice 2 — Activity
-- Add month activity hero with inflow, outflow, net movement, and count.
-- Move transactions ahead of trends.
-- Keep recurring charges as an attention section.
+- `MonthlyPlanWorkspace.swift` — Plan UX and parent-bucket logic.
+- `BudgetHubWorkspaces.swift` — Activity, Accounts, Reports and all new drill-down views.
+- `scripts/apply-tim-118-budget-hub-workspaces.py` — exact guarded replacement for the legacy Budget Hub destination block in `ContentView.swift`.
+- `docs/TIM-118-contentview-workspace-integration.patch` — reviewable integration diff.
 
-### Slice 3 — Accounts
-- Add cash / debt / investments / net summary.
-- Add attention rows for due cards and sync health when available.
-- Preserve existing account detail sheets.
+The project uses a filesystem-synchronized Xcode group, so `BudgetHubWorkspaces.swift` is automatically included. The final `ContentView.swift` route replacement is deliberately guarded: the legacy file is roughly 12,000 lines and the GitHub write interface available in this session only supports whole-file replacement rather than a small patch operation.
 
-### Slice 4 — Reports
-- Add budget-vs-actual report hero.
-- Add month-over-month comparison using existing monthly data.
-- Surface top category drivers before the full breakdown.
+## Verification
 
-## Acceptance
+After applying the guarded ContentView integration, build in Xcode and test:
 
-- Each workspace has a distinct purpose and first-screen summary.
-- Plan no longer duplicates the legacy planning sections after the monthly workspace.
-- Activity prioritizes recent movement over charts.
-- Accounts surfaces financial position and attention items, not only account lists.
-- Reports provides comparative insight, not only a stack of existing summaries.
-- No intended model, persistence, Plaid sync, or calculation changes.
+1. Budget Hub → Plan: no duplicated legacy sections below the new Plan workspace.
+2. Activity: quick actions, recent items, Transactions, Recurring and Trends navigation/edit flows.
+3. Accounts: summary values, attention states, Banks, Credit, card detail and Investments.
+4. Reports: month selector, category performance, 50/20/30 and previous-month comparison.
+5. Switch months and confirm Activity/Reports reflect the selected month.
+6. Test empty-data states and small-screen layout.
+7. Confirm existing Plaid/manual account management and transaction editor sheets still work.
