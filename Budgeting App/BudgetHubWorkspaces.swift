@@ -557,10 +557,13 @@ struct BudgetAccountsWorkspaceView: View {
     let onManageBanks: () -> Void
     let onManageCredit: () -> Void
 
+    private var activeCards: [CreditAccount] { budget.creditAccounts.filter(\.isActive) }
     private var totalCash: Double { budget.bankAccounts.reduce(0) { $0 + $1.balance } }
-    private var totalCredit: Double {
-        budget.creditAccounts.filter(\.isActive).reduce(0) { $0 + actualBalance(for: $1) }
-    }
+    private var totalCredit: Double { activeCards.reduce(0) { $0 + actualBalance(for: $1) } }
+    private var totalCreditLimit: Double { activeCards.reduce(0) { $0 + max($1.creditLimit, 0) } }
+    private var overallUtilization: Double { totalCreditLimit > 0 ? totalCredit / totalCreditLimit : 0 }
+    private var cashAfterCards: Double { totalCash - totalCredit }
+
     private var investmentNet: Double {
         let holdings = budget.holdings.reduce(0) { partial, holding in
             let quote = budget.cachedQuotes[holding.ticker.uppercased()]?.price ?? holding.currentPrice
@@ -568,16 +571,42 @@ struct BudgetAccountsWorkspaceView: View {
         }
         return holdings + budget.portfolioSnapshot.cashBalance - budget.portfolioSnapshot.marginUsed
     }
-    private var netPosition: Double { totalCash + investmentNet - totalCredit }
 
-    private var highUtilizationCards: [CreditAccount] {
-        budget.creditAccounts.filter { account in
-            account.isActive && account.creditLimit > 0 && actualBalance(for: account) / account.creditLimit >= 0.30
-        }
+    private var netPosition: Double { totalCash + investmentNet - totalCredit }
+    private var syncedBankCount: Int { budget.bankAccounts.filter { $0.plaidMetadata != nil }.count }
+
+    private var highestUtilizationCard: CreditAccount? {
+        activeCards
+            .filter { $0.creditLimit > 0 }
+            .max { utilization(for: $0) < utilization(for: $1) }
     }
 
-    private var attentionCount: Int {
-        highUtilizationCards.count + budget.plaidReviewItems.count
+    private var cardsDueSoon: [CreditAccount] {
+        activeCards
+            .filter { daysUntilDue(for: $0) <= 7 }
+            .sorted { nextDueDate(for: $0) < nextDueDate(for: $1) }
+    }
+
+    private var hasHighUtilization: Bool {
+        guard let card = highestUtilizationCard else { return false }
+        return utilization(for: card) >= 0.30
+    }
+
+    private var hasAttention: Bool {
+        !cardsDueSoon.isEmpty || hasHighUtilization || !budget.plaidReviewItems.isEmpty
+    }
+
+    private var statusTitle: String {
+        if netPosition < 0 { return "Debt ahead" }
+        if overallUtilization >= 0.30 { return "Watch cards" }
+        if hasAttention { return "Check accounts" }
+        return "All clear"
+    }
+
+    private var statusTint: Color {
+        if netPosition < 0 { return .red }
+        if overallUtilization >= 0.30 || hasAttention { return .orange }
+        return .green
     }
 
     var body: some View {
@@ -590,25 +619,27 @@ struct BudgetAccountsWorkspaceView: View {
                 BudgetWorkspaceActionButton(title: "Cards", systemImage: "creditcard", tint: .orange, action: onManageCredit)
             }
 
-            if attentionCount > 0 {
+            if hasAttention {
                 attentionCard
             }
 
             BudgetWorkspaceSectionHeader(
-                title: "Your accounts",
-                subtitle: "Balances first, management one tap deeper"
+                title: "Accounts at a glance",
+                subtitle: "Tap a group to see the balances and details that matter"
             )
 
             VStack(spacing: 8) {
                 NavigationLink {
                     BudgetBankAccountsWorkspaceView(budget: budget, onManage: onManageBanks)
                 } label: {
-                    BudgetWorkspaceNavigationRow(
-                        title: "Bank accounts",
-                        subtitle: "\(budget.bankAccounts.count) account\(budget.bankAccounts.count == 1 ? "" : "s")",
+                    BudgetAccountGroupCard(
+                        title: "Cash",
+                        value: totalCash.formatted(.currency(code: "USD")),
+                        subtitle: "\(budget.bankAccounts.count) account\(budget.bankAccounts.count == 1 ? "" : "s") · \(syncedBankCount) synced",
                         systemImage: "building.columns.fill",
                         tint: .blue,
-                        value: totalCash.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+                        status: cashAfterCards >= 0 ? "Covers cards" : "Below card debt",
+                        statusTint: cashAfterCards >= 0 ? .green : .orange
                     )
                 }
                 .buttonStyle(.plain)
@@ -616,12 +647,16 @@ struct BudgetAccountsWorkspaceView: View {
                 NavigationLink {
                     BudgetCreditAccountsWorkspaceView(budget: budget, onManage: onManageCredit)
                 } label: {
-                    BudgetWorkspaceNavigationRow(
-                        title: "Credit cards",
-                        subtitle: "\(budget.creditAccounts.filter(\.isActive).count) active",
+                    BudgetAccountGroupCard(
+                        title: "Credit",
+                        value: totalCredit.formatted(.currency(code: "USD")),
+                        subtitle: totalCreditLimit > 0
+                            ? "\(overallUtilization.formatted(.percent.precision(.fractionLength(0)))) utilization · \(activeCards.count) active"
+                            : "\(activeCards.count) active card\(activeCards.count == 1 ? "" : "s")",
                         systemImage: "creditcard.fill",
                         tint: .orange,
-                        value: totalCredit.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+                        status: cardsDueSoon.isEmpty ? "No due dates this week" : "\(cardsDueSoon.count) due soon",
+                        statusTint: cardsDueSoon.isEmpty ? .green : .orange
                     )
                 }
                 .buttonStyle(.plain)
@@ -629,12 +664,16 @@ struct BudgetAccountsWorkspaceView: View {
                 NavigationLink {
                     BudgetInvestmentsWorkspaceView(budget: budget)
                 } label: {
-                    BudgetWorkspaceNavigationRow(
+                    BudgetAccountGroupCard(
                         title: "Investments",
-                        subtitle: "Holdings, cash, and margin",
+                        value: investmentNet.formatted(.currency(code: "USD")),
+                        subtitle: budget.portfolioSnapshot.marginUsed > 0
+                            ? "\(budget.portfolioSnapshot.marginUsed.formatted(.currency(code: "USD"))) margin in use"
+                            : "Holdings + portfolio cash",
                         systemImage: "chart.line.uptrend.xyaxis",
                         tint: .mint,
-                        value: investmentNet.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+                        status: budget.portfolioSnapshot.marginUsed > 0 ? "Margin active" : "No margin used",
+                        statusTint: budget.portfolioSnapshot.marginUsed > 0 ? .purple : .green
                     )
                 }
                 .buttonStyle(.plain)
@@ -645,53 +684,145 @@ struct BudgetAccountsWorkspaceView: View {
     private var accountHero: some View {
         GlassCard(padding: 14) {
             VStack(alignment: .leading, spacing: 13) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Net financial position")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(netPosition, format: .currency(code: "USD"))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(netPosition >= 0 ? Color.primary : Color.red)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(1)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Net financial position")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(netPosition, format: .currency(code: "USD"))
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .foregroundStyle(netPosition >= 0 ? Color.primary : Color.red)
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 12)
+                    Text(statusTitle)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(statusTint)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(statusTint.opacity(0.11), in: Capsule())
                 }
 
                 HStack(spacing: 8) {
                     BudgetWorkspaceMetricPill(title: "Cash", value: totalCash, tint: .blue, systemImage: "building.columns")
-                    BudgetWorkspaceMetricPill(title: "Debt", value: totalCredit, tint: .orange, systemImage: "creditcard")
+                    BudgetWorkspaceMetricPill(title: "Card debt", value: totalCredit, tint: .orange, systemImage: "creditcard")
                     BudgetWorkspaceMetricPill(title: "Invested", value: investmentNet, tint: .mint, systemImage: "chart.line.uptrend.xyaxis")
                 }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cash after card balances")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(cashAfterCards >= 0 ? "Cash can cover current card balances" : "Card balances exceed cash on hand")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 10)
+                    Text(cashAfterCards, format: .currency(code: "USD").precision(.fractionLength(0)))
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(cashAfterCards >= 0 ? Color.green : Color.orange)
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
         }
     }
 
     private var attentionCard: some View {
         GlassCard(padding: 12) {
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Needs attention", systemImage: "exclamationmark.circle.fill")
+                    Label("Account focus", systemImage: "sparkles")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.orange)
                     Spacer()
-                    Text("\(attentionCount)")
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.orange.opacity(0.12), in: Capsule())
+                    Text("Review")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
                 }
 
-                if !highUtilizationCards.isEmpty {
-                    Text("\(highUtilizationCards.count) card\(highUtilizationCards.count == 1 ? " is" : "s are") above 30% utilization.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let card = cardsDueSoon.first {
+                    BudgetAccountAttentionRow(
+                        title: "\(card.name) is due \(dueLabel(for: card).lowercased())",
+                        detail: "\(actualBalance(for: card).formatted(.currency(code: "USD"))) balance · \(nextDueDate(for: card).formatted(.dateTime.month(.abbreviated).day()))",
+                        systemImage: "calendar.badge.clock",
+                        tint: daysUntilDue(for: card) <= 3 ? .red : .orange
+                    )
                 }
+
+                if let card = highestUtilizationCard, utilization(for: card) >= 0.30 {
+                    BudgetAccountAttentionRow(
+                        title: "\(card.name) is using \(utilization(for: card).formatted(.percent.precision(.fractionLength(0))))",
+                        detail: utilization(for: card) >= 0.50 ? "High utilization — consider paying this down first." : "Above the 30% watch level.",
+                        systemImage: "gauge.with.dots.needle.67percent",
+                        tint: utilization(for: card) >= 0.50 ? .red : .orange
+                    )
+                }
+
                 if !budget.plaidReviewItems.isEmpty {
-                    Text("\(budget.plaidReviewItems.count) Plaid import\(budget.plaidReviewItems.count == 1 ? "" : "s") need review.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    BudgetAccountAttentionRow(
+                        title: "\(budget.plaidReviewItems.count) imported item\(budget.plaidReviewItems.count == 1 ? "" : "s") need review",
+                        detail: "Resolve imported activity so account totals stay trustworthy.",
+                        systemImage: "arrow.triangle.2.circlepath.circle.fill",
+                        tint: .blue
+                    )
+                }
+
+                HStack(spacing: 8) {
+                    if !cardsDueSoon.isEmpty || hasHighUtilization {
+                        Button("Review cards", action: onManageCredit)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    if !budget.plaidReviewItems.isEmpty {
+                        Button("Manage accounts", action: onManageBanks)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 }
             }
         }
+    }
+
+    private func utilization(for account: CreditAccount) -> Double {
+        guard account.creditLimit > 0 else { return 0 }
+        return actualBalance(for: account) / account.creditLimit
+    }
+
+    private func dueLabel(for account: CreditAccount) -> String {
+        let days = daysUntilDue(for: account)
+        if days == 0 { return "Today" }
+        if days == 1 { return "Tomorrow" }
+        return "In \(days) days"
+    }
+
+    private func daysUntilDue(for account: CreditAccount) -> Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        return max(calendar.dateComponents([.day], from: start, to: nextDueDate(for: account)).day ?? 0, 0)
+    }
+
+    private func nextDueDate(for account: CreditAccount) -> Date {
+        nextAccountDate(day: account.dueDay, relativeTo: Date())
+    }
+
+    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+
+        func date(in month: Date) -> Date {
+            let monthRange = calendar.range(of: .day, in: .month, for: month)
+            let safeDay = min(max(day, 1), monthRange?.count ?? 28)
+            var components = calendar.dateComponents([.year, .month], from: month)
+            components.day = safeDay
+            return calendar.date(from: components) ?? month
+        }
+
+        let candidate = date(in: start)
+        if candidate >= start { return candidate }
+        let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
+        return date(in: nextMonth)
     }
 
     private func actualBalance(for account: CreditAccount) -> Double {
@@ -711,68 +842,132 @@ struct BudgetAccountsWorkspaceView: View {
     }
 }
 
+private struct BudgetAccountGroupCard: View {
+    let title: String
+    let value: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    let status: String
+    let statusTint: Color
+
+    var body: some View {
+        GlassCard(padding: 13) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                    .foregroundStyle(tint)
+                    .frame(width: 40, height: 40)
+                    .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text(status)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(statusTint)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(statusTint.opacity(0.10), in: Capsule())
+                            .lineLimit(1)
+                    }
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(value)
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+}
+
+private struct BudgetAccountAttentionRow: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.10), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 private struct BudgetBankAccountsWorkspaceView: View {
     @ObservedObject var budget: BudgetModel
     let onManage: () -> Void
 
+    private var sortedAccounts: [BankAccount] {
+        budget.bankAccounts.sorted { $0.balance > $1.balance }
+    }
+
     private var total: Double { budget.bankAccounts.reduce(0) { $0 + $1.balance } }
+    private var positiveCash: Double { budget.bankAccounts.reduce(0) { $0 + max($1.balance, 0) } }
+    private var syncedCount: Int { budget.bankAccounts.filter { $0.plaidMetadata != nil }.count }
+    private var manualCount: Int { budget.bankAccounts.count - syncedCount }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                BudgetWorkspaceSubpageHeader(
-                    title: "Bank accounts",
-                    subtitle: "Cash you can actually deploy",
-                    systemImage: "building.columns.fill",
-                    tint: .blue
-                )
-
-                GlassCard(padding: 14) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Available cash")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(total, format: .currency(code: "USD"))
-                                .font(.title2.weight(.bold).monospacedDigit())
-                        }
-                        Spacer()
-                        Button("Manage", action: onManage)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                }
+                bankHero
 
                 if budget.bankAccounts.isEmpty {
                     BudgetWorkspaceEmptyState(
                         systemImage: "building.columns",
                         title: "No bank accounts",
-                        message: "Add or sync an account to see cash balances here.",
+                        message: "Add or sync an account to see your cash position here.",
                         actionTitle: "Manage accounts",
                         action: onManage
                     )
                 } else {
+                    BudgetWorkspaceSectionHeader(
+                        title: "Your cash accounts",
+                        subtitle: "Tap any account to open its ledger"
+                    )
+
                     VStack(spacing: 8) {
-                        ForEach(budget.bankAccounts) { account in
-                            GlassCard(padding: 12) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "building.columns.fill")
-                                        .foregroundStyle(.blue)
-                                        .frame(width: 34, height: 34)
-                                        .background(Color.blue.opacity(0.10), in: Circle())
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(account.name)
-                                            .font(.subheadline.weight(.semibold))
-                                        Text(account.plaidMetadata == nil ? "Manual account" : "Synced account")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(account.balance, format: .currency(code: "USD"))
-                                        .font(.subheadline.weight(.bold).monospacedDigit())
-                                }
+                        ForEach(sortedAccounts) { account in
+                            NavigationLink {
+                                BankAccountLedgerView(account: binding(for: account), budget: budget)
+                            } label: {
+                                bankAccountRow(account)
                             }
+                            .buttonStyle(.plain)
                         }
+                    }
+
+                    if positiveCash > 0 && sortedAccounts.count > 1 {
+                        cashDistributionCard
                     }
                 }
             }
@@ -783,6 +978,142 @@ private struct BudgetBankAccountsWorkspaceView: View {
         .navigationTitle("Banks")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private var bankHero: some View {
+        GlassCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Cash available", systemImage: "building.columns.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.blue)
+                        Text(total, format: .currency(code: "USD"))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Manage", action: onManage)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+
+                HStack(spacing: 8) {
+                    bankHeroStat(title: "Accounts", value: "\(budget.bankAccounts.count)", tint: .blue)
+                    bankHeroStat(title: "Synced", value: "\(syncedCount)", tint: .green)
+                    bankHeroStat(title: "Manual", value: "\(manualCount)", tint: .secondary)
+                }
+            }
+        }
+    }
+
+    private func bankHeroStat(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func bankAccountRow(_ account: BankAccount) -> some View {
+        let share = positiveCash > 0 ? max(account.balance, 0) / positiveCash : 0
+        return GlassCard(padding: 12) {
+            HStack(spacing: 11) {
+                Image(systemName: account.plaidMetadata == nil ? "banknote" : "building.columns.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 36, height: 36)
+                    .background(Color.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(account.name)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(account.plaidMetadata == nil ? "Manual" : "Synced")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(account.plaidMetadata == nil ? Color.secondary : Color.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((account.plaidMetadata == nil ? Color.secondary : Color.green).opacity(0.09), in: Capsule())
+                    }
+                    if account.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(positiveCash > 0 ? "\(share.formatted(.percent.precision(.fractionLength(0)))) of cash" : "Open account ledger")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(account.note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(account.balance, format: .currency(code: "USD"))
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(account.balance >= 0 ? Color.primary : Color.red)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private var cashDistributionCard: some View {
+        GlassCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 11) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Cash distribution")
+                        .font(.subheadline.weight(.bold))
+                    Text("Where your available cash is sitting")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(sortedAccounts.filter { $0.balance > 0 }.prefix(5)) { account in
+                    let share = account.balance / positiveCash
+                    VStack(spacing: 5) {
+                        HStack {
+                            Text(account.name)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(share, format: .percent.precision(.fractionLength(0)))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        ProgressView(value: share)
+                            .tint(.blue)
+                    }
+                }
+            }
+        }
+    }
+
+    private func binding(for account: BankAccount) -> Binding<BankAccount> {
+        Binding(
+            get: {
+                budget.bankAccounts.first(where: { $0.id == account.id }) ?? account
+            },
+            set: { updated in
+                guard let index = budget.bankAccounts.firstIndex(where: { $0.id == account.id }) else { return }
+                budget.bankAccounts[index] = updated
+            }
+        )
+    }
 }
 
 private struct BudgetCreditAccountsWorkspaceView: View {
@@ -790,62 +1121,45 @@ private struct BudgetCreditAccountsWorkspaceView: View {
     let onManage: () -> Void
 
     private var activeCards: [CreditAccount] { budget.creditAccounts.filter(\.isActive) }
+    private var sortedCards: [CreditAccount] {
+        activeCards.sorted { lhs, rhs in
+            let lhsDue = nextDueDate(for: lhs)
+            let rhsDue = nextDueDate(for: rhs)
+            if lhsDue != rhsDue { return lhsDue < rhsDue }
+            return utilization(for: lhs) > utilization(for: rhs)
+        }
+    }
     private var totalDebt: Double { activeCards.reduce(0) { $0 + actualBalance(for: $1) } }
     private var totalLimit: Double { activeCards.reduce(0) { $0 + max($1.creditLimit, 0) } }
+    private var totalAvailable: Double { max(totalLimit - totalDebt, 0) }
     private var overallUtilization: Double { totalLimit > 0 ? totalDebt / totalLimit : 0 }
+    private var nextCard: CreditAccount? { sortedCards.first }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                BudgetWorkspaceSubpageHeader(
-                    title: "Credit cards",
-                    subtitle: "Debt, utilization, and due dates",
-                    systemImage: "creditcard.fill",
-                    tint: .orange
-                )
+                creditHero
 
-                GlassCard(padding: 14) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Total card debt")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Text(totalDebt, format: .currency(code: "USD"))
-                                    .font(.title2.weight(.bold).monospacedDigit())
-                            }
-                            Spacer()
-                            Button("Manage", action: onManage)
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
-                        if totalLimit > 0 {
-                            HStack {
-                                Text("Overall utilization")
-                                Spacer()
-                                Text(overallUtilization, format: .percent.precision(.fractionLength(1)))
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(utilizationTint(overallUtilization))
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            ProgressView(value: min(max(overallUtilization, 0), 1))
-                                .tint(utilizationTint(overallUtilization))
-                        }
-                    }
+                if let nextCard {
+                    nextPaymentCard(nextCard)
                 }
 
                 if activeCards.isEmpty {
                     BudgetWorkspaceEmptyState(
                         systemImage: "creditcard",
                         title: "No active cards",
-                        message: "Add or sync a credit card to track balances and utilization.",
+                        message: "Add or sync a credit card to track balances, utilization, and due dates.",
                         actionTitle: "Manage cards",
                         action: onManage
                     )
                 } else {
+                    BudgetWorkspaceSectionHeader(
+                        title: "Cards",
+                        subtitle: "Ordered by the next payment due date"
+                    )
+
                     VStack(spacing: 8) {
-                        ForEach(activeCards) { account in
+                        ForEach(sortedCards) { account in
                             NavigationLink {
                                 BudgetCreditCardWorkspaceDetail(account: account, budget: budget)
                             } label: {
@@ -864,22 +1178,116 @@ private struct BudgetCreditAccountsWorkspaceView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func creditCardRow(_ account: CreditAccount) -> some View {
-        let balance = actualBalance(for: account)
-        let utilization = account.creditLimit > 0 ? balance / account.creditLimit : 0
-        return GlassCard(padding: 12) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(account.name)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.primary)
-                        Text("Due day \(account.dueDay) · closes \(account.closingDay)")
+    private var creditHero: some View {
+        GlassCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Credit position", systemImage: "creditcard.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text(totalDebt, format: .currency(code: "USD"))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                        Text("Current card balances")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
+                    Button("Manage", action: onManage)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+
+                HStack(spacing: 8) {
+                    creditHeroStat(title: "Available", value: totalAvailable.formatted(.currency(code: "USD").precision(.fractionLength(0))), tint: .green)
+                    creditHeroStat(
+                        title: "Utilization",
+                        value: totalLimit > 0 ? overallUtilization.formatted(.percent.precision(.fractionLength(0))) : "—",
+                        tint: utilizationTint(overallUtilization)
+                    )
+                    creditHeroStat(title: "Active", value: "\(activeCards.count)", tint: .orange)
+                }
+
+                if totalLimit > 0 {
+                    ProgressView(value: min(max(overallUtilization, 0), 1))
+                        .tint(utilizationTint(overallUtilization))
+                }
+            }
+        }
+    }
+
+    private func creditHeroStat(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func nextPaymentCard(_ account: CreditAccount) -> some View {
+        let dueDate = nextDueDate(for: account)
+        let days = daysUntilDue(for: account)
+        let tint = dueTint(days)
+        return GlassCard(padding: 12) {
+            HStack(spacing: 11) {
+                Image(systemName: "calendar.badge.clock")
+                    .foregroundStyle(tint)
+                    .frame(width: 36, height: 36)
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Next payment")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(account.name)
+                        .font(.subheadline.weight(.bold))
+                    Text("Due \(dueDate.formatted(.dateTime.month(.abbreviated).day())) · \(dueLabel(days))")
+                        .font(.caption2)
+                        .foregroundStyle(tint)
+                }
+                Spacer()
+                Text(actualBalance(for: account), format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+    }
+
+    private func creditCardRow(_ account: CreditAccount) -> some View {
+        let balance = actualBalance(for: account)
+        let utilization = utilization(for: account)
+        let days = daysUntilDue(for: account)
+        return GlassCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(account.name)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.primary)
+                            Text(dueLabel(days))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(dueTint(days))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(dueTint(days).opacity(0.09), in: Capsule())
+                        }
+                        Text("Due \(nextDueDate(for: account).formatted(.dateTime.month(.abbreviated).day())) · closes day \(account.closingDay)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 3) {
                         Text(balance, format: .currency(code: "USD"))
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .foregroundStyle(.primary)
@@ -888,25 +1296,74 @@ private struct BudgetCreditAccountsWorkspaceView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+
                 if account.creditLimit > 0 {
                     ProgressView(value: min(max(utilization, 0), 1))
                         .tint(utilizationTint(utilization))
                     HStack {
-                        Text("\(utilization.formatted(.percent.precision(.fractionLength(1)))) utilized")
+                        Label(
+                            utilization.formatted(.percent.precision(.fractionLength(0))),
+                            systemImage: "gauge.with.dots.needle.33percent"
+                        )
+                        .foregroundStyle(utilizationTint(utilization))
                         Spacer()
                         Text("\(max(account.creditLimit - balance, 0).formatted(.currency(code: "USD"))) available")
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.weight(.semibold))
                 }
             }
         }
+    }
+
+    private func dueLabel(_ days: Int) -> String {
+        if days == 0 { return "Due today" }
+        if days == 1 { return "Due tomorrow" }
+        return "Due in \(days)d"
+    }
+
+    private func dueTint(_ days: Int) -> Color {
+        if days <= 3 { return .red }
+        if days <= 7 { return .orange }
+        return .secondary
     }
 
     private func utilizationTint(_ utilization: Double) -> Color {
         if utilization >= 0.50 { return .red }
         if utilization >= 0.30 { return .orange }
         return .green
+    }
+
+    private func utilization(for account: CreditAccount) -> Double {
+        guard account.creditLimit > 0 else { return 0 }
+        return actualBalance(for: account) / account.creditLimit
+    }
+
+    private func daysUntilDue(for account: CreditAccount) -> Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        return max(calendar.dateComponents([.day], from: start, to: nextDueDate(for: account)).day ?? 0, 0)
+    }
+
+    private func nextDueDate(for account: CreditAccount) -> Date {
+        nextAccountDate(day: account.dueDay, relativeTo: Date())
+    }
+
+    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+
+        func date(in month: Date) -> Date {
+            let monthRange = calendar.range(of: .day, in: .month, for: month)
+            let safeDay = min(max(day, 1), monthRange?.count ?? 28)
+            var components = calendar.dateComponents([.year, .month], from: month)
+            components.day = safeDay
+            return calendar.date(from: components) ?? month
+        }
+
+        let candidate = date(in: start)
+        if candidate >= start { return candidate }
+        let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
+        return date(in: nextMonth)
     }
 
     private func actualBalance(for account: CreditAccount) -> Double {
@@ -944,6 +1401,13 @@ private struct BudgetCreditCardWorkspaceDetail: View {
     }
 
     private var utilization: Double { account.creditLimit > 0 ? balance / account.creditLimit : 0 }
+    private var nextDueDate: Date { nextAccountDate(day: account.dueDay, relativeTo: Date()) }
+    private var nextClosingDate: Date { nextAccountDate(day: account.closingDay, relativeTo: Date()) }
+    private var daysUntilDue: Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        return max(calendar.dateComponents([.day], from: start, to: nextDueDate).day ?? 0, 0)
+    }
 
     private var activity: [(id: String, date: Date, name: String, amount: Double, isPayment: Bool)] {
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -975,11 +1439,30 @@ private struct BudgetCreditCardWorkspaceDetail: View {
                 }
 
                 GlassCard(padding: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(daysUntilDue <= 3 ? Color.red : (daysUntilDue <= 7 ? Color.orange : Color.blue))
+                            .frame(width: 34, height: 34)
+                            .background((daysUntilDue <= 3 ? Color.red : (daysUntilDue <= 7 ? Color.orange : Color.blue)).opacity(0.10), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(daysUntilDue == 0 ? "Payment due today" : (daysUntilDue == 1 ? "Payment due tomorrow" : "Payment due in \(daysUntilDue) days"))
+                                .font(.subheadline.weight(.bold))
+                            Text(nextDueDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(balance, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                    }
+                }
+
+                GlassCard(padding: 12) {
                     VStack(spacing: 10) {
                         BudgetWorkspaceLabeledValue(title: "Utilization", value: utilization.formatted(.percent.precision(.fractionLength(1))))
                         BudgetWorkspaceLabeledValue(title: "Credit limit", value: account.creditLimit.formatted(.currency(code: "USD")))
-                        BudgetWorkspaceLabeledValue(title: "Statement closes", value: "Day \(account.closingDay)")
-                        BudgetWorkspaceLabeledValue(title: "Payment due", value: "Day \(account.dueDay)")
+                        BudgetWorkspaceLabeledValue(title: "Statement closes", value: nextClosingDate.formatted(.dateTime.month(.abbreviated).day()))
+                        BudgetWorkspaceLabeledValue(title: "Payment due", value: nextDueDate.formatted(.dateTime.month(.abbreviated).day()))
                     }
                 }
 
@@ -1022,6 +1505,24 @@ private struct BudgetCreditCardWorkspaceDetail: View {
         .background(CuanTheme.background.ignoresSafeArea())
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func nextAccountDate(day: Int, relativeTo date: Date) -> Date {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+
+        func date(in month: Date) -> Date {
+            let monthRange = calendar.range(of: .day, in: .month, for: month)
+            let safeDay = min(max(day, 1), monthRange?.count ?? 28)
+            var components = calendar.dateComponents([.year, .month], from: month)
+            components.day = safeDay
+            return calendar.date(from: components) ?? month
+        }
+
+        let candidate = date(in: start)
+        if candidate >= start { return candidate }
+        let nextMonth = calendar.date(byAdding: .month, value: 1, to: start) ?? start
+        return date(in: nextMonth)
     }
 }
 
