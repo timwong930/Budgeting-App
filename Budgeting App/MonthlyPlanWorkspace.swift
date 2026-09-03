@@ -36,16 +36,40 @@ struct MonthlyPlanWorkspaceView: View {
         )
     }
 
-    private var plannedNeeds: Double {
+    private var needsTarget: Double {
+        plannedIncome * 0.50
+    }
+
+    private var wantsTarget: Double {
+        plannedIncome * 0.20
+    }
+
+    private var savingsTarget: Double {
+        plannedIncome * 0.30
+    }
+
+    private var categorizedNeeds: Double {
         budget.needsCategories.reduce(0) { $0 + allocation(for: $1, section: .needs) }
     }
 
-    private var plannedWants: Double {
+    private var categorizedWants: Double {
         budget.wantsCategories.reduce(0) { $0 + allocation(for: $1, section: .wants) }
     }
 
-    private var plannedSavings: Double {
+    private var categorizedSavings: Double {
         budget.savingsGoals.reduce(0) { $0 + max($1.monthlyContribution, 0) }
+    }
+
+    private var plannedNeeds: Double {
+        max(needsTarget, categorizedNeeds)
+    }
+
+    private var plannedWants: Double {
+        max(wantsTarget, categorizedWants)
+    }
+
+    private var plannedSavings: Double {
+        max(savingsTarget, categorizedSavings)
     }
 
     private var totalAssigned: Double {
@@ -86,30 +110,22 @@ struct MonthlyPlanWorkspaceView: View {
         if plannedIncome <= 0 {
             return (
                 "Start with income",
-                "Add the income you expect this month, then give it a job.",
+                "Add the income you expect this month, then the app can fund your 50/20/30 buckets.",
                 "dollarsign.circle.fill",
                 .orange
-            )
-        }
-        if unassigned > 0.01 {
-            return (
-                "Still needs a plan",
-                "Assign the remaining \(unassigned.formatted(.currency(code: "USD"))) before the month gets busy.",
-                "arrow.down.circle.fill",
-                .blue
             )
         }
         if unassigned < -0.01 {
             return (
                 "Plan needs attention",
-                "Reduce planned spending by \(abs(unassigned).formatted(.currency(code: "USD"))).",
+                "Your subcategories exceed their parent buckets by \(abs(unassigned).formatted(.currency(code: "USD"))).",
                 "exclamationmark.triangle.fill",
                 .red
             )
         }
         return (
-            "Plan is balanced",
-            "Every expected dollar has a job for this month.",
+            "50/20/30 plan funded",
+            "Needs, Wants, and Savings are funded first. Subcategories are optional and can be added later.",
             "checkmark.circle.fill",
             .green
         )
@@ -121,25 +137,27 @@ struct MonthlyPlanWorkspaceView: View {
             planTotals
             categorySection(
                 title: "Needs",
-                subtitle: "Required monthly spending",
+                subtitle: "50% parent bucket · subcategories optional",
                 systemImage: "house.fill",
                 tint: .blue,
+                target: needsTarget,
                 categories: budget.needsCategories,
                 section: .needs,
                 onAdd: onAddNeeds
             )
             categorySection(
                 title: "Wants",
-                subtitle: "Flexible monthly spending",
+                subtitle: "20% parent bucket · subcategories optional",
                 systemImage: "sparkles",
                 tint: .orange,
+                target: wantsTarget,
                 categories: budget.wantsCategories,
                 section: .wants,
                 onAdd: onAddWants
             )
             savingsSection
 
-            Text("Your categories carry forward. Only the monthly amounts change, so each new month starts from your latest plan instead of a blank slate.")
+            Text("Needs, Wants, and Savings are funded first using your 50/20/30 targets. Subcategories and savings goals only break those parent buckets down, so you can add detail whenever it becomes useful.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -233,10 +251,10 @@ struct MonthlyPlanWorkspaceView: View {
                         .frame(height: 46)
 
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(unassigned >= 0 ? "Unassigned" : "Over planned")
+                        Text(unassigned < -0.01 ? "Over planned" : "Parent buckets")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        Text(abs(unassigned), format: .currency(code: "USD"))
+                        Text(unassigned < -0.01 ? abs(unassigned) : plannedIncome, format: .currency(code: "USD"))
                             .font(.headline.monospacedDigit())
                             .foregroundStyle(unassigned < -0.01 ? Color.red : Color.primary)
                     }
@@ -250,9 +268,11 @@ struct MonthlyPlanWorkspaceView: View {
                         ProgressView(value: assignmentProgress)
                             .tint(unassigned < -0.01 ? .red : status.tint)
                         HStack {
-                            Text("\(totalAssigned.formatted(.currency(code: "USD"))) assigned")
+                            Text(unassigned < -0.01
+                                 ? "\(totalAssigned.formatted(.currency(code: "USD"))) planned"
+                                 : "100% assigned to parent buckets")
                             Spacer()
-                            Text("\((assignmentProgress * 100).formatted(.number.precision(.fractionLength(0))))% planned")
+                            Text("50 / 20 / 30")
                         }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -274,21 +294,24 @@ struct MonthlyPlanWorkspaceView: View {
             planTotalCard(
                 title: "Needs",
                 systemImage: "house.fill",
-                planned: plannedNeeds,
+                target: needsTarget,
+                categorized: categorizedNeeds,
                 actual: needsSpent,
                 tint: .blue
             )
             planTotalCard(
                 title: "Wants",
                 systemImage: "sparkles",
-                planned: plannedWants,
+                target: wantsTarget,
+                categorized: categorizedWants,
                 actual: wantsSpent,
                 tint: .orange
             )
             planTotalCard(
                 title: "Savings",
                 systemImage: "banknote.fill",
-                planned: plannedSavings,
+                target: savingsTarget,
+                categorized: categorizedSavings,
                 actual: savingsLogged,
                 tint: .mint
             )
@@ -298,12 +321,16 @@ struct MonthlyPlanWorkspaceView: View {
     private func planTotalCard(
         title: String,
         systemImage: String,
-        planned: Double,
+        target: Double,
+        categorized: Double,
         actual: Double,
         tint: Color
     ) -> some View {
-        let remaining = planned - actual
-        let progress = planned > 0 ? min(max(actual / planned, 0), 1) : 0
+        let effectivePlan = max(target, categorized)
+        let remaining = effectivePlan - actual
+        let progress = effectivePlan > 0 ? min(max(actual / effectivePlan, 0), 1) : 0
+        let uncategorized = max(target - categorized, 0)
+        let overTarget = max(categorized - target, 0)
 
         return GlassCard(padding: 10) {
             VStack(alignment: .leading, spacing: 7) {
@@ -315,18 +342,20 @@ struct MonthlyPlanWorkspaceView: View {
                 }
                 .foregroundStyle(tint)
 
-                Text(planned, format: .currency(code: "USD"))
+                Text(target, format: .currency(code: "USD"))
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
 
-                Text("\(actual.formatted(.currency(code: "USD"))) used")
+                Text(overTarget > 0.01
+                     ? "\(overTarget.formatted(.currency(code: "USD"))) over target"
+                     : "\(uncategorized.formatted(.currency(code: "USD"))) uncategorized")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(overTarget > 0.01 ? Color.red : Color.secondary)
                     .minimumScaleFactor(0.65)
                     .lineLimit(1)
 
-                if planned > 0 {
+                if effectivePlan > 0 {
                     ProgressView(value: progress)
                         .tint(remaining >= 0 ? tint : .red)
                 }
@@ -348,12 +377,15 @@ struct MonthlyPlanWorkspaceView: View {
         subtitle: String,
         systemImage: String,
         tint: Color,
+        target: Double,
         categories: [Category],
         section: BudgetSection,
         onAdd: @escaping () -> Void
     ) -> some View {
-        let planned = categories.reduce(0) { $0 + allocation(for: $1, section: section) }
+        let categorized = categories.reduce(0) { $0 + allocation(for: $1, section: section) }
         let spent = categories.reduce(0) { $0 + self.spent(for: $1.id, section: section) }
+        let uncategorized = max(target - categorized, 0)
+        let overTarget = max(categorized - target, 0)
 
         return GlassCard(padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
@@ -371,9 +403,9 @@ struct MonthlyPlanWorkspaceView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(planned, format: .currency(code: "USD"))
+                        Text(target, format: .currency(code: "USD"))
                             .font(.subheadline.weight(.bold).monospacedDigit())
-                        Text("\(spent.formatted(.currency(code: "USD"))) used")
+                        Text("parent target")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -384,15 +416,44 @@ struct MonthlyPlanWorkspaceView: View {
                             .background(tint.opacity(0.12), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Add \(title) category")
+                    .accessibilityLabel("Add \(title) subcategory")
                 }
 
+                HStack(spacing: 8) {
+                    Image(systemName: overTarget > 0.01 ? "exclamationmark.triangle.fill" : "tray.fill")
+                        .font(.caption)
+                        .foregroundStyle(overTarget > 0.01 ? Color.red : tint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(overTarget > 0.01 ? "Subcategories exceed bucket" : "Uncategorized")
+                            .font(.caption.weight(.semibold))
+                        Text(overTarget > 0.01
+                             ? "Reduce subcategory plans or increase income."
+                             : "This money is still planned for \(title.lowercased()) even without a subcategory.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(overTarget > 0.01 ? overTarget : uncategorized, format: .currency(code: "USD"))
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(overTarget > 0.01 ? Color.red : Color.primary)
+                }
+                .padding(9)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
                 if categories.isEmpty {
-                    Text("No categories yet. Add one to start assigning this month's income.")
+                    Text("Subcategories are optional. Leave this as one \(title) bucket or add detail later when you want to track where it goes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
+                    HStack {
+                        Text("\(categorized.formatted(.currency(code: "USD"))) categorized")
+                        Spacer()
+                        Text("\(spent.formatted(.currency(code: "USD"))) spent")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                     ForEach(categories) { category in
                         Divider()
                         categoryRow(category, section: section, tint: tint)
@@ -459,7 +520,11 @@ struct MonthlyPlanWorkspaceView: View {
     }
 
     private var savingsSection: some View {
-        let remaining = plannedSavings - savingsLogged
+        let categorized = categorizedSavings
+        let uncategorized = max(savingsTarget - categorized, 0)
+        let overTarget = max(categorized - savingsTarget, 0)
+        let effectivePlan = max(savingsTarget, categorized)
+        let remaining = effectivePlan - savingsLogged
 
         return GlassCard(padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
@@ -471,19 +536,17 @@ struct MonthlyPlanWorkspaceView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Savings")
                             .font(.headline)
-                        Text("Monthly contributions toward your goals")
+                        Text("30% parent bucket · goals optional")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(plannedSavings, format: .currency(code: "USD"))
+                        Text(savingsTarget, format: .currency(code: "USD"))
                             .font(.subheadline.weight(.bold).monospacedDigit())
-                        Text(remaining >= 0
-                             ? "\(remaining.formatted(.currency(code: "USD"))) left"
-                             : "Goal exceeded")
+                        Text("parent target")
                             .font(.caption2)
-                            .foregroundStyle(remaining >= 0 ? Color.secondary : Color.green)
+                            .foregroundStyle(.secondary)
                     }
                     Button(action: onAddSavings) {
                         Image(systemName: "plus")
@@ -495,8 +558,40 @@ struct MonthlyPlanWorkspaceView: View {
                     .accessibilityLabel("Add savings goal")
                 }
 
+                HStack(spacing: 8) {
+                    Image(systemName: overTarget > 0.01 ? "exclamationmark.triangle.fill" : "tray.fill")
+                        .font(.caption)
+                        .foregroundStyle(overTarget > 0.01 ? Color.red : Color.mint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(overTarget > 0.01 ? "Goals exceed savings bucket" : "Uncategorized savings")
+                            .font(.caption.weight(.semibold))
+                        Text(overTarget > 0.01
+                             ? "Reduce goal contributions or increase income."
+                             : "This amount is still planned as savings even without a specific goal.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(overTarget > 0.01 ? overTarget : uncategorized, format: .currency(code: "USD"))
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(overTarget > 0.01 ? Color.red : Color.primary)
+                }
+                .padding(9)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                HStack {
+                    Text("\(categorized.formatted(.currency(code: "USD"))) assigned to goals")
+                    Spacer()
+                    Text(remaining >= 0
+                         ? "\(remaining.formatted(.currency(code: "USD"))) left to save"
+                         : "\(abs(remaining).formatted(.currency(code: "USD"))) ahead")
+                        .foregroundStyle(remaining >= 0 ? Color.secondary : Color.green)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
                 if budget.savingsGoals.isEmpty {
-                    Text("No savings goals yet. Add one to make saving part of the monthly plan.")
+                    Text("Savings goals are optional. The full parent amount still counts as planned savings; add goals later if you want to split it between emergency fund, travel, investing, or anything else.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
