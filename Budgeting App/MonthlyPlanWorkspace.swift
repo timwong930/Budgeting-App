@@ -68,10 +68,47 @@ struct MonthlyPlanWorkspaceView: View {
             .reduce(0) { $0 + $1.amount }
     }
 
+    private var assignmentProgress: Double {
+        guard plannedIncome > 0 else { return 0 }
+        return min(max(totalAssigned / plannedIncome, 0), 1)
+    }
+
+    private var planStatus: (title: String, message: String, systemImage: String, tint: Color) {
+        if plannedIncome <= 0 {
+            return (
+                "Start with income",
+                "Add the income you expect this month, then give it a job.",
+                "dollarsign.circle.fill",
+                .orange
+            )
+        }
+        if unassigned > 0.01 {
+            return (
+                "Still needs a plan",
+                "Assign the remaining \(unassigned.formatted(.currency(code: "USD"))) before the month gets busy.",
+                "arrow.down.circle.fill",
+                .blue
+            )
+        }
+        if unassigned < -0.01 {
+            return (
+                "Plan needs attention",
+                "Reduce planned spending by \(abs(unassigned).formatted(.currency(code: "USD"))).",
+                "exclamationmark.triangle.fill",
+                .red
+            )
+        }
+        return (
+            "Plan is balanced",
+            "Every expected dollar has a job for this month.",
+            "checkmark.circle.fill",
+            .green
+        )
+    }
+
     var body: some View {
         VStack(spacing: 12) {
-            monthNavigator
-            assignmentSummary
+            planHero
             planTotals
             categorySection(
                 title: "Needs",
@@ -93,7 +130,7 @@ struct MonthlyPlanWorkspaceView: View {
             )
             savingsSection
 
-            Text("Categories stay available every month. Only each month's planned amounts change, and your latest plan carries forward as the starting point for a new month.")
+            Text("Your categories carry forward. Only the monthly amounts change, so each new month starts from your latest plan instead of a blank slate.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,103 +144,184 @@ struct MonthlyPlanWorkspaceView: View {
         }
     }
 
-    private var monthNavigator: some View {
-        GlassCard(padding: 10) {
-            HStack(spacing: 10) {
-                Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Previous month")
+    private var planHero: some View {
+        let status = planStatus
+        return GlassCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Button { shiftMonth(-1) } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: 32, height: 32)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Previous month")
 
-                VStack(spacing: 2) {
-                    Text(selectedMonth, format: .dateTime.month(.wide).year())
-                        .font(.headline)
-                    Text("Monthly plan")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-
-                Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Next month")
-            }
-        }
-    }
-
-    private var assignmentSummary: some View {
-        GlassCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(unassigned >= 0 ? "Unassigned" : "Over planned")
-                            .font(.caption.weight(.semibold))
+                        Text(selectedMonth, format: .dateTime.month(.wide).year())
+                            .font(.headline)
+                        Text("Monthly plan")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Text(abs(unassigned), format: .currency(code: "USD"))
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(unassigned >= 0 ? Color.primary : Color.red)
                     }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Assigned")
-                            .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button { shiftMonth(1) } label: {
+                        Image(systemName: "chevron.right")
+                            .frame(width: 32, height: 32)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Next month")
+                }
+
+                Divider()
+
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: status.systemImage)
+                        .font(.headline)
+                        .foregroundStyle(status.tint)
+                        .frame(width: 34, height: 34)
+                        .background(status.tint.opacity(0.12), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(status.title)
+                            .font(.subheadline.weight(.bold))
+                        Text(status.message)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(totalAssigned, format: .currency(code: "USD"))
-                            .font(.headline.monospacedDigit())
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    Spacer(minLength: 8)
                 }
 
                 HStack(spacing: 8) {
-                    Text("Income")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("$")
-                        .foregroundStyle(.secondary)
-                    TextField(
-                        "0",
-                        value: incomeBinding,
-                        format: .number.precision(.fractionLength(0...2))
-                    )
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(.subheadline.monospacedDigit())
-                    .frame(width: 110)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Expected income")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            Text("$")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField(
+                                "0",
+                                value: incomeBinding,
+                                format: .number.precision(.fractionLength(0...2))
+                            )
+                            .keyboardType(.decimalPad)
+                            .font(.headline.monospacedDigit())
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider()
+                        .frame(height: 34)
+
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(unassigned >= 0 ? "Unassigned" : "Over planned")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(abs(unassigned), format: .currency(code: "USD"))
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(unassigned < -0.01 ? Color.red : Color.primary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .padding(.top, 2)
+                .padding(10)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 if plannedIncome > 0 {
-                    ProgressView(value: min(max(totalAssigned / plannedIncome, 0), 1))
+                    VStack(spacing: 5) {
+                        ProgressView(value: assignmentProgress)
+                            .tint(unassigned < -0.01 ? .red : status.tint)
+                        HStack {
+                            Text("\(totalAssigned.formatted(.currency(code: "USD"))) assigned")
+                            Spacer()
+                            Text("\((assignmentProgress * 100).formatted(.number.precision(.fractionLength(0))))% planned")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
     }
 
     private var planTotals: some View {
-        HStack(spacing: 8) {
-            planTotalCard(title: "Needs", planned: plannedNeeds, actual: needsSpent, tint: .blue)
-            planTotalCard(title: "Wants", planned: plannedWants, actual: wantsSpent, tint: .orange)
-            planTotalCard(title: "Savings", planned: plannedSavings, actual: savingsLogged, tint: .mint)
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ],
+            spacing: 8
+        ) {
+            planTotalCard(
+                title: "Needs",
+                systemImage: "house.fill",
+                planned: plannedNeeds,
+                actual: needsSpent,
+                tint: .blue
+            )
+            planTotalCard(
+                title: "Wants",
+                systemImage: "sparkles",
+                planned: plannedWants,
+                actual: wantsSpent,
+                tint: .orange
+            )
+            planTotalCard(
+                title: "Savings",
+                systemImage: "banknote.fill",
+                planned: plannedSavings,
+                actual: savingsLogged,
+                tint: .mint
+            )
         }
     }
 
-    private func planTotalCard(title: String, planned: Double, actual: Double, tint: Color) -> some View {
-        GlassCard(padding: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
+    private func planTotalCard(
+        title: String,
+        systemImage: String,
+        planned: Double,
+        actual: Double,
+        tint: Color
+    ) -> some View {
+        let remaining = planned - actual
+        let progress = planned > 0 ? min(max(actual / planned, 0), 1) : 0
+
+        return GlassCard(padding: 10) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 5) {
+                    Image(systemName: systemImage)
+                        .font(.caption.weight(.semibold))
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(tint)
+
                 Text(planned, format: .currency(code: "USD"))
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
+
                 Text("\(actual.formatted(.currency(code: "USD"))) used")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+
+                if planned > 0 {
+                    ProgressView(value: progress)
+                        .tint(remaining >= 0 ? tint : .red)
+                }
+
+                Text(remaining >= 0
+                     ? "\(remaining.formatted(.currency(code: "USD"))) left"
+                     : "\(abs(remaining).formatted(.currency(code: "USD"))) over")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(remaining >= 0 ? Color.secondary : Color.red)
                     .minimumScaleFactor(0.65)
                     .lineLimit(1)
             }
@@ -220,11 +338,16 @@ struct MonthlyPlanWorkspaceView: View {
         section: BudgetSection,
         onAdd: @escaping () -> Void
     ) -> some View {
-        GlassCard(padding: 12) {
+        let planned = categories.reduce(0) { $0 + allocation(for: $1, section: section) }
+        let spent = categories.reduce(0) { $0 + self.spent(for: $1.id, section: section) }
+
+        return GlassCard(padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 9) {
                     Image(systemName: systemImage)
                         .foregroundStyle(tint)
+                        .frame(width: 30, height: 30)
+                        .background(tint.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title)
                             .font(.headline)
@@ -233,6 +356,13 @@ struct MonthlyPlanWorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(planned, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                        Text("\(spent.formatted(.currency(code: "USD"))) used")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Button(action: onAdd) {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
@@ -262,6 +392,7 @@ struct MonthlyPlanWorkspaceView: View {
         let planned = allocation(for: category, section: section)
         let spent = spent(for: category.id, section: section)
         let remaining = planned - spent
+        let progress = planned > 0 ? min(max(spent / planned, 0), 1) : 0
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
@@ -291,7 +422,7 @@ struct MonthlyPlanWorkspaceView: View {
                 )
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
-                .font(.subheadline.monospacedDigit())
+                .font(.subheadline.weight(.semibold).monospacedDigit())
                 .frame(width: 90)
             }
 
@@ -299,13 +430,14 @@ struct MonthlyPlanWorkspaceView: View {
                 Text("Spent \(spent.formatted(.currency(code: "USD")))")
                 Spacer()
                 Text("\(remaining >= 0 ? "Left" : "Over") \(abs(remaining).formatted(.currency(code: "USD")))")
+                    .fontWeight(.semibold)
                     .foregroundStyle(remaining >= 0 ? Color.secondary : Color.red)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
 
             if planned > 0 {
-                ProgressView(value: min(max(spent / planned, 0), 1))
+                ProgressView(value: progress)
                     .tint(remaining >= 0 ? tint : .red)
             }
         }
@@ -313,11 +445,15 @@ struct MonthlyPlanWorkspaceView: View {
     }
 
     private var savingsSection: some View {
-        GlassCard(padding: 12) {
+        let remaining = plannedSavings - savingsLogged
+
+        return GlassCard(padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 9) {
                     Image(systemName: "banknote.fill")
                         .foregroundStyle(.mint)
+                        .frame(width: 30, height: 30)
+                        .background(Color.mint.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Savings")
                             .font(.headline)
@@ -326,6 +462,15 @@ struct MonthlyPlanWorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(plannedSavings, format: .currency(code: "USD"))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                        Text(remaining >= 0
+                             ? "\(remaining.formatted(.currency(code: "USD"))) left"
+                             : "Goal exceeded")
+                            .font(.caption2)
+                            .foregroundStyle(remaining >= 0 ? Color.secondary : Color.green)
+                    }
                     Button(action: onAddSavings) {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
@@ -337,15 +482,20 @@ struct MonthlyPlanWorkspaceView: View {
                 }
 
                 if budget.savingsGoals.isEmpty {
-                    Text("No savings goals yet.")
+                    Text("No savings goals yet. Add one to make saving part of the monthly plan.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
                     ForEach(budget.savingsGoals) { goal in
+                        let saved = savedThisMonth(for: goal.id)
+                        let contribution = max(goal.monthlyContribution, 0)
+                        let goalRemaining = contribution - saved
+                        let progress = contribution > 0 ? min(max(saved / contribution, 0), 1) : 0
+
                         Divider()
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(spacing: 8) {
                                 Button {
                                     onEditSavingsGoal(goal)
                                 } label: {
@@ -359,13 +509,29 @@ struct MonthlyPlanWorkspaceView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
-                                Text("\(savedThisMonth(for: goal.id).formatted(.currency(code: "USD"))) saved this month")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+
+                                Spacer()
+
+                                Text(contribution, format: .currency(code: "USD"))
+                                    .font(.subheadline.weight(.semibold).monospacedDigit())
                             }
-                            Spacer()
-                            Text(goal.monthlyContribution, format: .currency(code: "USD"))
-                                .font(.subheadline.weight(.semibold).monospacedDigit())
+
+                            HStack {
+                                Text("Saved \(saved.formatted(.currency(code: "USD")))")
+                                Spacer()
+                                Text(goalRemaining >= 0
+                                     ? "Left \(goalRemaining.formatted(.currency(code: "USD")))"
+                                     : "Ahead \(abs(goalRemaining).formatted(.currency(code: "USD")))")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(goalRemaining >= 0 ? Color.secondary : Color.green)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                            if contribution > 0 {
+                                ProgressView(value: progress)
+                                    .tint(.mint)
+                            }
                         }
                     }
                 }
