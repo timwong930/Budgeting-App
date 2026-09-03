@@ -14,15 +14,24 @@ struct MonthlyPlanWorkspaceView: View {
         BudgetModel.monthKey(for: selectedMonth)
     }
 
-    private var plannedIncome: Double {
+    private var incomePerPayPeriod: Double {
         budget.income(for: selectedMonth)
+    }
+
+    private var monthlyIncomeMultiplier: Double {
+        budget.payFrequency.multiplier / 12.0
+    }
+
+    private var plannedIncome: Double {
+        incomePerPayPeriod * monthlyIncomeMultiplier
     }
 
     private var incomeBinding: Binding<Double> {
         Binding(
-            get: { budget.income(for: selectedMonth) },
+            get: { plannedIncome },
             set: { value in
-                budget.setIncome(max(value, 0), for: selectedMonth)
+                let multiplier = max(monthlyIncomeMultiplier, 0.0001)
+                budget.setIncome(max(value, 0) / multiplier, for: selectedMonth)
             }
         )
     }
@@ -197,7 +206,7 @@ struct MonthlyPlanWorkspaceView: View {
 
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Expected income")
+                        Text("Expected monthly income")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                         HStack(spacing: 3) {
@@ -212,11 +221,16 @@ struct MonthlyPlanWorkspaceView: View {
                             .keyboardType(.decimalPad)
                             .font(.headline.monospacedDigit())
                         }
+                        Text("\(budget.payFrequency.rawValue) schedule · \(incomePerPayPeriod.formatted(.currency(code: "USD"))) per pay period")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Divider()
-                        .frame(height: 34)
+                        .frame(height: 46)
 
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(unassigned >= 0 ? "Unassigned" : "Over planned")
