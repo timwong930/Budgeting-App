@@ -47,13 +47,14 @@ Accounts summarizes financial position and surfaces attention items before prese
 - Net financial position.
 - Cash / credit debt / investment net metrics.
 - Transfer / Banks / Cards quick actions.
-- Attention area for card utilization and Plaid review items.
+- Attention area for card due dates, utilization, and Plaid review items.
+- Cash-after-card-balances context.
 
 ### Drill-downs
-- **Banks** — available cash and individual balances, with a direct Manage action.
-- **Credit** — total card debt, overall utilization, individual utilization/available credit.
-- **Credit card detail** — balance, available credit, utilization, statement close, due day, purchases and payments.
-- **Investments** — net investment value, margin exposure, portfolio cash and holdings.
+- **Banks** — available cash and individual balances with direct ledger navigation and account management.
+- **Credit** — total card debt, overall utilization, payment timing, individual utilization, and available credit.
+- **Credit card detail** — balance, available credit, utilization, statement close, payment due date, purchases, and payments.
+- **Investments** — net investment value, margin exposure, portfolio cash, and holdings.
 
 ## Reports
 
@@ -80,25 +81,24 @@ Reports is read-oriented. Editing belongs in Plan or Activity.
 - Keep editing in Plan / Activity / account-management screens; Reports remains analytical.
 - Preserve BudgetModel, Plaid reconciliation, persistence, Cuan/Glass styling, and accessibility conventions.
 
-## Implementation status
+## Final implementation
 
-Implemented on `tim-118-budget-hub-workspaces`:
+Implemented on `tim-118-budget-hub-workspaces-v2`:
 
-- `MonthlyPlanWorkspace.swift` — Plan UX and parent-bucket logic.
-- `BudgetHubWorkspaces.swift` — Activity, Accounts, Reports and all new drill-down views.
-- `scripts/apply-tim-118-budget-hub-workspaces.py` — exact guarded replacement for the legacy Budget Hub destination block in `ContentView.swift`.
-- `docs/TIM-118-contentview-workspace-integration.patch` — reviewable integration diff.
+- `Budgeting App/MonthlyPlanWorkspace.swift` — Plan UX and parent-bucket logic.
+- `Budgeting App/BudgetHubWorkspaces.swift` — Activity, Accounts, Reports, account drill-downs, and shared workspace UI.
+- `Budgeting App/ContentView.swift` — final Budget Hub routing to the purpose-built workspaces.
 
-The project uses a filesystem-synchronized Xcode group, so `BudgetHubWorkspaces.swift` is automatically included. The final `ContentView.swift` route replacement is deliberately guarded: the legacy file is roughly 12,000 lines and the GitHub write interface available in this session only supports whole-file replacement rather than a small patch operation.
+The project uses a filesystem-synchronized Xcode group, so `BudgetHubWorkspaces.swift` participates without a manual project-file edit.
 
 ## Verification
 
-After applying the guarded ContentView integration, build in Xcode and test:
+Static review confirms the TIM-118 acceptance criteria are represented in the final branch. This repository has no CI and this environment cannot run Xcode, so final device/Xcode verification remains manual:
 
-1. Budget Hub → Plan: no duplicated legacy sections below the new Plan workspace.
-2. Activity: quick actions, recent items, Transactions, Recurring and Trends navigation/edit flows.
-3. Accounts: summary values, attention states, Banks, Credit, card detail and Investments.
-4. Reports: month selector, category performance, 50/20/30 and previous-month comparison.
+1. Budget Hub → Plan: no duplicated legacy sections below the Plan workspace.
+2. Activity: quick actions, recent items, Transactions, Recurring, and Trends navigation/edit flows.
+3. Accounts: summary values, attention states, Banks, Credit, card detail, and Investments.
+4. Reports: month selector, category performance, 50/20/30, and previous-month comparison.
 5. Switch months and confirm Activity/Reports reflect the selected month.
-6. Test empty-data states and small-screen layout.
+6. Test empty-data states and small-screen/Dynamic Type layout.
 7. Confirm existing Plaid/manual account management and transaction editor sheets still work.
