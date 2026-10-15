@@ -531,11 +531,18 @@ private extension BudgetModel {
             return .reconciled
         }
 
-        if transaction.category == nil && persistentCategoryAssignment(for: transaction) == nil {
+        let hasManualCategory = persistentCategoryAssignment(for: transaction) != nil
+        let categoryNeedsReview = transaction.category == nil && !hasManualCategory
+        let ambiguousPlaidTransferCategory =
+            (transaction.category ?? "").lowercased().contains("transfer") &&
+            !isLikelyBankTransfer(transaction) && !hasManualCategory
+        if categoryNeedsReview || ambiguousPlaidTransferCategory {
             let added = upsertPlaidReviewItem(
                 sourceId: transaction.id,
                 title: expense.name,
-                detail: "Plaid transaction needs category review.",
+                detail: ambiguousPlaidTransferCategory
+                    ? "Plaid labels this a transfer, but no receiving bank transaction was confirmed. It is currently recorded as a withdrawal/expense; review whether it belongs to an external account."
+                    : "Plaid transaction needs category review.",
                 amount: transaction.amount,
                 date: transaction.date
             )
