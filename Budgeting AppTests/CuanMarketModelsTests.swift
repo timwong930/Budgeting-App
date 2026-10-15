@@ -13,6 +13,11 @@ struct CuanMarketModelsTests {
         testPlaidMetadataCodableMigrationKeepsLegacyExpenseReadable()
         testPlaidBackendDecoderAcceptsPlaidDateOnlyStrings()
         testPlaidTransactionImportDedupesManualExpense()
+        testPlaidWithdrawalsStayExpenses()
+        testPlaidBankTransferNeedsVerifiedBothSides()
+        testPlaidAmbiguousTransfersStayUnpaired()
+        testPlaidLegacyMispairedTransferIsRemovedOnReplay()
+        testPlaidRemovedTransactionClearsPairedTransfer()
         testPlaidCreditAccountUpdateUsesLiabilityFields()
         testPlaidHoldingsSnapshotPreservesTickerMetadata()
         testPlaidWatchlistImportDedupesAndUppercases()
@@ -255,6 +260,126 @@ struct CuanMarketModelsTests {
         assert(budget.expenses.count == 1, "Expected Plaid import to reconcile duplicate manual expense instead of appending")
         assert(budget.expenses[0].plaidMetadata?.transactionId == "tx-1", "Expected reconciled manual expense to gain Plaid transaction ID")
         assert(result.reconciledTransactions == 1, "Expected import result to report one reconciled transaction")
+    }
+
+
+    private static func testPlaidWithdrawalsStayExpenses() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_100_000)
+        let payload = PlaidSyncPayload(
+            accounts: [
+                PlaidSyncedAccount(id: "withdraw-checking", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 800, availableBalance: 800, creditLimit: nil, institutionName: "Bank")
+            ],
+            transactions: [
+                PlaidSyncedTransaction(id: "withdraw-atm", accountId: "withdraw-checking", itemId: "bank", name: "ATM CASH WITHDRAWAL", merchantName: nil, amount: 80, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "withdraw-ach", accountId: "withdraw-checking", itemId: "bank", name: "ACH DEBIT GYM MEMBERSHIP", merchantName: nil, amount: 42, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "withdraw-zelle", accountId: "withdraw-checking", itemId: "bank", name: "ZELLE PAYMENT TO FRIEND", merchantName: nil, amount: 35, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "withdraw-payroll", accountId: "withdraw-checking", itemId: "bank", name: "ACH CREDIT PAYROLL", merchantName: nil, amount: -1000, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.isEmpty, "ACH, ATM and Zelle must not automatically become account transfers")
+        assert(budget.expenses.count == 3 && budget.incomes.count == 1, "Bank withdrawals should remain outflows and payroll should remain income")
+
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.isEmpty && budget.expenses.count == 3 && budget.incomes.count == 1, "Replaying withdrawal transactions must not create duplicates")
+    }
+
+    private static func testPlaidBankTransferNeedsVerifiedBothSides() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_200_000)
+        let checking = PlaidSyncedAccount(id: "pair-check", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank")
+        let savings = PlaidSyncedAccount(id: "pair-save", itemId: "bank", name: "Savings", type: .depository, subtype: "savings", currentBalance: 900, availableBalance: 900, creditLimit: nil, institutionName: "Bank")
+        let payload = PlaidSyncPayload(
+            accounts: [checking, savings],
+            transactions: [
+                PlaidSyncedTransaction(id: "pair-out", accountId: "pair-check", itemId: "bank", name: "ONLINE TRANSFER TO SAVINGS", merchantName: nil, amount: 200, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "pair-in", accountId: "pair-save", itemId: "bank", name: "TRANSFER FROM CHECKING", merchantName: nil, amount: -200, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.count == 1, "A corroborated two-sided bank transfer should be created exactly once")
+        assert(budget.cashTransfers[0].fromAccountName == "Checking" && budget.cashTransfers[0].toAccountName == "Savings", "Verified transfer must preserve bank direction")
+        assert(budget.expenses.isEmpty && budget.incomes.isEmpty, "Confirmed transfers should not affect budget income or spending")
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.count == 1, "Repeated sync should not duplicate a confirmed transfer")
+    }
+
+    private static func testPlaidAmbiguousTransfersStayUnpaired() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_300_000)
+        let accounts = [
+            PlaidSyncedAccount(id: "amb-a", itemId: "bank", name: "Checking A", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank"),
+            PlaidSyncedAccount(id: "amb-b", itemId: "bank", name: "Checking B", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank"),
+            PlaidSyncedAccount(id: "amb-save", itemId: "bank", name: "Savings", type: .depository, subtype: "savings", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank")
+        ]
+        let payload = PlaidSyncPayload(
+            accounts: accounts,
+            transactions: [
+                PlaidSyncedTransaction(id: "amb-out-a", accountId: "amb-a", itemId: "bank", name: "TRANSFER", merchantName: nil, amount: 175, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "amb-out-b", accountId: "amb-b", itemId: "bank", name: "TRANSFER", merchantName: nil, amount: 175, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "amb-in", accountId: "amb-save", itemId: "bank", name: "TRANSFER", merchantName: nil, amount: -175, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.count == 3, "Ambiguous sides should remain three independently reviewable movements")
+        assert(budget.cashTransfers.allSatisfy { $0.fromAccountId == nil || $0.toAccountId == nil }, "An ambiguous match must not claim another linked bank account")
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.count == 3, "Ambiguity must not disappear after replay or pairing order changes")
+    }
+
+    private static func testPlaidLegacyMispairedTransferIsRemovedOnReplay() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_400_000)
+        budget.cashTransfers = [
+            CashTransfer(name: "Bad Plaid match", amount: 90, date: date, fromAccountName: "Checking", toAccountName: "Savings", note: "[PLAID_PAIR:legacy-ach|legacy-income] Synced from Plaid transaction pair"),
+            CashTransfer(name: "Manual transfer", amount: 10, date: date, fromAccountName: "Checking", toAccountName: "Savings", note: "Created by user")
+        ]
+        let payload = PlaidSyncPayload(
+            accounts: [
+                PlaidSyncedAccount(id: "legacy-check", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank"),
+                PlaidSyncedAccount(id: "legacy-save", itemId: "bank", name: "Savings", type: .depository, subtype: "savings", currentBalance: 600, availableBalance: 600, creditLimit: nil, institutionName: "Bank")
+            ],
+            transactions: [
+                PlaidSyncedTransaction(id: "legacy-ach", accountId: "legacy-check", itemId: "bank", name: "ACH DEBIT UTILITIES", merchantName: nil, amount: 90, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "legacy-income", accountId: "legacy-save", itemId: "bank", name: "ACH CREDIT PAYROLL", merchantName: nil, amount: -90, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.count == 1 && budget.cashTransfers[0].note == "Created by user", "A legacy coincidental Plaid pair should be removed without touching manual transfers")
+        assert(budget.expenses.count == 1 && budget.incomes.count == 1, "Previously mispaired transactions should be reclassified with their original directions")
+    }
+
+    private static func testPlaidRemovedTransactionClearsPairedTransfer() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_500_000)
+        let accounts = [
+            PlaidSyncedAccount(id: "remove-check", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank"),
+            PlaidSyncedAccount(id: "remove-save", itemId: "bank", name: "Savings", type: .depository, subtype: "savings", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank")
+        ]
+        let original = PlaidSyncPayload(
+            accounts: accounts,
+            transactions: [
+                PlaidSyncedTransaction(id: "remove-out", accountId: "remove-check", itemId: "bank", name: "TRANSFER TO SAVINGS", merchantName: nil, amount: 60, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "remove-in", accountId: "remove-save", itemId: "bank", name: "TRANSFER FROM CHECKING", merchantName: nil, amount: -60, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(original)
+        assert(budget.cashTransfers.count == 1, "The initial verified transfer should be imported")
+        let removed = PlaidSyncPayload(
+            accounts: accounts,
+            transactions: [
+                PlaidSyncedTransaction(id: "remove-out", accountId: "remove-check", itemId: "bank", name: "TRANSFER TO SAVINGS", merchantName: nil, amount: 60, date: date, pending: false, category: "TRANSFER_OUT", removed: true)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(removed)
+        assert(budget.cashTransfers.isEmpty, "Removing a Plaid transaction must clear its auto-generated transfer pair")
     }
 
     private static func testPlaidCreditAccountUpdateUsesLiabilityFields() {
