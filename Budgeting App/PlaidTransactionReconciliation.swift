@@ -45,6 +45,9 @@ extension BudgetModel {
         result.reviewItems += transferResult.reviewItemsAdded
 
         for transaction in activeTransactions where !transferResult.handledTransactionIds.contains(transaction.id) {
+            // A previously auto-created single transfer may now be correctly
+            // recognized as an ordinary withdrawal, expense, or deposit.
+            _ = removePlaidSingleTransfers(sourceIds: [transaction.id])
             let importResult = reconcilePlaidTransaction(
                 transaction,
                 accountName: accountNamesById[transaction.accountId] ?? "",
@@ -64,6 +67,8 @@ extension BudgetModel {
         // replace a pending row before Plaid removes the old pending transaction ID.
         for transaction in payload.transactions where transaction.removed {
             result.removedTransactions += removeReconciledPlaidTransaction(id: transaction.id)
+            // Plaid removals must also remove linked, auto-generated pairs.
+            _ = removePlaidPairedTransfers(sourceIds: [transaction.id])
         }
 
         synchronizeLegacyMarginStateFromLedger()
@@ -80,49 +85,45 @@ private extension BudgetModel {
         accountTypesById: [String: PlaidAccountType]
     ) -> PlaidTransferReconciliationResult {
         var result = PlaidTransferReconciliationResult()
+        var confirmedPairMarkers: Set<String> = []
 
         for (index, transaction) in transactions.enumerated() {
             guard !result.handledTransactionIds.contains(transaction.id) else { continue }
             let type = accountTypesById[transaction.accountId] ?? .other
             guard isStrongTransferOrPayment(transaction, accountType: type) else { continue }
 
-            var bestMatch: (transaction: PlaidSyncedTransaction, score: Double)?
-            for candidateIndex in transactions.indices where candidateIndex != index {
-                let candidate = transactions[candidateIndex]
-                guard !result.handledTransactionIds.contains(candidate.id),
-                      candidate.accountId != transaction.accountId,
-                      transaction.amount * candidate.amount < 0,
-                      abs(abs(transaction.amount) - abs(candidate.amount)) < 0.01,
-                      dayDistance(transaction.date, candidate.date) <= 3 else {
-                    continue
-                }
-
-                let candidateType = accountTypesById[candidate.accountId] ?? .other
-                guard canPairTransfer(
-                    transaction,
-                    accountType: type,
-                    with: candidate,
-                    candidateAccountType: candidateType
-                ) else { continue }
-
-                var score = 0.55
-                if Calendar.current.isDate(transaction.date, inSameDayAs: candidate.date) { score += 0.20 }
-                if namesLikelyMatchForReconciliation(transactionDisplayName(transaction), transactionDisplayName(candidate)) { score += 0.10 }
-                if isLikelyCreditCardPaymentForReconciliation(transaction) || isLikelyCreditCardPaymentForReconciliation(candidate) { score += 0.15 }
-
-                if bestMatch == nil || score > bestMatch!.score {
-                    bestMatch = (candidate, score)
+            // An equal amount and nearby date are not sufficient proof of an
+            // account-to-account transfer. Both directions must have exactly
+            // one eligible counterpart; otherwise, keep the account unassigned.
+            let candidates = eligibleTransferCounterpartIndices(
+                for: transaction,
+                at: index,
+                in: transactions,
+                accountTypesById: accountTypesById,
+                handledIds: result.handledTransactionIds
+            )
+            var confirmedCandidate: PlaidSyncedTransaction?
+            if candidates.count == 1 {
+                let candidateIndex = candidates[0]
+                let reverseCandidates = eligibleTransferCounterpartIndices(
+                    for: transactions[candidateIndex],
+                    at: candidateIndex,
+                    in: transactions,
+                    accountTypesById: accountTypesById,
+                    handledIds: result.handledTransactionIds
+                )
+                if reverseCandidates == [index] {
+                    confirmedCandidate = transactions[candidateIndex]
                 }
             }
 
-            if let bestMatch {
-                let outflow = transaction.amount > 0 ? transaction : bestMatch.transaction
-                let inflow = transaction.amount < 0 ? transaction : bestMatch.transaction
+            if let confirmedCandidate {
+                let outflow = transaction.amount > 0 ? transaction : confirmedCandidate
+                let inflow = transaction.amount < 0 ? transaction : confirmedCandidate
 
-                // Clean up rows imported by the pre-TIM-82 sign-first behavior before
-                // recording the pair in the transfer ledger.
+                // Remove legacy sign-first rows before creating a verified pair.
                 _ = removeReconciledPlaidTransaction(id: transaction.id)
-                _ = removeReconciledPlaidTransaction(id: bestMatch.transaction.id)
+                _ = removeReconciledPlaidTransaction(id: confirmedCandidate.id)
 
                 upsertPlaidTransfer(
                     outflow: outflow,
@@ -130,12 +131,15 @@ private extension BudgetModel {
                     accountNamesById: accountNamesById,
                     accountTypesById: accountTypesById
                 )
+                confirmedPairMarkers.insert(
+                    plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
+                )
                 result.handledTransactionIds.insert(transaction.id)
-                result.handledTransactionIds.insert(bestMatch.transaction.id)
+                result.handledTransactionIds.insert(confirmedCandidate.id)
                 result.reconciledTransactions += 2
             } else {
-                // Keep one-sided external transfers visible in the account ledger while
-                // keeping them out of budget income/spending until they are reviewed.
+                // A *named* transfer may leave the connected-account set, but we
+                // never invent a destination bank account or count it as income.
                 _ = removeReconciledPlaidTransaction(id: transaction.id)
                 upsertUnpairedPlaidTransfer(
                     transaction,
@@ -145,7 +149,7 @@ private extension BudgetModel {
                 let added = upsertPlaidReviewItem(
                     sourceId: transaction.id,
                     title: transactionDisplayName(transaction),
-                    detail: "Plaid transfer/payment could not be paired to another synced account. It remains visible in the account ledger as an external transfer, but is excluded from income/spending until reviewed.",
+                    detail: "Transfer/payment is unpaired or has multiple possible matches. Verify the destination before classifying it as a bank transfer.",
                     amount: transaction.amount,
                     date: transaction.date
                 )
@@ -154,7 +158,39 @@ private extension BudgetModel {
             }
         }
 
+        // When both transaction sides are in this delivery, discard older Plaid
+        // pairs that fail the new matching rules. Do not touch manual transfers
+        // or pairs whose other side was omitted by a partial delivery.
+        _ = removeStalePlaidTransferPairs(
+            presentTransactionIds: Set(transactions.map(\.id)),
+            confirmedPairMarkers: confirmedPairMarkers
+        )
         return result
+    }
+
+    func eligibleTransferCounterpartIndices(
+        for transaction: PlaidSyncedTransaction,
+        at index: Int,
+        in transactions: [PlaidSyncedTransaction],
+        accountTypesById: [String: PlaidAccountType],
+        handledIds: Set<String>
+    ) -> [Int] {
+        let type = accountTypesById[transaction.accountId] ?? .other
+        return transactions.indices.filter { candidateIndex in
+            let candidate = transactions[candidateIndex]
+            guard candidateIndex != index,
+                  !handledIds.contains(candidate.id),
+                  candidate.accountId != transaction.accountId,
+                  transaction.amount * candidate.amount < 0,
+                  abs(abs(transaction.amount) - abs(candidate.amount)) < 0.01,
+                  dayDistance(transaction.date, candidate.date) <= 3 else { return false }
+            return canPairTransfer(
+                transaction,
+                accountType: type,
+                with: candidate,
+                candidateAccountType: accountTypesById[candidate.accountId] ?? .other
+            )
+        }
     }
 
     func canPairTransfer(
@@ -165,17 +201,24 @@ private extension BudgetModel {
     ) -> Bool {
         let bothDepository = lhsType == .depository && rhsType == .depository
         if bothDepository {
-            return isLikelyBankTransfer(lhs) || isLikelyBankTransfer(rhs)
+            // Both bank statements must independently identify a transfer.
+            return isLikelyBankTransfer(lhs) && isLikelyBankTransfer(rhs)
         }
 
         let depositoryAndCredit =
             (lhsType == .depository && rhsType == .credit) ||
             (lhsType == .credit && rhsType == .depository)
         if depositoryAndCredit {
-            return isLikelyCreditCardPaymentForReconciliation(lhs) ||
-                isLikelyCreditCardPaymentForReconciliation(rhs) ||
-                isLikelyBankTransfer(lhs) ||
-                isLikelyBankTransfer(rhs)
+            let credit = lhsType == .credit ? lhs : rhs
+            let bank = lhsType == .depository ? lhs : rhs
+            let bankDescription = transactionDescriptionText(bank)
+            // A random bank withdrawal must not become a card payment just
+            // because a card has an equal, opposite-signed transaction.
+            return isLikelyCreditCardPaymentForReconciliation(credit) &&
+                (isLikelyCreditCardPaymentForReconciliation(bank) ||
+                 bankDescription.contains("payment") ||
+                 bankDescription.contains("autopay") ||
+                 bankDescription.contains("credit card"))
         }
         return false
     }
@@ -200,13 +243,18 @@ private extension BudgetModel {
     }
 
     func isLikelyBankTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
-        let category = (transaction.category ?? "").lowercased()
-        let text = transactionSearchText(transaction)
-        return category.contains("transfer") ||
-            text.contains("transfer") ||
-            text.contains("zelle") ||
-            text.contains("ach credit") ||
-            text.contains("ach debit")
+        // Plaid's broad TRANSFER category, ACH debit/credit, and Zelle do NOT
+        // prove a movement between the user's own linked bank accounts.
+        // Require an explicit transfer word in the bank's description.
+        let description = transactionDescriptionText(transaction)
+        return description.range(
+            of: #"\b(transfer|xfer|xfr)\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    func transactionDescriptionText(_ transaction: PlaidSyncedTransaction) -> String {
+        "\(transaction.name) \(transaction.merchantName ?? "")".lowercased()
     }
 
     func isLikelyCreditCardPaymentForReconciliation(_ transaction: PlaidSyncedTransaction) -> Bool {
@@ -324,6 +372,43 @@ private extension BudgetModel {
                 note: note
             )
         )
+    }
+
+    func plaidPairTransactionIds(from note: String) -> [String]? {
+        let prefix = "[PLAID_PAIR:"
+        guard note.hasPrefix(prefix),
+              let closingBracket = note.firstIndex(of: "]") else { return nil }
+        let start = note.index(note.startIndex, offsetBy: prefix.count)
+        let ids = note[start..<closingBracket].split(separator: "|").map(String.init)
+        return ids.count == 2 ? ids : nil
+    }
+
+    @discardableResult
+    func removeStalePlaidTransferPairs(
+        presentTransactionIds: Set<String>,
+        confirmedPairMarkers: Set<String>
+    ) -> Int {
+        let previousCount = cashTransfers.count
+        cashTransfers.removeAll { transfer in
+            guard let ids = plaidPairTransactionIds(from: transfer.note),
+                  ids.allSatisfy({ presentTransactionIds.contains($0) }) else {
+                return false
+            }
+            let marker = plaidTransferSourceMarker(outflowId: ids[0], inflowId: ids[1])
+            return !confirmedPairMarkers.contains(marker)
+        }
+        return previousCount - cashTransfers.count
+    }
+
+    @discardableResult
+    func removePlaidPairedTransfers(sourceIds: [String]) -> Int {
+        let removedIds = Set(sourceIds)
+        let previousCount = cashTransfers.count
+        cashTransfers.removeAll { transfer in
+            guard let ids = plaidPairTransactionIds(from: transfer.note) else { return false }
+            return ids.contains(where: { removedIds.contains($0) })
+        }
+        return previousCount - cashTransfers.count
     }
 
     func plaidSingleTransferSourceMarker(_ transactionId: String) -> String {
