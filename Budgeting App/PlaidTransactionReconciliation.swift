@@ -100,7 +100,6 @@ private extension BudgetModel {
                 at: index,
                 in: transactions,
                 accountTypesById: accountTypesById,
-                handledIds: result.handledTransactionIds
             )
             var confirmedCandidate: PlaidSyncedTransaction?
             if candidates.count == 1 {
@@ -110,9 +109,9 @@ private extension BudgetModel {
                     at: candidateIndex,
                     in: transactions,
                     accountTypesById: accountTypesById,
-                    handledIds: result.handledTransactionIds
                 )
-                if reverseCandidates == [index] {
+                if reverseCandidates == [index] &&
+                    !result.handledTransactionIds.contains(transactions[candidateIndex].id) {
                     confirmedCandidate = transactions[candidateIndex]
                 }
             }
@@ -172,14 +171,12 @@ private extension BudgetModel {
         for transaction: PlaidSyncedTransaction,
         at index: Int,
         in transactions: [PlaidSyncedTransaction],
-        accountTypesById: [String: PlaidAccountType],
-        handledIds: Set<String>
+        accountTypesById: [String: PlaidAccountType]
     ) -> [Int] {
         let type = accountTypesById[transaction.accountId] ?? .other
         return transactions.indices.filter { candidateIndex in
             let candidate = transactions[candidateIndex]
             guard candidateIndex != index,
-                  !handledIds.contains(candidate.id),
                   candidate.accountId != transaction.accountId,
                   transaction.amount * candidate.amount < 0,
                   abs(abs(transaction.amount) - abs(candidate.amount)) < 0.01,
@@ -284,24 +281,10 @@ private extension BudgetModel {
         let sourceMarker = plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
         _ = removePlaidSingleTransfers(sourceIds: [outflow.id, inflow.id])
 
-        let existingIndex = cashTransfers.firstIndex { existing in
-            if existing.note.contains(sourceMarker) {
-                return true
-            }
-
-            guard existing.note.hasPrefix("[PLAID_PAIR:"),
-                  abs(existing.amount - amount) < 0.01,
-                  dayDistance(existing.date, date) <= 3 else { return false }
-
-            if let existingFromId = existing.fromAccountId,
-               let existingToId = existing.toAccountId,
-               let fromId,
-               let toId {
-                return existingFromId == fromId && existingToId == toId
-            }
-
-            return normalizedReconciliationText(existing.fromAccountName) == normalizedReconciliationText(fromName) &&
-                normalizedReconciliationText(existing.toAccountName) == normalizedReconciliationText(toName)
+        // Only the same Plaid source IDs may update an existing pair.
+        // Matching by amount/date/accounts collapses distinct transfers.
+        let existingIndex = cashTransfers.firstIndex {
+            $0.note.contains(sourceMarker)
         }
 
         if let existingIndex {
