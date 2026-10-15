@@ -15,6 +15,7 @@ struct CuanMarketModelsTests {
         testPlaidTransactionImportDedupesManualExpense()
         testPlaidWithdrawalsStayExpenses()
         testPlaidBankTransferNeedsVerifiedBothSides()
+        testPlaidUnrelatedMatchingAmountDoesNotPair()
         testPlaidAmbiguousTransfersStayUnpaired()
         testPlaidLegacyMispairedTransferIsRemovedOnReplay()
         testPlaidRemovedTransactionClearsPairedTransfer()
@@ -266,6 +267,10 @@ struct CuanMarketModelsTests {
     private static func testPlaidWithdrawalsStayExpenses() {
         let budget = BudgetModel()
         let date = Date(timeIntervalSince1970: 1_780_100_000)
+        // Simulate a previously misclassified one-sided Plaid transfer.
+        budget.cashTransfers = [
+            CashTransfer(name: "ATM CASH WITHDRAWAL", amount: 80, date: date, fromAccountName: "Checking", toAccountName: "External account", note: "[PLAID_SINGLE:withdraw-atm] Unpaired Plaid transfer/payment")
+        ]
         let payload = PlaidSyncPayload(
             accounts: [
                 PlaidSyncedAccount(id: "withdraw-checking", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 800, availableBalance: 800, creditLimit: nil, institutionName: "Bank")
@@ -305,6 +310,27 @@ struct CuanMarketModelsTests {
         assert(budget.expenses.isEmpty && budget.incomes.isEmpty, "Confirmed transfers should not affect budget income or spending")
         _ = budget.applyPlaidSyncReconciled(payload)
         assert(budget.cashTransfers.count == 1, "Repeated sync should not duplicate a confirmed transfer")
+    }
+
+    private static func testPlaidUnrelatedMatchingAmountDoesNotPair() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_250_000)
+        let payload = PlaidSyncPayload(
+            accounts: [
+                PlaidSyncedAccount(id: "unrelated-check", itemId: "bank", name: "Checking", type: .depository, subtype: "checking", currentBalance: 500, availableBalance: 500, creditLimit: nil, institutionName: "Bank"),
+                PlaidSyncedAccount(id: "unrelated-save", itemId: "bank", name: "Savings", type: .depository, subtype: "savings", currentBalance: 700, availableBalance: 700, creditLimit: nil, institutionName: "Bank")
+            ],
+            transactions: [
+                PlaidSyncedTransaction(id: "unrelated-transfer", accountId: "unrelated-check", itemId: "bank", name: "TRANSFER TO EXTERNAL ACCOUNT", merchantName: nil, amount: 120, date: date, pending: false, category: "TRANSFER_OUT", removed: false),
+                PlaidSyncedTransaction(id: "unrelated-paycheck", accountId: "unrelated-save", itemId: "bank", name: "ACH CREDIT PAYROLL", merchantName: nil, amount: -120, date: date, pending: false, category: "TRANSFER_IN", removed: false)
+            ],
+            creditLiabilities: [], holdings: [], investmentTransactions: [], connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.incomes.count == 1 && budget.cashTransfers.count == 1, "A same-amount paycheck must not become the other side of a transfer")
+        assert(budget.cashTransfers[0].toAccountId == nil, "Unpaired transfer must not point to an unrelated linked savings account")
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.incomes.count == 1 && budget.cashTransfers.count == 1, "Repeated sync must not introduce a false account match")
     }
 
     private static func testPlaidAmbiguousTransfersStayUnpaired() {
