@@ -11,6 +11,7 @@ struct PlaidSettingsView: View {
     @State private var statusMessage: String?
     @State private var errorMessage: String?
     @State private var lastResult: PlaidSyncResult?
+    @State private var isTransferReviewExpanded = false
 
     private var client: PlaidAPIClient {
         PlaidAPIClient(configuration: PlaidBackendConfiguration(backendURL: backendURL))
@@ -187,6 +188,58 @@ struct PlaidSettingsView: View {
                         .onDelete { offsets in
                             budget.plaidReviewItems.remove(atOffsets: offsets)
                             budget.saveNow()
+                        }
+                    }
+                }
+
+                Section("Bank Transfer Review") {
+                    Toggle("Review possible bank transfers", isOn: $isTransferReviewExpanded)
+                    Text("Matches here are suggestions only. Each requires confirmation of a transaction on both connected bank accounts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if isTransferReviewExpanded {
+                        let suggestions = budget.plaidPotentialTransferReviews()
+                        if suggestions.isEmpty {
+                            Text("No matching bank transactions found to review.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(suggestions) { source in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(source.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text("\(source.accountName) · \(source.date.formatted(date: .abbreviated, time: .omitted)) · \(abs(source.signedAmount).formatted(.currency(code: "USD")))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    ForEach(budget.plaidTransferReviewCandidates(sourceId: source.id)) { candidate in
+                                        Button {
+                                            if budget.confirmPlaidTransferReview(sourceId: source.id, counterpartId: candidate.id) {
+                                                statusMessage = "Confirmed transfer from \(source.accountName) to \(candidate.accountName)."
+                                            } else {
+                                                errorMessage = "Could not confirm this match. Refresh transactions and try again."
+                                            }
+                                        } label: {
+                                            Label(
+                                                "Match with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))",
+                                                systemImage: "checkmark.circle"
+                                            )
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(isWorking)
+                                    }
+                                    if budget.plaidTransferReviewLeg(sourceId: source.id) != nil {
+                                        Button("Keep as Withdrawal / Expense") {
+                                            if budget.keepPlaidWithdrawalAsExpense(sourceId: source.id) {
+                                                statusMessage = "Kept \(source.title) as an expense."
+                                            }
+                                        }
+                                        .font(.caption)
+                                        .disabled(isWorking)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                            }
                         }
                     }
                 }
