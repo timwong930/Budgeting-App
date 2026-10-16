@@ -289,7 +289,7 @@ private extension BudgetModel {
         // Require an explicit transfer word in the bank's description.
         let description = transactionDescriptionText(transaction)
         return description.range(
-            of: #"\b(transfer|xfer|xfr)\b"#,
+            of: #"\b(transfer|xfer|xfr|tfr|trf|trsf|trnsfr)\b"#,
             options: .regularExpression
         ) != nil
     }
