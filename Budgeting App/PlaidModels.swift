@@ -19,6 +19,9 @@ struct PlaidSourceMetadata: Codable, Sendable, Equatable {
     var status: PlaidImportStatus
     var matchConfidence: Double?
     var isPending: Bool?
+    // Persisted user decision: a reviewed Plaid withdrawal must not be
+    // converted back into an inferred transfer on the next sync.
+    var userConfirmedNotTransfer: Bool? = nil
 
     init(
         itemId: String,
