@@ -119,8 +119,12 @@ struct PlaidSettingsView: View {
                         Text("No Plaid imports need review.")
                             .foregroundStyle(.secondary)
                     } else {
+                        Text("Review uncertain bank movements here. Matching never creates a destination account without a real transaction from that account.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         ForEach(budget.plaidReviewItems) { item in
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 Text(item.title)
                                     .font(.headline)
                                 Text(item.detail)
@@ -130,10 +134,59 @@ struct PlaidSettingsView: View {
                                     Text(amount, format: .currency(code: "USD"))
                                         .font(.caption)
                                 }
+                                if let leg = budget.plaidTransferReviewLeg(sourceId: item.sourceId) {
+                                    Text("\(leg.accountName) · \(leg.date.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    let candidates = budget.plaidTransferReviewCandidates(sourceId: item.sourceId)
+                                    if !candidates.isEmpty {
+                                        Text("Possible matching bank transactions")
+                                            .font(.caption.weight(.semibold))
+                                        ForEach(candidates) { candidate in
+                                            Button {
+                                                if budget.confirmPlaidTransferReview(sourceId: item.sourceId, counterpartId: candidate.id) {
+                                                    statusMessage = "Bank transfer confirmed between \(leg.accountName) and \(candidate.accountName)."
+                                                } else {
+                                                    errorMessage = "The candidate is no longer eligible. Sync again and review the latest transactions."
+                                                }
+                                            } label: {
+                                                Label(
+                                                    "Confirm with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))",
+                                                    systemImage: "arrow.left.arrow.right.circle"
+                                                )
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .disabled(isWorking)
+                                        }
+                                    } else {
+                                        Text("No matching transaction found in another linked bank account.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if leg.signedAmount > 0 {
+                                        Button {
+                                            if budget.keepPlaidWithdrawalAsExpense(sourceId: item.sourceId) {
+                                                statusMessage = "Kept as withdrawal. This choice will survive future Plaid syncs."
+                                            } else {
+                                                errorMessage = "Could not confirm this withdrawal. Sync again and review the account."
+                                            }
+                                        } label: {
+                                            Label("Keep as Withdrawal / Expense", systemImage: "checkmark.shield")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .disabled(isWorking)
+                                    }
+                                }
+                                Text("To dismiss this review without changing classification, swipe left.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
                             }
+                            .padding(.vertical, 6)
                         }
                         .onDelete { offsets in
                             budget.plaidReviewItems.remove(atOffsets: offsets)
+                            budget.saveNow()
                         }
                     }
                 }
