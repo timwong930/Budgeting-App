@@ -86,11 +86,36 @@ private extension BudgetModel {
     ) -> PlaidTransferReconciliationResult {
         var result = PlaidTransferReconciliationResult()
         var confirmedPairMarkers: Set<String> = []
+        let activeById = Dictionary(uniqueKeysWithValues: transactions.map { ($0.id, $0) })
+
+        // Preserve user-approved matches through later syncs. If both sides
+        // change into incompatible transactions, re-evaluate them normally.
+        for transfer in cashTransfers where transfer.note.contains("[USER_CONFIRMED]") {
+            guard let ids = plaidPairTransactionIds(from: transfer.note) else { continue }
+            let present = ids.compactMap { activeById[$0] }
+            let stillValid = present.count < 2 || (
+                present[0].accountId != present[1].accountId &&
+                present[0].amount * present[1].amount < 0 &&
+                abs(abs(present[0].amount) - abs(present[1].amount)) < 0.01 &&
+                dayDistance(present[0].date, present[1].date) <= 3
+            )
+            guard stillValid else { continue }
+            confirmedPairMarkers.insert(plaidTransferSourceMarker(outflowId: ids[0], inflowId: ids[1]))
+            result.handledTransactionIds.formUnion(ids)
+        }
 
         for (index, transaction) in transactions.enumerated() {
             guard !result.handledTransactionIds.contains(transaction.id) else { continue }
             let type = accountTypesById[transaction.accountId] ?? .other
-            guard isStrongTransferOrPayment(transaction, accountType: type) else { continue }
+            let keptAsTransaction = expenses.contains {
+                $0.plaidMetadata?.transactionId == transaction.id &&
+                $0.plaidMetadata?.userConfirmedNotTransfer == true
+            } || incomes.contains {
+                $0.plaidMetadata?.transactionId == transaction.id &&
+                $0.plaidMetadata?.userConfirmedNotTransfer == true
+            }
+            guard !keptAsTransaction,
+                  isStrongTransferOrPayment(transaction, accountType: type) else { continue }
 
             // An equal amount and nearby date are not sufficient proof of an
             // account-to-account transfer. Both directions must have exactly
@@ -198,8 +223,15 @@ private extension BudgetModel {
     ) -> Bool {
         let bothDepository = lhsType == .depository && rhsType == .depository
         if bothDepository {
-            // Both bank statements must independently identify a transfer.
-            return isLikelyBankTransfer(lhs) && isLikelyBankTransfer(rhs)
+            // One side may read "TRANSFER TO SAVINGS" and the other "ACH CREDIT".
+            // Plaid's transfer category corroborates the latter but cannot
+            // independently turn an ordinary withdrawal into a transfer.
+            guard !isObviousNonTransfer(lhs), !isObviousNonTransfer(rhs) else { return false }
+            let left = isLikelyBankTransfer(lhs)
+            let right = isLikelyBankTransfer(rhs)
+            return (left && right) ||
+                (left && isTransferCategory(rhs)) ||
+                (right && isTransferCategory(lhs))
         }
 
         let depositoryAndCredit =
@@ -237,6 +269,18 @@ private extension BudgetModel {
             text.contains("credit card payment") ||
             text.contains("card payment") ||
             text.contains("payment thank you")
+    }
+
+    func isTransferCategory(_ transaction: PlaidSyncedTransaction) -> Bool {
+        (transaction.category ?? "").lowercased().contains("transfer")
+    }
+
+    func isObviousNonTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
+        let name = transactionDescriptionText(transaction)
+        let exclusions = ["atm", "cash withdrawal", "payroll", "paycheck", "salary",
+                          "zelle", "venmo", "cash app", "merchant", "purchase",
+                          "refund", "bill pay"]
+        return exclusions.contains { name.contains($0) }
     }
 
     func isLikelyBankTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
@@ -596,6 +640,7 @@ private extension BudgetModel {
             matchConfidence: existing.plaidMetadata?.matchConfidence,
             importedAt: existing.plaidMetadata?.importedAt
         )
+        updated.plaidMetadata?.userConfirmedNotTransfer = existing.plaidMetadata?.userConfirmedNotTransfer
         return updated
     }
 
@@ -617,6 +662,7 @@ private extension BudgetModel {
             matchConfidence: existing.plaidMetadata?.matchConfidence,
             importedAt: existing.plaidMetadata?.importedAt
         )
+        updated.plaidMetadata?.userConfirmedNotTransfer = existing.plaidMetadata?.userConfirmedNotTransfer
         return updated
     }
 
