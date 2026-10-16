@@ -86,7 +86,7 @@ private extension BudgetModel {
     ) -> PlaidTransferReconciliationResult {
         var result = PlaidTransferReconciliationResult()
         var confirmedPairMarkers: Set<String> = []
-        let activeById = Dictionary(uniqueKeysWithValues: transactions.map { ($0.id, $0) })
+        let activeById = Dictionary(transactions.map { ($0.id, $0) }, uniquingKeysWith: { _, newer in newer })
 
         // Preserve user-approved matches through later syncs. If both sides
         // change into incompatible transactions, re-evaluate them normally.
@@ -124,7 +124,7 @@ private extension BudgetModel {
                 for: transaction,
                 at: index,
                 in: transactions,
-                accountTypesById: accountTypesById,
+                accountTypesById: accountTypesById
             )
             var confirmedCandidate: PlaidSyncedTransaction?
             if candidates.count == 1 {
@@ -133,7 +133,7 @@ private extension BudgetModel {
                     for: transactions[candidateIndex],
                     at: candidateIndex,
                     in: transactions,
-                    accountTypesById: accountTypesById,
+                    accountTypesById: accountTypesById
                 )
                 if reverseCandidates == [index] &&
                     !result.handledTransactionIds.contains(transactions[candidateIndex].id) {
