@@ -54,10 +54,21 @@ extension BudgetModel {
         return nil
     }
 
+    private func isConfirmedNonTransfer(sourceId: String) -> Bool {
+        expenses.contains {
+            $0.plaidMetadata?.transactionId == sourceId &&
+            $0.plaidMetadata?.userConfirmedNotTransfer == true
+        } || incomes.contains {
+            $0.plaidMetadata?.transactionId == sourceId &&
+            $0.plaidMetadata?.userConfirmedNotTransfer == true
+        }
+    }
+
     /// Suggest only observed transactions from another connected depository
     /// account. Never offer an arbitrary destination bank without a Plaid row.
     func plaidTransferReviewCandidates(sourceId: String) -> [PlaidTransferReviewLeg] {
-        guard let source = plaidTransferReviewLeg(sourceId: sourceId),
+        guard !isConfirmedNonTransfer(sourceId: sourceId),
+              let source = plaidTransferReviewLeg(sourceId: sourceId),
               financialAccounts.contains(where: { $0.id == source.accountId && $0.kind == .depository })
         else { return [] }
 
@@ -74,6 +85,7 @@ extension BudgetModel {
 
         return sourceIds.compactMap { candidateId -> PlaidTransferReviewLeg? in
             guard candidateId != sourceId,
+                  !isConfirmedNonTransfer(sourceId: candidateId),
                   let candidate = plaidTransferReviewLeg(sourceId: candidateId),
                   candidate.accountId != source.accountId,
                   source.signedAmount * candidate.signedAmount < 0,
@@ -110,7 +122,7 @@ extension BudgetModel {
             }
         }
         let outflows = ids.compactMap { plaidTransferReviewLeg(sourceId: $0) }
-            .filter { $0.signedAmount > 0 }
+            .filter { $0.signedAmount > 0 && !isConfirmedNonTransfer(sourceId: $0.id) }
             .filter { leg in
                 // Suppress obvious purchases, cash withdrawals, and person-to-
                 // person payments from the suggestions; they remain expenses.
