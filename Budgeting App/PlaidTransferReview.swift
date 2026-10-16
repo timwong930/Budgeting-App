@@ -28,23 +28,25 @@ extension BudgetModel {
             )
         }
         if let expense = expenses.first(where: { $0.plaidMetadata?.transactionId == sourceId }),
-           let accountId = expense.paymentAccountId {
+           let plaidAccountId = expense.plaidMetadata?.accountId,
+           let account = financialAccounts.first(where: { $0.externalAccountId == plaidAccountId }) {
             return PlaidTransferReviewLeg(
                 id: sourceId,
                 title: expense.name,
-                accountName: expense.paymentAccount,
-                accountId: accountId,
+                accountName: account.name,
+                accountId: account.id,
                 signedAmount: expense.amount,
                 date: expense.date
             )
         }
         if let income = incomes.first(where: { $0.plaidMetadata?.transactionId == sourceId }),
-           let accountId = income.bankAccountId {
+           let plaidAccountId = income.plaidMetadata?.accountId,
+           let account = financialAccounts.first(where: { $0.externalAccountId == plaidAccountId }) {
             return PlaidTransferReviewLeg(
                 id: sourceId,
                 title: income.name,
-                accountName: income.bankName,
-                accountId: accountId,
+                accountName: account.name,
+                accountId: account.id,
                 signedAmount: -income.amount,
                 date: income.date
             )
@@ -95,6 +97,32 @@ extension BudgetModel {
         }.sorted {
             abs($0.date.timeIntervalSince(source.date)) < abs($1.date.timeIntervalSince(source.date))
         }
+    }
+
+    /// On-demand review mode for transactions that neither bank labeled as a
+    /// transfer. Nothing here is automatically reconciled.
+    func plaidPotentialTransferReviews() -> [PlaidTransferReviewLeg] {
+        var ids = Set(expenses.compactMap { $0.plaidMetadata?.transactionId })
+        for transfer in cashTransfers where transfer.note.hasPrefix("[PLAID_SINGLE:") {
+            if let end = transfer.note.firstIndex(of: "]") {
+                let start = transfer.note.index(transfer.note.startIndex, offsetBy: "[PLAID_SINGLE:".count)
+                ids.insert(String(transfer.note[start..<end]))
+            }
+        }
+        let outflows = ids.compactMap { plaidTransferReviewLeg(sourceId: $0) }
+            .filter { $0.signedAmount > 0 }
+            .filter { leg in
+                // Suppress obvious purchases, cash withdrawals, and person-to-
+                // person payments from the suggestions; they remain expenses.
+                !["atm", "cash withdrawal", "payroll", "paycheck", "zelle",
+                  "venmo", "cash app", "merchant", "purchase", "refund"].contains {
+                    leg.title.localizedCaseInsensitiveContains($0)
+                }
+            }
+            .sorted { $0.date > $1.date }
+        return Array(outflows.prefix(100).filter {
+            !plaidTransferReviewCandidates(sourceId: $0.id).isEmpty
+        }.prefix(25))
     }
 
     /// Explicit review choices survive repeated Plaid sync through the
