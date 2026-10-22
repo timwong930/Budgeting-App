@@ -10435,6 +10435,9 @@ struct EditIncomeView: View {
     @State private var bucketFrom: String
     @State private var bucketTo: String
     @State private var confirmDuplicate = false
+    @State private var selectedBucketExpense: Expense?
+    @State private var confirmBucketPair = false
+    @State private var bucketPairError: String?
 
     private var bankAccountOptions: [String] {
         let names = (budget.bankAccounts.map(\.name) + [bankName])
@@ -10498,8 +10501,64 @@ struct EditIncomeView: View {
                 } header: {
                     Text("Income Details")
                 }
+
+                if correction == .bucketTransfer && income.plaidMetadata != nil {
+                    Section("Pair bucket movements") {
+                        if let pairedID = income.bucketCounterpartSourceId {
+                            Text("Linked to observed bucket transaction \(pairedID.suffix(6)). Change classification to unlink.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            let candidates = budget.expenses.filter { expense in
+                                budget.bucketTransferIncomeCandidates(for: expense).contains {
+                                    $0.id == income.id
+                                }
+                            }
+                            if candidates.isEmpty {
+                                Text("No matching debit was observed in this account. You can still classify the incoming entry as a bucket transfer without creating another bank transaction.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(candidates) { expense in
+                                    Button {
+                                        selectedBucketExpense = expense
+                                        confirmBucketPair = true
+                                    } label: {
+                                        Label("Link \(expense.name) · \(expense.amount.formatted(.currency(code: "USD")))", systemImage: "arrow.left.arrow.right")
+                                    }
+                                }
+                            }
+                        }
+                        if let bucketPairError {
+                            Text(bucketPairError).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
+            .confirmationDialog(
+                "Confirm internal bucket movement?",
+                isPresented: $confirmBucketPair,
+                titleVisibility: .visible
+            ) {
+                Button("Link both bucket movements") {
+                    guard let selectedBucketExpense,
+                          budget.confirmInternalBucketTransfer(
+                            expenseID: selectedBucketExpense.id,
+                            incomeID: income.id,
+                            fromBucket: bucketFrom,
+                            toBucket: bucketTo
+                          ) else {
+                        bucketPairError = "These two entries are no longer eligible. No link was made."
+                        return
+                    }
+                    Haptics.success()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Link only if these are the opposite sides of a bucket transfer inside the same account. Neither income nor spending is created, and the actual bank balance stays unchanged.")
+            }
             .confirmationDialog(
                 "Hide this duplicate income?",
                 isPresented: $confirmDuplicate,
