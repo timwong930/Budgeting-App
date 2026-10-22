@@ -56,9 +56,11 @@ extension BudgetModel {
         let normalizedName = ledgerNormalizedAccountName(account.name)
         var entries: [AccountLedgerEntry] = []
 
-        for expense in expenses where ledgerExpenseUsesAccount(expense, accountId: accountId, normalizedName: normalizedName) {
+        for expense in expenses where expense.reviewCorrection != .duplicate &&
+            ledgerExpenseUsesAccount(expense, accountId: accountId, normalizedName: normalizedName) {
             let isCardPayment = creditCardPaymentTarget(for: expense) != nil
-            let isTransfer = isUserClassifiedTransfer(expense)
+            let isBucket = expense.reviewCorrection == .bucketTransfer
+            let isTransfer = isUserClassifiedTransfer(expense) || isBucket
             let destination = expense.transferDestinationAccountName ??
                 financialAccounts.first(where: { $0.id == expense.transferDestinationAccountId })?.name ??
                 "selected account"
@@ -67,9 +69,10 @@ extension BudgetModel {
                     id: "expense|\(expense.id.uuidString)",
                     date: expense.date,
                     title: expense.name,
-                    detail: isTransfer ? "Transfer to \(destination) · awaiting account-side confirmation" :
+                    detail: isBucket ? "Internal bucket transfer" :
+                        (isTransfer ? "Transfer to \(destination) · awaiting account-side confirmation" :
                         (isCardPayment ? "Credit card payment · awaiting account-side confirmation" :
-                            ledgerExpenseDetail(expense)),
+                            ledgerExpenseDetail(expense))),
                     signedAmount: -abs(expense.amount),
                     kind: isTransfer ? .transferOut : (isCardPayment ? .payment : .expense),
                     isPending: ledgerIsPending(expense.plaidMetadata, note: expense.note),
@@ -80,15 +83,17 @@ extension BudgetModel {
             )
         }
 
-        for income in incomes where ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
+        for income in incomes where income.reviewCorrection != .duplicate &&
+            ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
             entries.append(
                 AccountLedgerEntry(
                     id: "income|\(income.id.uuidString)",
                     date: income.date,
                     title: income.name,
-                    detail: "Deposit / income",
+                    detail: income.reviewCorrection == .bucketTransfer ?
+                        "Internal bucket transfer" : "Deposit / income",
                     signedAmount: abs(income.amount),
-                    kind: .income,
+                    kind: income.reviewCorrection == .bucketTransfer ? .transferIn : .income,
                     isPending: income.plaidMetadata?.isPending == true,
                     sourceLabel: income.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: income.plaidMetadata?.status,
@@ -149,7 +154,7 @@ extension BudgetModel {
         let normalizedName = ledgerNormalizedAccountName(account.name)
         var entries: [AccountLedgerEntry] = []
 
-        for expense in expenses {
+        for expense in expenses where expense.reviewCorrection != .duplicate {
             if ledgerCreditPaymentTargetsAccount(expense, accountId: accountId, normalizedName: normalizedName) {
                 entries.append(
                     AccountLedgerEntry(
@@ -185,15 +190,17 @@ extension BudgetModel {
             )
         }
 
-        for income in incomes where ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
+        for income in incomes where income.reviewCorrection != .duplicate &&
+            ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
             entries.append(
                 AccountLedgerEntry(
                     id: "refund|\(income.id.uuidString)",
                     date: income.date,
                     title: income.name,
-                    detail: "Refund / statement credit",
+                    detail: income.reviewCorrection == .bucketTransfer ?
+                        "Internal bucket transfer" : "Refund / statement credit",
                     signedAmount: abs(income.amount),
-                    kind: .refund,
+                    kind: income.reviewCorrection == .bucketTransfer ? .transferIn : .refund,
                     isPending: income.plaidMetadata?.isPending == true,
                     sourceLabel: income.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: income.plaidMetadata?.status,
