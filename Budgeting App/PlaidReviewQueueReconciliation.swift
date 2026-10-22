@@ -33,6 +33,33 @@ extension BudgetModel {
         if restored { saveNow() }
     }
 
+    /// Restoring a duplicate changes the app's classification, not bank history.
+    @discardableResult
+    func restoreDuplicateIncome(id: UUID) -> Bool {
+        guard let entry = incomes.first(where: { $0.id == id && $0.reviewCorrection == .duplicate }) else {
+            return false
+        }
+        var restored = entry
+        restored.reviewCorrection = nil
+        restored.bucketCounterpartSourceId = nil
+        updateIncomeEntry(restored)
+        saveNow()
+        return true
+    }
+
+    @discardableResult
+    func restoreDuplicateExpense(id: UUID) -> Bool {
+        guard let entry = expenses.first(where: { $0.id == id && $0.reviewCorrection == .duplicate }) else {
+            return false
+        }
+        var restored = entry
+        restored.reviewCorrection = nil
+        restored.bucketCounterpartSourceId = nil
+        updateExpense(restored)
+        saveNow()
+        return true
+    }
+
     /// Bucket reallocations have two signs but the same Plaid account. They
     /// must never be modeled as a bank-to-bank transfer or a new bank balance.
     func bucketTransferIncomeCandidates(for expense: Expense) -> [IncomeEntry] {
