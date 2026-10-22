@@ -30,16 +30,28 @@ extension BudgetModel {
         let syncedAt = Date()
         var accountNamesById: [String: String] = [:]
         var accountTypesById: [String: PlaidAccountType] = [:]
+        // A connection can omit unchanged accounts from an incremental update.
+        for account in financialAccounts {
+            guard let id = account.externalAccountId else { continue }
+            accountNamesById[id] = account.name
+            switch account.kind {
+            case .depository: accountTypesById[id] = .depository
+            case .credit: accountTypesById[id] = .credit
+            default: break
+            }
+        }
         for account in payload.accounts {
             accountNamesById[account.id] = account.name
             accountTypesById[account.id] = account.type
         }
 
         let activeTransactions = payload.transactions.filter { !$0.removed }
+        let removedSourceIds = Set(payload.transactions.filter { $0.removed }.map(\.id))
         let transferResult = reconcilePlaidTransfers(
             activeTransactions,
             accountNamesById: accountNamesById,
-            accountTypesById: accountTypesById
+            accountTypesById: accountTypesById,
+            removedSourceIds: removedSourceIds
         )
         result.reconciledTransactions += transferResult.reconciledTransactions
         result.reviewItems += transferResult.reviewItemsAdded
@@ -82,16 +94,38 @@ private extension BudgetModel {
     func reconcilePlaidTransfers(
         _ transactions: [PlaidSyncedTransaction],
         accountNamesById: [String: String],
-        accountTypesById: [String: PlaidAccountType]
+        accountTypesById: [String: PlaidAccountType],
+        removedSourceIds: Set<String>
     ) -> PlaidTransferReconciliationResult {
         var result = PlaidTransferReconciliationResult()
         var confirmedPairMarkers: Set<String> = []
         let activeById = Dictionary(transactions.map { ($0.id, $0) }, uniquingKeysWith: { _, newer in newer })
+        // Plaid sends deltas, not complete history. Revisit unmatched observed
+        // legs from earlier deliveries when searching for this batch's partner.
+        let candidates = transactions + storedPlaidTransferCandidates(
+            excluding: Set(transactions.map(\.id)).union(removedSourceIds)
+        )
+
+        // Plaid sync is incremental: a previously verified pair may have only
+        // one side in this delivery. Do not create an additional unpaired
+        // transfer while its partner is absent. Defer changes to that pair
+        // until both sides arrive, or until Plaid explicitly removes a side.
+        // A removal is authoritative and must not be held by this safeguard.
+        for transfer in cashTransfers {
+            guard !transfer.note.contains("[USER_CONFIRMED]"),
+                  let ids = plaidPairTransactionIds(from: transfer.note),
+                  ids.filter({ activeById[$0] != nil }).count == 1,
+                  !ids.contains(where: { removedSourceIds.contains($0) }) else {
+                continue
+            }
+            result.handledTransactionIds.formUnion(ids)
+        }
 
         // Preserve user-approved matches through later syncs. If both sides
         // change into incompatible transactions, re-evaluate them normally.
         for transfer in cashTransfers where transfer.note.contains("[USER_CONFIRMED]") {
-            guard let ids = plaidPairTransactionIds(from: transfer.note) else { continue }
+            guard let ids = plaidPairTransactionIds(from: transfer.note),
+                  !ids.contains(where: { removedSourceIds.contains($0) }) else { continue }
             let present = ids.compactMap { activeById[$0] }
             let stillValid = present.count < 2 || (
                 present[0].accountId != present[1].accountId &&
@@ -109,35 +143,47 @@ private extension BudgetModel {
             let type = accountTypesById[transaction.accountId] ?? .other
             let keptAsTransaction = expenses.contains {
                 $0.plaidMetadata?.transactionId == transaction.id &&
-                $0.plaidMetadata?.userConfirmedNotTransfer == true
+                ($0.plaidMetadata?.userConfirmedNotTransfer == true ||
+                 $0.userClassifiedTransfer == true ||
+                 $0.transferDestinationAccountId != nil ||
+                 $0.creditCardPaymentTargetId != nil ||
+                 $0.creditCardPaymentTarget != nil)
             } || incomes.contains {
                 $0.plaidMetadata?.transactionId == transaction.id &&
                 $0.plaidMetadata?.userConfirmedNotTransfer == true
             }
-            guard !keptAsTransaction,
-                  isStrongTransferOrPayment(transaction, accountType: type) else { continue }
+            guard !keptAsTransaction else { continue }
 
-            // An equal amount and nearby date are not sufficient proof of an
-            // account-to-account transfer. Both directions must have exactly
-            // one eligible counterpart; otherwise, keep the account unassigned.
-            let candidates = eligibleTransferCounterpartIndices(
+            // A generic ACH credit may be the *new* side of an explicitly
+            // named transfer already stored from a prior sync. It must be
+            // eligible to trigger matching, even without transfer wording.
+            let candidateIndices = eligibleTransferCounterpartIndices(
                 for: transaction,
                 at: index,
-                in: transactions,
+                in: candidates,
                 accountTypesById: accountTypesById
-            )
+            ).filter { !isRejectedPlaidPair(transaction.id, candidates[$0].id) }
+            // Unidentified credits on a credit account are not wages or
+            // deposits. Hold them for review rather than inflate income.
+            let ambiguousCardCredit = type == .credit && transaction.amount < 0 &&
+                !isRecognizableCardRefund(transaction)
+            guard isStrongTransferOrPayment(transaction, accountType: type) ||
+                    !candidateIndices.isEmpty || ambiguousCardCredit else { continue }
+
+            // Amount + date alone never creates a verified pair; candidate
+            // eligibility and unique reverse matching are still required.
             var confirmedCandidate: PlaidSyncedTransaction?
-            if candidates.count == 1 {
-                let candidateIndex = candidates[0]
+            if candidateIndices.count == 1 {
+                let candidateIndex = candidateIndices[0]
                 let reverseCandidates = eligibleTransferCounterpartIndices(
-                    for: transactions[candidateIndex],
+                    for: candidates[candidateIndex],
                     at: candidateIndex,
-                    in: transactions,
+                    in: candidates,
                     accountTypesById: accountTypesById
-                )
+                ).filter { !isRejectedPlaidPair(candidates[candidateIndex].id, candidates[$0].id) }
                 if reverseCandidates == [index] &&
-                    !result.handledTransactionIds.contains(transactions[candidateIndex].id) {
-                    confirmedCandidate = transactions[candidateIndex]
+                    !result.handledTransactionIds.contains(candidates[candidateIndex].id) {
+                    confirmedCandidate = candidates[candidateIndex]
                 }
             }
 
@@ -145,7 +191,13 @@ private extension BudgetModel {
                 let outflow = transaction.amount > 0 ? transaction : confirmedCandidate
                 let inflow = transaction.amount < 0 ? transaction : confirmedCandidate
 
-                // Remove legacy sign-first rows before creating a verified pair.
+                // Preserve the user's chosen label/note before replacing the
+                // single-side expense with a verified, two-sided Plaid pair.
+                let sourceIds = Set([outflow.id, inflow.id])
+                let userAnnotatedMovement = expenses.first(where: {
+                    sourceIds.contains($0.plaidMetadata?.transactionId ?? "") &&
+                    (isUserClassifiedTransfer($0) || isCreditCardPayment($0))
+                })
                 _ = removeReconciledPlaidTransaction(id: transaction.id)
                 _ = removeReconciledPlaidTransaction(id: confirmedCandidate.id)
 
@@ -153,7 +205,9 @@ private extension BudgetModel {
                     outflow: outflow,
                     inflow: inflow,
                     accountNamesById: accountNamesById,
-                    accountTypesById: accountTypesById
+                    accountTypesById: accountTypesById,
+                    userTitle: userAnnotatedMovement?.name,
+                    userNote: userAnnotatedMovement?.note
                 )
                 confirmedPairMarkers.insert(
                     plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
@@ -162,13 +216,21 @@ private extension BudgetModel {
                 result.handledTransactionIds.insert(confirmedCandidate.id)
                 result.reconciledTransactions += 2
             } else {
-                // A *named* transfer may leave the connected-account set, but we
-                // never invent a destination bank account or count it as income.
+                // Keep a user's rejected-counterpart decision even when the
+                // new bank sync updates the same source ID.
+                let rejectedIds = cashTransfers.first(where: {
+                    $0.note.hasPrefix("[PLAID_SINGLE:\(transaction.id)]")
+                })?.plaidRejectedCounterpartIds ??
+                    expenses.first(where: { $0.plaidMetadata?.transactionId == transaction.id })?
+                        .plaidMetadata?.rejectedCounterpartIds ??
+                    incomes.first(where: { $0.plaidMetadata?.transactionId == transaction.id })?
+                        .plaidMetadata?.rejectedCounterpartIds
                 _ = removeReconciledPlaidTransaction(id: transaction.id)
                 upsertUnpairedPlaidTransfer(
                     transaction,
                     accountName: accountNamesById[transaction.accountId] ?? "Plaid account",
-                    accountType: type
+                    accountType: type,
+                    rejectedCounterpartIds: rejectedIds
                 )
                 let added = upsertPlaidReviewItem(
                     sourceId: transaction.id,
@@ -190,6 +252,90 @@ private extension BudgetModel {
             confirmedPairMarkers: confirmedPairMarkers
         )
         return result
+    }
+
+
+    /// Durable matching pool: Plaid sync calls often contain only one Item's
+    /// changes. Persisted unmatched legs are genuine bank observations; we
+    /// never invent an opposite transaction from an account balance.
+    func storedPlaidTransferCandidates(excluding excludedIds: Set<String>) -> [PlaidSyncedTransaction] {
+        let pairedIds = Set(cashTransfers.compactMap { transfer -> [String]? in
+            guard transfer.note.hasPrefix("[PLAID_PAIR:") else { return nil }
+            return plaidPairTransactionIds(from: transfer.note)
+        }.flatMap { $0 })
+        var unique: [String: PlaidSyncedTransaction] = [:]
+
+        func add(_ transaction: PlaidSyncedTransaction) {
+            guard !excludedIds.contains(transaction.id), !pairedIds.contains(transaction.id),
+                  unique[transaction.id] == nil,
+                  financialAccounts.contains(where: {
+                      $0.externalAccountId == transaction.accountId &&
+                      ($0.kind == .depository || $0.kind == .credit)
+                  }) else { return }
+            unique[transaction.id] = transaction
+        }
+
+        for transfer in cashTransfers where transfer.note.hasPrefix("[PLAID_SINGLE:") {
+            if let originals = transfer.plaidSourceTransactions {
+                originals.forEach(add)
+            } else if let closing = transfer.note.firstIndex(of: "]"),
+                      let accountId = transfer.fromAccountId ?? transfer.toAccountId,
+                      let account = financialAccounts.first(where: {
+                          $0.id == accountId && $0.externalAccountId != nil
+                      }), let externalId = account.externalAccountId {
+                let start = transfer.note.index(transfer.note.startIndex, offsetBy: "[PLAID_SINGLE:".count)
+                add(PlaidSyncedTransaction(
+                    id: String(transfer.note[start..<closing]), accountId: externalId,
+                    itemId: account.externalItemId ?? "", name: transfer.name,
+                    merchantName: nil,
+                    amount: transfer.fromAccountId != nil ? transfer.amount : -transfer.amount,
+                    date: transfer.date, pending: transfer.note.contains("[PENDING]"),
+                    category: nil, removed: false
+                ))
+            }
+        }
+        for expense in expenses {
+            guard let metadata = expense.plaidMetadata,
+                  let id = metadata.transactionId,
+                  let accountId = metadata.accountId,
+                  metadata.userConfirmedNotTransfer != true else { continue }
+            add(PlaidSyncedTransaction(
+                id: id, accountId: accountId, itemId: metadata.itemId,
+                name: expense.name, merchantName: nil, amount: abs(expense.amount),
+                date: expense.date, pending: metadata.isPending ?? false,
+                category: metadata.originalCategory, removed: false
+            ))
+        }
+        for income in incomes {
+            guard let metadata = income.plaidMetadata,
+                  let id = metadata.transactionId,
+                  let accountId = metadata.accountId,
+                  metadata.userConfirmedNotTransfer != true else { continue }
+            add(PlaidSyncedTransaction(
+                id: id, accountId: accountId, itemId: metadata.itemId,
+                name: income.name, merchantName: nil, amount: -abs(income.amount),
+                date: income.date, pending: metadata.isPending ?? false,
+                category: metadata.originalCategory, removed: false
+            ))
+        }
+        return unique.values.sorted { $0.id < $1.id }
+    }
+
+    func isRejectedPlaidPair(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsRejections = expenses.first(where: { $0.plaidMetadata?.transactionId == lhs })?
+            .plaidMetadata?.rejectedCounterpartIds ??
+            incomes.first(where: { $0.plaidMetadata?.transactionId == lhs })?
+                .plaidMetadata?.rejectedCounterpartIds ?? []
+        let rhsRejections = expenses.first(where: { $0.plaidMetadata?.transactionId == rhs })?
+            .plaidMetadata?.rejectedCounterpartIds ??
+            incomes.first(where: { $0.plaidMetadata?.transactionId == rhs })?
+                .plaidMetadata?.rejectedCounterpartIds ?? []
+        let lhsTransfer = cashTransfers.first(where: { $0.note.hasPrefix("[PLAID_SINGLE:\(lhs)]") })?
+            .plaidRejectedCounterpartIds ?? []
+        let rhsTransfer = cashTransfers.first(where: { $0.note.hasPrefix("[PLAID_SINGLE:\(rhs)]") })?
+            .plaidRejectedCounterpartIds ?? []
+        return lhsRejections.contains(rhs) || rhsRejections.contains(lhs) ||
+            lhsTransfer.contains(rhs) || rhsTransfer.contains(lhs)
     }
 
     func eligibleTransferCounterpartIndices(
@@ -215,12 +361,42 @@ private extension BudgetModel {
         }
     }
 
+    func declaredTransferDestinationAllows(sourceId: String, candidateAccountId: String) -> Bool {
+        guard let expense = expenses.first(where: { $0.plaidMetadata?.transactionId == sourceId }) else {
+            return true
+        }
+        let destinationId = expense.transferDestinationAccountId ?? expense.creditCardPaymentTargetId
+        guard let destinationId else { return true }
+        return financialAccounts.contains(where: {
+            $0.id == destinationId && $0.externalAccountId == candidateAccountId
+        })
+    }
+
+    func userSelectedAccountDestination(sourceId: String, targetExternalAccountId: String, kind: FinancialAccountKind) -> Bool {
+        guard let expense = expenses.first(where: { $0.plaidMetadata?.transactionId == sourceId }) else { return false }
+        let selectedId: UUID?
+        if kind == .credit {
+            selectedId = expense.creditCardPaymentTargetId
+        } else {
+            selectedId = expense.userClassifiedTransfer == true ? expense.transferDestinationAccountId : nil
+        }
+        guard let selectedId else { return false }
+        return financialAccounts.contains(where: {
+            $0.id == selectedId && $0.externalAccountId == targetExternalAccountId && $0.kind == kind
+        })
+    }
+
     func canPairTransfer(
         _ lhs: PlaidSyncedTransaction,
         accountType lhsType: PlaidAccountType,
         with rhs: PlaidSyncedTransaction,
         candidateAccountType rhsType: PlaidAccountType
     ) -> Bool {
+        // A manual destination is a user decision, not just a hint. Never
+        // silently pair that debit with a different observed account.
+        guard declaredTransferDestinationAllows(sourceId: lhs.id, candidateAccountId: rhs.accountId),
+              declaredTransferDestinationAllows(sourceId: rhs.id, candidateAccountId: lhs.accountId)
+        else { return false }
         let bothDepository = lhsType == .depository && rhsType == .depository
         if bothDepository {
             // One side may read "TRANSFER TO SAVINGS" and the other "ACH CREDIT".
@@ -229,7 +405,13 @@ private extension BudgetModel {
             guard !isObviousNonTransfer(lhs), !isObviousNonTransfer(rhs) else { return false }
             let left = isLikelyBankTransfer(lhs)
             let right = isLikelyBankTransfer(rhs)
-            return (left && right) ||
+            let explicitlySelected =
+                (userSelectedAccountDestination(sourceId: lhs.id, targetExternalAccountId: rhs.accountId, kind: .depository) &&
+                 isTransferCategory(rhs)) ||
+                (userSelectedAccountDestination(sourceId: rhs.id, targetExternalAccountId: lhs.accountId, kind: .depository) &&
+                 isTransferCategory(lhs))
+            return explicitlySelected ||
+                (left && right) ||
                 (left && isTransferCategory(rhs)) ||
                 (right && isTransferCategory(lhs))
         }
@@ -240,35 +422,54 @@ private extension BudgetModel {
         if depositoryAndCredit {
             let credit = lhsType == .credit ? lhs : rhs
             let bank = lhsType == .depository ? lhs : rhs
+            // Card payments leave checking and enter credit accounts.
+            // Similar-sized purchases or refunds are not card payments.
+            guard credit.amount < 0, bank.amount > 0,
+                  !isRecognizableCardRefund(credit) else { return false }
             let bankDescription = transactionDescriptionText(bank)
-            // A random bank withdrawal must not become a card payment just
-            // because a card has an equal, opposite-signed transaction.
-            return isLikelyCreditCardPaymentForReconciliation(credit) &&
-                (isLikelyCreditCardPaymentForReconciliation(bank) ||
-                 bankDescription.contains("payment") ||
-                 bankDescription.contains("autopay") ||
-                 bankDescription.contains("credit card"))
+            // Loan payments, ordinary bill payments and merchant autopay can
+            // coincide with a card credit by amount/date. A card transaction
+            // alone does NOT verify that the bank debit paid this card.
+            let explicitCardMemo = [
+                "credit card", "card payment", "cardmember", "epay", "pymt"
+            ].contains { bankDescription.contains($0) }
+            let knownIssuer = financialAccounts.first(where: {
+                $0.externalAccountId == credit.accountId
+            })?.institutionName?.lowercased() ?? ""
+            let mentionsIssuer = knownIssuer.count >= 5 &&
+                !["bank", "credit union", "unknown", "financial institution"].contains(knownIssuer) &&
+                bankDescription.contains(knownIssuer) &&
+                (bankDescription.contains("payment") || bankDescription.contains("autopay"))
+            let selectedCard = userSelectedAccountDestination(
+                sourceId: bank.id, targetExternalAccountId: credit.accountId, kind: .credit
+            )
+            return (selectedCard &&
+                (isTransferCategory(credit) || isLikelyCreditCardPaymentForReconciliation(credit))) ||
+                (isLikelyCreditCardPaymentForReconciliation(credit) &&
+                 (explicitCardMemo || mentionsIssuer))
         }
         return false
     }
 
     func isStrongTransferOrPayment(_ transaction: PlaidSyncedTransaction, accountType: PlaidAccountType) -> Bool {
+        // Positive credit-account amounts are purchases, not payments. Generic
+        // words such as "autopay" must never hide card spending on their own.
+        if accountType == .credit {
+            return transaction.amount < 0 && !isRecognizableCardRefund(transaction) &&
+                isLikelyCreditCardPaymentForReconciliation(transaction)
+        }
         if isLikelyBankTransfer(transaction) {
             return true
         }
-        if accountType == .credit {
-            return isLikelyCreditCardPaymentForReconciliation(transaction)
-        }
 
-        // On depository accounts require explicit card-payment language. This avoids
-        // treating ordinary merchant autopay charges as credit-card transfers.
-        let category = (transaction.category ?? "").lowercased()
+        // LOAN_PAYMENT also describes mortgages and other ordinary bank
+        // withdrawals. Do not exclude those from spending without card evidence.
         let text = transactionSearchText(transaction)
-        return category.contains("loan_payment") ||
-            category.contains("loan payment") ||
-            text.contains("credit card payment") ||
+        return text.contains("credit card payment") ||
             text.contains("card payment") ||
-            text.contains("payment thank you")
+            text.contains("payment thank you") ||
+            text.contains("epay") ||
+            text.contains("pymt")
     }
 
     func isTransferCategory(_ transaction: PlaidSyncedTransaction) -> Bool {
@@ -277,7 +478,7 @@ private extension BudgetModel {
 
     func isObviousNonTransfer(_ transaction: PlaidSyncedTransaction) -> Bool {
         let name = transactionDescriptionText(transaction)
-        let exclusions = ["atm", "cash withdrawal", "payroll", "paycheck", "salary",
+        let exclusions = ["atm", "cash withdrawal", "cash wdl", "cash wd", "payroll", "paycheck", "salary",
                           "zelle", "venmo", "cash app", "merchant", "purchase",
                           "refund", "bill pay"]
         return exclusions.contains { name.contains($0) }
@@ -298,6 +499,14 @@ private extension BudgetModel {
         "\(transaction.name) \(transaction.merchantName ?? "")".lowercased()
     }
 
+    func isRecognizableCardRefund(_ transaction: PlaidSyncedTransaction) -> Bool {
+        let description = transactionDescriptionText(transaction)
+        return ["refund", "return", "reversal", "cashback", "cash back",
+                "statement credit", "reward credit", "adjustment credit"].contains {
+            description.contains($0)
+        }
+    }
+
     func isLikelyCreditCardPaymentForReconciliation(_ transaction: PlaidSyncedTransaction) -> Bool {
         let category = (transaction.category ?? "").lowercased()
         let text = transactionSearchText(transaction)
@@ -306,6 +515,11 @@ private extension BudgetModel {
             text.contains("credit card payment") ||
             text.contains("card payment") ||
             text.contains("payment thank you") ||
+            text.contains("payment received") ||
+            text.contains("online payment") ||
+            text.contains("automatic payment") ||
+            text.contains("epay") ||
+            text.contains("pymt") ||
             text.contains("autopay")
     }
 
@@ -313,16 +527,24 @@ private extension BudgetModel {
         outflow: PlaidSyncedTransaction,
         inflow: PlaidSyncedTransaction,
         accountNamesById: [String: String],
-        accountTypesById: [String: PlaidAccountType]
+        accountTypesById: [String: PlaidAccountType],
+        userTitle: String? = nil,
+        userNote: String? = nil
     ) {
-        let fromName = accountNamesById[outflow.accountId] ?? "Plaid account"
-        let toName = accountNamesById[inflow.accountId] ?? "Plaid account"
+        let fromName = accountNamesById[outflow.accountId] ??
+            financialAccounts.first(where: { $0.externalAccountId == outflow.accountId })?.name ?? "Plaid account"
+        let toName = accountNamesById[inflow.accountId] ??
+            financialAccounts.first(where: { $0.externalAccountId == inflow.accountId })?.name ?? "Plaid account"
         let fromId = stableFinancialAccountId(forPlaidAccountId: outflow.accountId)
         let toId = stableFinancialAccountId(forPlaidAccountId: inflow.accountId)
         let amount = roundedReconciliationCurrency(abs(outflow.amount))
         let date = max(outflow.date, inflow.date)
         let isCardPayment = accountTypesById[inflow.accountId] == .credit || accountTypesById[outflow.accountId] == .credit
         let sourceMarker = plaidTransferSourceMarker(outflowId: outflow.id, inflowId: inflow.id)
+        let cleanedTitle = userTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNote = userNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transferNote = "\(sourceMarker) Synced from Plaid transaction pair" +
+            ((cleanedNote?.isEmpty == false) ? " · \(cleanedNote!)" : "")
         _ = removePlaidSingleTransfers(sourceIds: [outflow.id, inflow.id])
 
         // Only the same Plaid source IDs may update an existing pair.
@@ -338,20 +560,26 @@ private extension BudgetModel {
             cashTransfers[existingIndex].toAccountName = toName
             cashTransfers[existingIndex].fromAccountId = fromId
             cashTransfers[existingIndex].toAccountId = toId
-            cashTransfers[existingIndex].note = "\(sourceMarker) Synced from Plaid transaction pair"
+            cashTransfers[existingIndex].note = transferNote
+            if let cleanedTitle, !cleanedTitle.isEmpty {
+                cashTransfers[existingIndex].name = cleanedTitle
+            }
+            cashTransfers[existingIndex].plaidSourceTransactions = [outflow, inflow]
             return
         }
 
         cashTransfers.append(
             CashTransfer(
-                name: isCardPayment ? "Credit card payment" : "Account transfer",
+                name: (cleanedTitle?.isEmpty == false) ?
+                    cleanedTitle! : (isCardPayment ? "Credit card payment" : "Account transfer"),
                 amount: amount,
                 date: date,
                 fromAccountName: fromName,
                 toAccountName: toName,
                 fromAccountId: fromId,
                 toAccountId: toId,
-                note: "\(sourceMarker) Synced from Plaid transaction pair"
+                note: transferNote,
+                plaidSourceTransactions: [outflow, inflow]
             )
         )
     }
@@ -359,7 +587,8 @@ private extension BudgetModel {
     func upsertUnpairedPlaidTransfer(
         _ transaction: PlaidSyncedTransaction,
         accountName: String,
-        accountType: PlaidAccountType
+        accountType: PlaidAccountType,
+        rejectedCounterpartIds: [String]? = nil
     ) {
         if let pendingTransactionId = transaction.pendingTransactionId {
             _ = removePlaidSingleTransfers(sourceIds: [pendingTransactionId])
@@ -384,6 +613,10 @@ private extension BudgetModel {
             cashTransfers[existingIndex].fromAccountId = isOutflow ? currentAccountId : nil
             cashTransfers[existingIndex].toAccountId = isOutflow ? nil : currentAccountId
             cashTransfers[existingIndex].note = note
+            cashTransfers[existingIndex].plaidSourceTransactions = [transaction]
+            if let rejectedCounterpartIds {
+                cashTransfers[existingIndex].plaidRejectedCounterpartIds = rejectedCounterpartIds
+            }
             return
         }
 
@@ -396,7 +629,9 @@ private extension BudgetModel {
                 toAccountName: isOutflow ? externalName : accountName,
                 fromAccountId: isOutflow ? currentAccountId : nil,
                 toAccountId: isOutflow ? nil : currentAccountId,
-                note: note
+                note: note,
+                plaidSourceTransactions: [transaction],
+                plaidRejectedCounterpartIds: rejectedCounterpartIds
             )
         )
     }
@@ -579,7 +814,7 @@ private extension BudgetModel {
         let categoryNeedsReview = transaction.category == nil && !hasManualCategory
         let ambiguousPlaidTransferCategory =
             (transaction.category ?? "").lowercased().contains("transfer") &&
-            !isLikelyBankTransfer(transaction) && !hasManualCategory
+            !isLikelyBankTransfer(transaction) && !isPlaidCashWithdrawal(transaction) && !hasManualCategory
         if categoryNeedsReview || ambiguousPlaidTransferCategory {
             let added = upsertPlaidReviewItem(
                 sourceId: transaction.id,
@@ -624,6 +859,11 @@ private extension BudgetModel {
         var updated = existing
         updated.amount = roundedReconciliationCurrency(abs(transaction.amount))
         updated.date = transaction.date
+        // Only migrate the generic Plaid fallback, never a user-selected category.
+        if isPlaidCashWithdrawal(transaction), updated.section == .needs,
+           needsCategories.contains(where: { $0.id == updated.categoryId && $0.name == "Plaid Needs" }) {
+            updated.categoryId = plaidCashWithdrawalCategory().categoryId
+        }
         updated.paymentAccount = accountName
         updated.paymentAccountId = stableFinancialAccountId(forPlaidAccountId: transaction.accountId)
 
@@ -641,6 +881,8 @@ private extension BudgetModel {
             importedAt: existing.plaidMetadata?.importedAt
         )
         updated.plaidMetadata?.userConfirmedNotTransfer = existing.plaidMetadata?.userConfirmedNotTransfer
+        updated.plaidMetadata?.rejectedCounterpartIds = existing.plaidMetadata?.rejectedCounterpartIds
+        updated.plaidMetadata?.originalCategory = transaction.category ?? existing.plaidMetadata?.originalCategory
         return updated
     }
 
@@ -663,6 +905,8 @@ private extension BudgetModel {
             importedAt: existing.plaidMetadata?.importedAt
         )
         updated.plaidMetadata?.userConfirmedNotTransfer = existing.plaidMetadata?.userConfirmedNotTransfer
+        updated.plaidMetadata?.rejectedCounterpartIds = existing.plaidMetadata?.rejectedCounterpartIds
+        updated.plaidMetadata?.originalCategory = transaction.category ?? existing.plaidMetadata?.originalCategory
         return updated
     }
 
@@ -728,7 +972,8 @@ private extension BudgetModel {
     }
 
     func makeReconciledExpense(from transaction: PlaidSyncedTransaction, accountName: String, syncedAt: Date) -> Expense {
-        let mapped = persistentCategoryAssignment(for: transaction) ?? mappedReconciliationCategory(for: transaction.category)
+        let mapped = persistentCategoryAssignment(for: transaction) ??
+            (isPlaidCashWithdrawal(transaction) ? plaidCashWithdrawalCategory() : mappedReconciliationCategory(for: transaction.category))
         return Expense(
             name: transactionDisplayName(transaction),
             amount: roundedReconciliationCurrency(abs(transaction.amount)),
@@ -877,7 +1122,7 @@ private extension BudgetModel {
         matchConfidence: Double? = nil,
         importedAt: Date? = nil
     ) -> PlaidSourceMetadata {
-        PlaidSourceMetadata(
+        var metadata = PlaidSourceMetadata(
             itemId: transaction.itemId,
             accountId: transaction.accountId,
             transactionId: transaction.id,
@@ -887,10 +1132,28 @@ private extension BudgetModel {
             matchConfidence: matchConfidence,
             isPending: transaction.pending
         )
+        metadata.originalCategory = transaction.category
+        return metadata
     }
 
     func stableFinancialAccountId(forPlaidAccountId accountId: String) -> UUID? {
         financialAccounts.first { $0.externalAccountId == accountId }?.id
+    }
+
+    func isPlaidCashWithdrawal(_ transaction: PlaidSyncedTransaction) -> Bool {
+        guard transaction.amount > 0 else { return false }
+        let desc = transactionDescriptionText(transaction)
+        guard !desc.contains("surcharge"), !desc.contains(" fee") else { return false }
+        return ["atm", "cash withdrawal", "cash wdl", "cash wd"].contains { desc.contains($0) }
+    }
+
+    func plaidCashWithdrawalCategory() -> (section: BudgetSection, categoryId: UUID) {
+        if let existing = needsCategories.first(where: { $0.name == "Cash Withdrawals" }) {
+            return (.needs, existing.id)
+        }
+        let created = Category(name: "Cash Withdrawals", allocatedAmount: 0)
+        needsCategories.append(created)
+        return (.needs, created.id)
     }
 
     func mappedReconciliationCategory(for plaidCategory: String?) -> (section: BudgetSection, categoryId: UUID) {

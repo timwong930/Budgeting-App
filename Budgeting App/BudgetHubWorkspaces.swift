@@ -23,7 +23,7 @@ struct BudgetActivityWorkspaceView: View {
     private var monthExpenses: [Expense] {
         guard let monthInterval else { return [] }
         return budget.expenses
-            .filter { monthInterval.contains($0.date) && !budget.isCreditCardPayment($0) }
+            .filter { monthInterval.contains($0.date) && !budget.isExcludedFromSpending($0) }
             .sorted { $0.date > $1.date }
     }
 
@@ -1619,7 +1619,7 @@ struct BudgetReportsWorkspaceView: View {
 
     private var expenses: [Expense] {
         guard let interval else { return [] }
-        return budget.expenses.filter { interval.contains($0.date) && !budget.isCreditCardPayment($0) }
+        return budget.expenses.filter { interval.contains($0.date) && !budget.isExcludedFromSpending($0) }
     }
     private var incomes: [IncomeEntry] {
         guard let interval else { return [] }
@@ -1769,7 +1769,7 @@ private enum BudgetReportData {
 
     static func expenses(budget: BudgetModel, month: Date) -> [Expense] {
         guard let interval = Calendar.current.dateInterval(of: .month, for: month) else { return [] }
-        return budget.expenses.filter { interval.contains($0.date) && !budget.isCreditCardPayment($0) }
+        return budget.expenses.filter { interval.contains($0.date) && !budget.isExcludedFromSpending($0) }
     }
 
     static func incomes(budget: BudgetModel, month: Date) -> [IncomeEntry] {

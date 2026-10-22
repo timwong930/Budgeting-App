@@ -12,6 +12,9 @@ struct PlaidSettingsView: View {
     @State private var errorMessage: String?
     @State private var lastResult: PlaidSyncResult?
     @State private var isTransferReviewExpanded = false
+    @State private var recentlyDismissedReviews: [PlaidReviewItem] = []
+    @State private var matchedTransferToUndo: UUID?
+    @State private var showingMatchUndoConfirmation = false
 
     private var client: PlaidAPIClient {
         PlaidAPIClient(configuration: PlaidBackendConfiguration(backendURL: backendURL))
@@ -99,6 +102,15 @@ struct PlaidSettingsView: View {
                                     Text("Last sync \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if Date().timeIntervalSince(lastSyncedAt) > 24 * 60 * 60 {
+                                        Label("Last sync was over 24 hours ago. Balances may be out of date.", systemImage: "exclamationmark.triangle")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                } else {
+                                    Label("No successful sync time available. Balances may be out of date.", systemImage: "clock")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 if let errorMessage = connection.errorMessage {
                                     Text(errorMessage)
@@ -116,6 +128,20 @@ struct PlaidSettingsView: View {
                 }
 
                 Section("Review Queue") {
+                    if !recentlyDismissedReviews.isEmpty {
+                        Button {
+                            for item in recentlyDismissedReviews {
+                                if !budget.plaidReviewItems.contains(where: { $0.sourceId == item.sourceId }) {
+                                    budget.plaidReviewItems.append(item)
+                                }
+                            }
+                            recentlyDismissedReviews.removeAll()
+                            budget.saveNow()
+                        } label: {
+                            Label("Undo Review Dismissal", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+
                     if budget.plaidReviewItems.isEmpty {
                         Text("No Plaid imports need review.")
                             .foregroundStyle(.secondary)
@@ -165,7 +191,10 @@ struct PlaidSettingsView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
-                                    if leg.signedAmount > 0 {
+                                    if leg.signedAmount > 0 &&
+                                        budget.financialAccounts.contains(where: {
+                                            $0.id == leg.accountId && $0.kind == .depository
+                                        }) {
                                         Button {
                                             if budget.keepPlaidWithdrawalAsExpense(sourceId: item.sourceId) {
                                                 statusMessage = "Kept as withdrawal. This choice will survive future Plaid syncs."
@@ -179,29 +208,30 @@ struct PlaidSettingsView: View {
                                         .disabled(isWorking)
                                     }
                                 }
-                                Text("To dismiss this review without changing classification, swipe left.")
+                                Text("Swiping to dismiss removes only this reminder, not the transaction. A future sync may flag it again.")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
                             .padding(.vertical, 6)
                         }
                         .onDelete { offsets in
+                            recentlyDismissedReviews = offsets.map { budget.plaidReviewItems[$0] }
                             budget.plaidReviewItems.remove(atOffsets: offsets)
                             budget.saveNow()
                         }
                     }
                 }
 
-                Section("Bank Transfer Review") {
-                    Toggle("Review possible bank transfers", isOn: $isTransferReviewExpanded)
-                    Text("Matches here are suggestions only. Each requires confirmation of a transaction on both connected bank accounts.")
+                Section("Transfer & Card Payment Review") {
+                    Toggle("Find matching transactions", isOn: $isTransferReviewExpanded)
+                    Text("Only real movements from your connected bank or credit-card accounts can be linked. Matching is never based on amount alone.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     if isTransferReviewExpanded {
                         let suggestions = budget.plaidPotentialTransferReviews()
                         if suggestions.isEmpty {
-                            Text("No matching bank transactions found to review.")
+                            Text("No eligible bank or credit-card matches were found. Sync the relevant accounts and check their transaction ledgers.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -228,10 +258,15 @@ struct PlaidSettingsView: View {
                                         .buttonStyle(.bordered)
                                         .disabled(isWorking)
                                     }
-                                    if budget.plaidTransferReviewLeg(sourceId: source.id) != nil {
+                                    if source.signedAmount > 0 &&
+                                        budget.financialAccounts.contains(where: {
+                                            $0.id == source.accountId && $0.kind == .depository
+                                        }) {
                                         Button("Keep as Withdrawal / Expense") {
                                             if budget.keepPlaidWithdrawalAsExpense(sourceId: source.id) {
-                                                statusMessage = "Kept \(source.title) as an expense."
+                                                statusMessage = "Kept \(source.title) as a withdrawal."
+                                            } else {
+                                                errorMessage = "Could not classify this transaction. No changes were saved."
                                             }
                                         }
                                         .font(.caption)
@@ -244,6 +279,41 @@ struct PlaidSettingsView: View {
                     }
                 }
 
+                Section("Correct a Linked Transfer or Payment") {
+                    let linked = Array(budget.cashTransfers.filter {
+                        $0.note.hasPrefix("[PLAID_PAIR:")
+                    }.sorted { $0.date > $1.date }.prefix(50))
+                    if linked.isEmpty {
+                        Text("No linked bank or credit-card movements to review.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("If the wrong accounts were linked, undo the match. Both original transactions will return for review; balances reported by Plaid are not changed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(linked) { transfer in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(transfer.name).font(.subheadline.weight(.semibold))
+                                Text("\(transfer.fromAccountName) → \(transfer.toAccountName) · \(transfer.amount.formatted(.currency(code: "USD")))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if budget.canUndoPlaidTransferMatch(transferId: transfer.id) {
+                                    Button("Undo Incorrect Match", role: .destructive) {
+                                        matchedTransferToUndo = transfer.id
+                                        showingMatchUndoConfirmation = true
+                                    }
+                                    .font(.caption)
+                                    .disabled(isWorking)
+                                } else {
+                                    Text("Original transaction details unavailable; this match cannot be undone safely.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
                 Section("Production Checklist") {
                     Text("Plaid Dashboard must use Production or Limited Production, and the backend domain must be registered as the OAuth redirect URI.")
                         .font(.caption)
@@ -252,6 +322,23 @@ struct PlaidSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+            .confirmationDialog(
+                "Undo this account match?",
+                isPresented: $showingMatchUndoConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Undo Match", role: .destructive) {
+                    if let transferId = matchedTransferToUndo,
+                       budget.undoPlaidTransferMatch(transferId: transferId) {
+                        statusMessage = "Match undone. The original bank movements are ready for review."
+                    } else {
+                        errorMessage = "Could not restore both original transactions. No changes were made."
+                    }
+                    matchedTransferToUndo = nil
+                }
+            } message: {
+                Text("The original bank-side transactions will be separated. The rejected pairing will not be recreated automatically.")
             }
             .navigationTitle("Plaid Sync")
             .navigationBarTitleDisplayMode(.inline)

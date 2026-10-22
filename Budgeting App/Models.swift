@@ -77,6 +77,13 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var note: String
     var creditCardPaymentTarget: String?
     var creditCardPaymentTargetId: UUID?
+    /// Explicit user classification; this does not create an unobserved
+    /// credit in the destination account. Actual receiving side needs Plaid evidence.
+    var transferDestinationAccountId: UUID?
+    var transferDestinationAccountName: String?
+    /// Allows a user to classify an observed outgoing transaction as their
+    /// own transfer even if the destination is not connected to Plaid.
+    var userClassifiedTransfer: Bool?
     var plaidMetadata: PlaidSourceMetadata?
 
     init(
@@ -91,6 +98,9 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         note: String = "",
         creditCardPaymentTarget: String? = nil,
         creditCardPaymentTargetId: UUID? = nil,
+        transferDestinationAccountId: UUID? = nil,
+        transferDestinationAccountName: String? = nil,
+        userClassifiedTransfer: Bool? = nil,
         plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
@@ -104,6 +114,9 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.note = note
         self.creditCardPaymentTarget = creditCardPaymentTarget
         self.creditCardPaymentTargetId = creditCardPaymentTargetId
+        self.transferDestinationAccountId = transferDestinationAccountId
+        self.transferDestinationAccountName = transferDestinationAccountName
+        self.userClassifiedTransfer = userClassifiedTransfer
         self.plaidMetadata = plaidMetadata
     }
 
@@ -119,6 +132,9 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case note
         case creditCardPaymentTarget
         case creditCardPaymentTargetId
+        case transferDestinationAccountId
+        case transferDestinationAccountName
+        case userClassifiedTransfer
         case plaidMetadata
     }
 
@@ -135,6 +151,9 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
         creditCardPaymentTarget = try container.decodeIfPresent(String.self, forKey: .creditCardPaymentTarget)
         creditCardPaymentTargetId = try container.decodeIfPresent(UUID.self, forKey: .creditCardPaymentTargetId)
+        transferDestinationAccountId = try container.decodeIfPresent(UUID.self, forKey: .transferDestinationAccountId)
+        transferDestinationAccountName = try container.decodeIfPresent(String.self, forKey: .transferDestinationAccountName)
+        userClassifiedTransfer = try container.decodeIfPresent(Bool.self, forKey: .userClassifiedTransfer)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
         if creditCardPaymentTarget == nil {
             creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
@@ -319,6 +338,10 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
     var fromAccountId: UUID?
     var toAccountId: UUID?
     var note: String
+    // Exact original Plaid legs, if known, for safe reclassification and
+    // matching across separate Plaid sync deliveries. Legacy rows decode nil.
+    var plaidSourceTransactions: [PlaidSyncedTransaction]? = nil
+    var plaidRejectedCounterpartIds: [String]? = nil
 
     init(
         id: UUID = UUID(),
@@ -329,7 +352,9 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
         toAccountName: String,
         fromAccountId: UUID? = nil,
         toAccountId: UUID? = nil,
-        note: String = ""
+        note: String = "",
+        plaidSourceTransactions: [PlaidSyncedTransaction]? = nil,
+        plaidRejectedCounterpartIds: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -340,6 +365,8 @@ struct CashTransfer: Identifiable, Codable, Sendable, Equatable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.note = note
+        self.plaidSourceTransactions = plaidSourceTransactions
+        self.plaidRejectedCounterpartIds = plaidRejectedCounterpartIds
     }
 }
 
@@ -2521,9 +2548,22 @@ class BudgetModel: ObservableObject {
         guard let index = expenses.firstIndex(where: { $0.id == updatedExpense.id }) else { return }
         let previousExpense = expenses[index]
         applyBalanceImpact(for: previousExpense, multiplier: -1)
-        let resolved = resolvingAccountReferences(for: updatedExpense)
+        var resolved = resolvingAccountReferences(for: updatedExpense)
+        // Edits to Plaid-synced expenses must retain their source transaction
+        // identity; otherwise the next sync imports the same bank movement again.
+        if resolved.plaidMetadata == nil {
+            resolved.plaidMetadata = previousExpense.plaidMetadata
+        }
+        if resolved.paymentAccountId == nil &&
+           normalizedAccountName(resolved.paymentAccount) == normalizedAccountName(previousExpense.paymentAccount) {
+            resolved.paymentAccountId = previousExpense.paymentAccountId
+        }
         expenses[index] = resolved
-        rememberPersistentCategoryRule(for: resolved, aliases: [previousExpense.name])
+        // Classifying an individual withdrawal as a transfer or card payment
+        // must not train a merchant-wide spending category rule.
+        if !isExcludedFromSpending(resolved) {
+            rememberPersistentCategoryRule(for: resolved, aliases: [previousExpense.name])
+        }
         applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
@@ -2592,6 +2632,16 @@ class BudgetModel: ObservableObject {
 
     func isCreditCardPayment(_ expense: Expense) -> Bool {
         creditCardPaymentTarget(for: expense) != nil
+    }
+
+    func isUserClassifiedTransfer(_ expense: Expense) -> Bool {
+        expense.userClassifiedTransfer == true || expense.transferDestinationAccountId != nil
+    }
+
+    /// Account movements are not new consumption, even when the matching
+    /// destination transaction has not yet reached us from Plaid.
+    func isExcludedFromSpending(_ expense: Expense) -> Bool {
+        isCreditCardPayment(expense) || isUserClassifiedTransfer(expense)
     }
 
     func creditCardPaymentTarget(for expense: Expense) -> String? {
@@ -2747,7 +2797,7 @@ class BudgetModel: ObservableObject {
         var wantsTotals: [UUID: Double] = [:]
 
         for expense in expenses {
-            guard !isCreditCardPayment(expense) else { continue }
+            guard !isExcludedFromSpending(expense) else { continue }
             switch expense.section {
             case .needs:
                 needsTotals[expense.categoryId, default: 0] += expense.amount

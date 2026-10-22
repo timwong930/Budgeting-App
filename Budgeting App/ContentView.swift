@@ -2603,7 +2603,7 @@ struct ContentView: View {
     }
 
     private var monthlySpendingExpenses: [Expense] {
-        monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
+        monthlyExpenses.filter { !budget.isExcludedFromSpending($0) }
     }
 
     private var trendRangeStart: Date? {
@@ -2717,7 +2717,7 @@ struct ContentView: View {
         monthlyExpenses = budget.expenses.filter { interval.contains($0.date) }
         monthlyIncomes = budget.incomes.filter { interval.contains($0.date) }
         monthlySavingsEntries = budget.savingsEntries.filter { interval.contains($0.date) }
-        let spendingExpenses = monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
+        let spendingExpenses = monthlyExpenses.filter { !budget.isExcludedFromSpending($0) }
         totalMonthlySpent = spendingExpenses.reduce(0) { $0 + $1.amount }
         totalMonthlyIncomeLogged = monthlyIncomes.reduce(0) { $0 + $1.amount }
 
@@ -3119,7 +3119,7 @@ struct ContentView: View {
     private var calendarVisibleOutflow: Double {
         guard calendarShowExpenses else { return 0 }
         let oneTimeExpenses = budget.expenses
-            .filter { isInVisibleCalendarMonth($0.date) && !budget.isCreditCardPayment($0) }
+            .filter { isInVisibleCalendarMonth($0.date) && !budget.isExcludedFromSpending($0) }
             .reduce(0) { $0 + $1.amount }
         let recurringExpenses = visibleCalendarMonthDays
             .flatMap(recurringOccurrences)
@@ -3741,12 +3741,19 @@ struct ContentView: View {
             LogTransactionItem(
                 id: expense.id,
                 title: expense.name,
-                subtitle: budget.categoryName(for: expense),
+                subtitle: budget.isUserClassifiedTransfer(expense) ?
+                    "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
+                    (budget.isCreditCardPayment(expense) ?
+                        "Credit card payment to \(budget.creditCardPaymentTarget(for: expense) ?? "card")" :
+                        budget.categoryName(for: expense)),
                 amount: expense.amount,
                 date: expense.date,
                 isInflow: false,
-                iconName: iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount),
-                tint: colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
+                iconName: budget.isUserClassifiedTransfer(expense) ? "arrow.left.arrow.right" :
+                    (budget.isCreditCardPayment(expense) ? "creditcard" :
+                     iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount)),
+                tint: budget.isExcludedFromSpending(expense) ? .teal :
+                    colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
                 kind: .expense(expense)
             )
         }
@@ -9405,7 +9412,10 @@ struct ExpenseRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(expense.name)
                     .font(.subheadline)
-                Text(categoryName)
+                Text(expense.userClassifiedTransfer == true || expense.transferDestinationAccountId != nil ?
+                    "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
+                    ((expense.creditCardPaymentTargetId != nil || expense.creditCardPaymentTarget != nil) ?
+                        "Credit card payment" : categoryName))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -10490,6 +10500,20 @@ struct EditExpenseView: View {
     @State private var note: String
     @State private var isCreditCardPayment: Bool
     @State private var targetCreditAccountName: String
+    @State private var isTransfer: Bool
+    @State private var destinationAccountId: UUID?
+
+    private var destinationOptions: [FinancialAccount] {
+        let source = expense.paymentAccountId ??
+            budget.financialAccounts.first(where: {
+                $0.name.caseInsensitiveCompare(paymentAccount) == .orderedSame &&
+                $0.kind == .depository
+            })?.id
+        return budget.financialAccounts.filter {
+            $0.isActive && ($0.kind == .depository || $0.kind == .investment) &&
+            $0.id != source
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
@@ -10540,6 +10564,8 @@ struct EditExpenseView: View {
         let target = budget.creditCardPaymentTarget(for: expense) ?? ""
         _isCreditCardPayment = State(initialValue: !target.isEmpty)
         _targetCreditAccountName = State(initialValue: target)
+        _isTransfer = State(initialValue: budget.isUserClassifiedTransfer(expense))
+        _destinationAccountId = State(initialValue: expense.transferDestinationAccountId)
     }
 
     private var entryTitle: String {
@@ -10555,12 +10581,31 @@ struct EditExpenseView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Picker("Section", selection: $section) {
-                        ForEach(BudgetSection.allCases) { item in
-                            Text(item.title).tag(item)
+                    Toggle("Bank / Investment Transfer", isOn: $isTransfer)
+                    if isTransfer {
+                        Picker("Transfer to", selection: $destinationAccountId) {
+                            Text("External / not connected").tag(Optional<UUID>.none)
+                            ForEach(destinationOptions) { account in
+                                Text(account.name).tag(Optional(account.id))
+                            }
                         }
+                        if destinationOptions.isEmpty {
+                            Text("No other account is connected. You can classify this as a transfer to an external account you own without creating a deposit.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("This excludes the withdrawal from your spending budget. The receiving balance only updates when that account actually syncs; no deposit is invented.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                    if !isTransfer {
+                        Picker("Section", selection: $section) {
+                            ForEach(BudgetSection.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
+                    }
                     if isCreditCardPayment {
                         if creditCardOptions.isEmpty {
                             Text("Add a credit card in Credit Accounts first.")
@@ -10573,7 +10618,7 @@ struct EditExpenseView: View {
                                 }
                             }
                         }
-                    } else {
+                    } else if !isTransfer {
                         Toggle("Other category", isOn: $useCustomCategory)
 
                         if useCustomCategory {
@@ -10590,11 +10635,17 @@ struct EditExpenseView: View {
                             }
                         }
                     }
-                    Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
+                    Picker(isTransfer ? "Transfer from" : (isCreditCardPayment ? "Pay from" : "Paid with"), selection: $paymentAccount) {
                         Text("None").tag("")
-                        ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
+                        ForEach((isCreditCardPayment || isTransfer) ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
                             Text(accountName).tag(accountName)
                         }
+                    }
+                    .disabled(expense.plaidMetadata != nil)
+                    if expense.plaidMetadata != nil {
+                        Text("The originating account is controlled by Plaid. You can change how this transaction is classified, but not which bank reported it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     TextField("Note", text: $note, axis: .vertical)
                 } header: {
@@ -10615,8 +10666,22 @@ struct EditExpenseView: View {
                 }
             }
             .onChange(of: isCreditCardPayment) { _, newValue in
-                if newValue && targetCreditAccountName.isEmpty {
-                    targetCreditAccountName = creditCardOptions.first ?? ""
+                if newValue {
+                    isTransfer = false
+                    if targetCreditAccountName.isEmpty {
+                        targetCreditAccountName = creditCardOptions.first ?? ""
+                    }
+                }
+            }
+            .onChange(of: isTransfer) { _, newValue in
+                if newValue {
+                    isCreditCardPayment = false
+                }
+            }
+            .onChange(of: paymentAccount) { _, _ in
+                if let destinationAccountId,
+                   !destinationOptions.contains(where: { $0.id == destinationAccountId }) {
+                    self.destinationAccountId = nil
                 }
             }
             .toolbar {
@@ -10626,8 +10691,13 @@ struct EditExpenseView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let resolvedCategoryId: UUID?
-                        if isCreditCardPayment {
-                            guard !targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        if isTransfer {
+                            guard !paymentAccount.isEmpty,
+                                  destinationAccountId == nil ||
+                                  destinationOptions.contains(where: { $0.id == destinationAccountId }) else { return }
+                            resolvedCategoryId = expense.categoryId
+                        } else if isCreditCardPayment {
+                            guard creditCardOptions.contains(targetCreditAccountName), !paymentAccount.isEmpty else { return }
                             resolvedCategoryId = creditCardPaymentCategoryId()
                         } else if useCustomCategory {
                             let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -10644,6 +10714,15 @@ struct EditExpenseView: View {
                         }
 
                         guard let categoryId = resolvedCategoryId else { return }
+                        var savedMetadata = expense.plaidMetadata
+                        if savedMetadata != nil {
+                            if isTransfer || isCreditCardPayment {
+                                savedMetadata?.userConfirmedNotTransfer = false
+                            } else if budget.isUserClassifiedTransfer(expense) ||
+                                      budget.isCreditCardPayment(expense) {
+                                savedMetadata?.userConfirmedNotTransfer = true
+                            }
+                        }
                         budget.updateExpense(
                             Expense(
                                 id: expense.id,
@@ -10653,14 +10732,30 @@ struct EditExpenseView: View {
                                 section: isCreditCardPayment ? .needs : section,
                                 categoryId: categoryId,
                                 paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
+                                paymentAccountId: expense.paymentAccountId,
                                 note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+                                creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName : nil,
+                                creditCardPaymentTargetId: isCreditCardPayment ?
+                                    budget.financialAccounts.first(where: {
+                                        $0.kind == .credit && $0.name == targetCreditAccountName
+                                    })?.id : nil,
+                                transferDestinationAccountId: isTransfer ? destinationAccountId : nil,
+                                transferDestinationAccountName: isTransfer ?
+                                    (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ??
+                                     "External / not connected") : nil,
+                                userClassifiedTransfer: isTransfer ? true : nil,
+                                plaidMetadata: savedMetadata
                             )
                         )
                         Haptics.success()
                         dismiss()
                     }
-                    .disabled(name.isEmpty || amount <= 0 || (!isCreditCardPayment && !useCustomCategory && categoryId == nil) || (isCreditCardPayment && targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || amount <= 0 ||
+                        (isTransfer && (paymentAccount.isEmpty ||
+                            (destinationAccountId != nil &&
+                             !destinationOptions.contains(where: { $0.id == destinationAccountId })))) ||
+                        (isCreditCardPayment && (!creditCardOptions.contains(targetCreditAccountName) || paymentAccount.isEmpty)) ||
+                        (!isTransfer && !isCreditCardPayment && !useCustomCategory && categoryId == nil))
                 }
             }
         }

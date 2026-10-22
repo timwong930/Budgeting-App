@@ -58,14 +58,20 @@ extension BudgetModel {
 
         for expense in expenses where ledgerExpenseUsesAccount(expense, accountId: accountId, normalizedName: normalizedName) {
             let isCardPayment = creditCardPaymentTarget(for: expense) != nil
+            let isTransfer = isUserClassifiedTransfer(expense)
+            let destination = expense.transferDestinationAccountName ??
+                financialAccounts.first(where: { $0.id == expense.transferDestinationAccountId })?.name ??
+                "selected account"
             entries.append(
                 AccountLedgerEntry(
                     id: "expense|\(expense.id.uuidString)",
                     date: expense.date,
                     title: expense.name,
-                    detail: isCardPayment ? "Credit card payment" : ledgerExpenseDetail(expense),
+                    detail: isTransfer ? "Transfer to \(destination) · awaiting account-side confirmation" :
+                        (isCardPayment ? "Credit card payment · awaiting account-side confirmation" :
+                            ledgerExpenseDetail(expense)),
                     signedAmount: -abs(expense.amount),
-                    kind: isCardPayment ? .payment : .expense,
+                    kind: isTransfer ? .transferOut : (isCardPayment ? .payment : .expense),
                     isPending: ledgerIsPending(expense.plaidMetadata, note: expense.note),
                     sourceLabel: expense.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: expense.plaidMetadata?.status,
@@ -505,6 +511,135 @@ struct CreditAccountLedgerView: View {
     }
 }
 
+
+private struct PlaidLinkedTransferCorrectionView: View {
+    let transfer: CashTransfer
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingUndoConfirmation = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Linked Accounts") {
+                    LabeledContent("From", value: transfer.fromAccountName)
+                    LabeledContent("To", value: transfer.toAccountName)
+                    LabeledContent("Amount", value: transfer.amount.formatted(.currency(code: "USD")))
+                    Text("This match connects two observed Plaid transactions. Undoing it will restore each original movement to review, without altering reported bank balances.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Correct an Incorrect Match") {
+                    if budget.canUndoPlaidTransferMatch(transferId: transfer.id) {
+                        Button("Undo Incorrect Match", role: .destructive) {
+                            showingUndoConfirmation = true
+                        }
+                    } else {
+                        Text("Original transaction details were not saved for this older match. Reimport complete history before attempting to undo; this screen will not invent missing transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).foregroundStyle(.red).font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Review Linked Movement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .confirmationDialog(
+                "Undo this linked transfer?",
+                isPresented: $showingUndoConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Undo Match", role: .destructive) {
+                    if budget.undoPlaidTransferMatch(transferId: transfer.id) {
+                        dismiss()
+                    } else {
+                        errorMessage = "Could not restore the original transactions. No changes were saved."
+                    }
+                }
+            } message: {
+                Text("Both bank-side transactions will return as separate review items. The incorrect pair will not be suggested again automatically.")
+            }
+        }
+    }
+}
+
+private struct PlaidUnpairedMovementView: View {
+    let transfer: CashTransfer
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var statusMessage: String?
+
+    private var sourceId: String? {
+        guard transfer.note.hasPrefix("[PLAID_SINGLE:"),
+              let end = transfer.note.firstIndex(of: "]") else { return nil }
+        let start = transfer.note.index(transfer.note.startIndex, offsetBy: "[PLAID_SINGLE:".count)
+        return String(transfer.note[start..<end])
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Awaiting Verification") {
+                    LabeledContent("Amount", value: transfer.amount.formatted(.currency(code: "USD")))
+                    Text("No other connected account has been confirmed for this movement. Select an observed matching bank or credit-card transaction, or classify a withdrawal separately.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let sourceId {
+                    Section("Possible Matching Transactions") {
+                        let candidates = budget.plaidTransferReviewCandidates(sourceId: sourceId)
+                        if candidates.isEmpty {
+                            Text("No eligible matching transaction is available yet. Synchronize both accounts and review again.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(candidates) { item in
+                                Button("Match with \(item.accountName) · \(item.date.formatted(date: .abbreviated, time: .omitted))") {
+                                    if budget.confirmPlaidTransferReview(sourceId: sourceId, counterpartId: item.id) {
+                                        dismiss()
+                                    } else {
+                                        statusMessage = "This candidate can no longer be linked. Refresh the accounts and try again."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let leg = budget.plaidTransferReviewLeg(sourceId: sourceId),
+                       leg.signedAmount > 0,
+                       budget.financialAccounts.contains(where: {
+                           $0.id == leg.accountId && $0.kind == .depository
+                       }) {
+                        Section("Separate Withdrawal") {
+                            Button("Keep as Withdrawal / Expense") {
+                                if budget.keepPlaidWithdrawalAsExpense(sourceId: sourceId) {
+                                    dismiss()
+                                } else {
+                                    statusMessage = "Could not reclassify this withdrawal. No changes were saved."
+                                }
+                            }
+                        }
+                    }
+                }
+                if let statusMessage {
+                    Text(statusMessage).font(.caption).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Review Transaction")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
 private struct AccountLedgerTransactionEditor: View {
     let entry: AccountLedgerEntry
     @ObservedObject var budget: BudgetModel
@@ -534,11 +669,17 @@ private struct AccountLedgerTransactionEditor: View {
                 }
             case "transfer", "card-transfer":
                 if let transfer = budget.cashTransfers.first(where: { $0.id == sourceId }) {
-                    CashTransferEditorView(
-                        budget: budget,
-                        selectedDate: transfer.date,
-                        existingTransfer: transfer
-                    )
+                    if transfer.note.hasPrefix("[PLAID_PAIR:") {
+                        PlaidLinkedTransferCorrectionView(transfer: transfer, budget: budget)
+                    } else if transfer.note.hasPrefix("[PLAID_SINGLE:") {
+                        PlaidUnpairedMovementView(transfer: transfer, budget: budget)
+                    } else {
+                        CashTransferEditorView(
+                            budget: budget,
+                            selectedDate: transfer.date,
+                            existingTransfer: transfer
+                        )
+                    }
                 } else {
                     missingTransaction
                 }

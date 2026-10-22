@@ -22,6 +22,10 @@ struct PlaidSourceMetadata: Codable, Sendable, Equatable {
     // Persisted user decision: a reviewed Plaid withdrawal must not be
     // converted back into an inferred transfer on the next sync.
     var userConfirmedNotTransfer: Bool? = nil
+    // Original classification and manual pairing rejections are persisted so
+    // incremental sync and undo cannot silently re-create a rejected match.
+    var originalCategory: String? = nil
+    var rejectedCounterpartIds: [String]? = nil
 
     init(
         itemId: String,
