@@ -724,6 +724,18 @@ struct CuanMarketModelsTests {
                "Undoing dismissal restores a single original reminder without duplicates")
         assert(budget.expenses == [expense] && budget.cashTransfers == [marker],
                "Review reminder restore must leave all financial rows unchanged")
+
+        // An old dismissed reminder must not reappear if another review action
+        // has since linked the original Plaid transaction to a real counterpart.
+        budget.plaidReviewItems.removeAll()
+        budget.cashTransfers.append(CashTransfer(
+            name: "Verified account transfer", amount: 42.19,
+            fromAccountName: "Example Checking", toAccountName: "Example Savings",
+            note: "[PLAID_PAIR:synthetic-credit-1|synthetic-review-debit-1] [USER_CONFIRMED]"
+        ))
+        budget.restoreDismissedPlaidReviewReminders([review])
+        assert(budget.plaidReviewItems.isEmpty,
+               "Undo dismissal cannot resurrect a review for a transaction already linked to a confirmed pair")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
