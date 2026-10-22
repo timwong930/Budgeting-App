@@ -10610,10 +10610,14 @@ struct EditIncomeView: View {
         updated.bankName = income.plaidMetadata == nil ?
             bankName.trimmingCharacters(in: .whitespacesAndNewlines) : income.bankName
         updated.reviewCorrection = correction
+        updated.correctionBeforeDuplicate = correction == .duplicate ?
+            (income.reviewCorrection == .duplicate ? income.correctionBeforeDuplicate : income.reviewCorrection) : nil
         updated.bucketFromName = correction == .bucketTransfer ?
-            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? income.bucketFromName : nil)
         updated.bucketToName = correction == .bucketTransfer ?
-            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? income.bucketToName : nil)
         if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
         budget.updateIncomeEntry(updated)
         Haptics.success()
@@ -11087,18 +11091,27 @@ struct EditExpenseView: View {
         updated.paymentAccount = expense.plaidMetadata != nil ?
             expense.paymentAccount : paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.reviewCorrection = correction
+        updated.correctionBeforeDuplicate = correction == .duplicate ?
+            (expense.reviewCorrection == .duplicate ? expense.correctionBeforeDuplicate : expense.reviewCorrection) : nil
         updated.bucketFromName = correction == .bucketTransfer ?
-            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? expense.bucketFromName : nil)
         updated.bucketToName = correction == .bucketTransfer ?
-            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? expense.bucketToName : nil)
         if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
-        updated.userClassifiedTransfer = correction == nil && isTransfer ? true : nil
-        updated.transferDestinationAccountId = correction == nil && isTransfer ? destinationAccountId : nil
-        updated.transferDestinationAccountName = correction == nil && isTransfer ?
-            (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ?? "External / not connected") : nil
-        updated.creditCardPaymentTargetId = correction == nil && isCreditCardPayment ? targetCreditAccountId : nil
-        updated.creditCardPaymentTarget = correction == nil && isCreditCardPayment ?
-            creditCardOptions.first(where: { stableCreditAccountId($0) == targetCreditAccountId })?.name : nil
+        updated.userClassifiedTransfer = correction == .duplicate ? expense.userClassifiedTransfer :
+            (correction == nil && isTransfer ? true : nil)
+        updated.transferDestinationAccountId = correction == .duplicate ? expense.transferDestinationAccountId :
+            (correction == nil && isTransfer ? destinationAccountId : nil)
+        updated.transferDestinationAccountName = correction == .duplicate ? expense.transferDestinationAccountName :
+            (correction == nil && isTransfer ?
+                (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ?? "External / not connected") : nil)
+        updated.creditCardPaymentTargetId = correction == .duplicate ? expense.creditCardPaymentTargetId :
+            (correction == nil && isCreditCardPayment ? targetCreditAccountId : nil)
+        updated.creditCardPaymentTarget = correction == .duplicate ? expense.creditCardPaymentTarget :
+            (correction == nil && isCreditCardPayment ?
+                creditCardOptions.first(where: { stableCreditAccountId($0) == targetCreditAccountId })?.name : nil)
         if updated.plaidMetadata != nil {
             if correction != nil || isTransfer || isCreditCardPayment {
                 updated.plaidMetadata?.userConfirmedNotTransfer = false
