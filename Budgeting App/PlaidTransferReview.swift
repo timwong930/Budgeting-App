@@ -176,6 +176,12 @@ extension BudgetModel {
         let originals = ids.compactMap { plaidObservedTransaction(sourceId: $0) }
         guard originals.count == 2 else { return false }
         let sourceIds = Set(ids)
+        let annotatedExpense = expenses.first(where: {
+            sourceIds.contains($0.plaidMetadata?.transactionId ?? "") &&
+                (isUserClassifiedTransfer($0) || isCreditCardPayment($0))
+        })
+        let annotatedName = annotatedExpense?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let annotatedNote = annotatedExpense?.note.trimmingCharacters(in: .whitespacesAndNewlines)
         cashTransfers.removeAll { transfer in
             sourceIds.contains { transfer.note.hasPrefix("[PLAID_SINGLE:\($0)]") }
         }
@@ -183,15 +189,18 @@ extension BudgetModel {
         incomes.removeAll { sourceIds.contains($0.plaidMetadata?.transactionId ?? "") }
         cashTransfers.append(
             CashTransfer(
-                name: financialAccounts.contains(where: { $0.id == inflow.accountId && $0.kind == .credit })
-                    ? "Reviewed credit card payment" : "Reviewed bank transfer",
+                name: (annotatedName?.isEmpty == false) ?
+                    (annotatedName ?? "Reviewed transfer") :
+                    (financialAccounts.contains(where: { $0.id == inflow.accountId && $0.kind == .credit })
+                        ? "Reviewed credit card payment" : "Reviewed bank transfer"),
                 amount: abs(outflow.signedAmount),
                 date: max(outflow.date, inflow.date),
                 fromAccountName: outflow.accountName,
                 toAccountName: inflow.accountName,
                 fromAccountId: outflow.accountId,
                 toAccountId: inflow.accountId,
-                note: "\(marker) [USER_CONFIRMED] Linked after manual review",
+                note: "\(marker) [USER_CONFIRMED] Linked after manual review" +
+                    ((annotatedNote?.isEmpty == false) ? " · \(annotatedNote ?? "")" : ""),
                 plaidSourceTransactions: originals.count == 2 ? originals : nil
             )
         )
