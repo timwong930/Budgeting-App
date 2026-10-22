@@ -9428,10 +9428,12 @@ struct ExpenseRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(expense.name)
                     .font(.subheadline)
-                Text(expense.userClassifiedTransfer == true || expense.transferDestinationAccountId != nil ?
+                Text(expense.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" :
+                    (expense.userClassifiedTransfer == true || expense.transferDestinationAccountId != nil ?
                     "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
                     ((expense.creditCardPaymentTargetId != nil || expense.creditCardPaymentTarget != nil) ?
-                        "Credit card payment" : categoryName))
+                        "Credit card payment" : categoryName)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -9484,7 +9486,11 @@ struct IncomeRowView: View {
                 Text(income.date, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if !income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if income.reviewCorrection == .bucketTransfer {
+                    Text("Internal bucket transfer")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if !income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(income.bankName)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
