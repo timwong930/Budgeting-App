@@ -28,6 +28,7 @@ extension BudgetModel {
             )
         }
         if let expense = expenses.first(where: { $0.plaidMetadata?.transactionId == sourceId }),
+           expense.reviewCorrection == nil,
            let plaidAccountId = expense.plaidMetadata?.accountId,
            let account = financialAccounts.first(where: { $0.externalAccountId == plaidAccountId }) {
             return PlaidTransferReviewLeg(
@@ -40,6 +41,7 @@ extension BudgetModel {
             )
         }
         if let income = incomes.first(where: { $0.plaidMetadata?.transactionId == sourceId }),
+           income.reviewCorrection == nil,
            let plaidAccountId = income.plaidMetadata?.accountId,
            let account = financialAccounts.first(where: { $0.externalAccountId == plaidAccountId }) {
             return PlaidTransferReviewLeg(
