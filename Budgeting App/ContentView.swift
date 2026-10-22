@@ -3748,6 +3748,9 @@ struct ContentView: View {
     }
 
     private var logTransactionItems: [LogTransactionItem] {
+        let pairedBucketCreditIds = Set(monthlyExpenses.compactMap {
+            $0.reviewCorrection == .bucketTransfer ? $0.bucketCounterpartSourceId : nil
+        })
         let expenses = monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }.map { expense in
             LogTransactionItem(
                 id: expense.id,
@@ -3771,7 +3774,11 @@ struct ContentView: View {
                 kind: .expense(expense)
             )
         }
-        let incomes = monthlyIncomes.filter { !budget.isHiddenDuplicate($0) }.map { income in
+        let incomes = monthlyIncomes.filter { income in
+            !budget.isHiddenDuplicate(income) &&
+                !(income.reviewCorrection == .bucketTransfer &&
+                  pairedBucketCreditIds.contains(income.plaidMetadata?.transactionId ?? ""))
+        }.map { income in
             LogTransactionItem(
                 id: income.id,
                 title: income.name,
@@ -3853,10 +3860,10 @@ struct ContentView: View {
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text("\(item.isInflow ? "+" : "-")\(item.amount, format: .currency(code: "USD"))")
+                                    Text("\(item.subtitle.hasPrefix("Internal bucket transfer") ? "↔" : (item.isInflow ? "+" : "-"))\(item.amount, format: .currency(code: "USD"))")
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
-                                        .foregroundStyle(item.isInflow ? .green : .primary)
+                                        .foregroundStyle(item.subtitle.hasPrefix("Internal bucket transfer") ? .teal : (item.isInflow ? .green : .primary))
                                     Text(item.date, style: .date)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
