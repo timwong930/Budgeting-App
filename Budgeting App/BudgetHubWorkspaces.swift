@@ -76,6 +76,40 @@ struct BudgetActivityWorkspaceView: View {
             activityHero
             quickActions
 
+            if !budget.plaidReviewItems.isEmpty {
+                NavigationLink {
+                    BudgetFinancialReviewView(
+                        budget: budget,
+                        onEditExpense: onEditExpense,
+                        onEditIncome: onEditIncome
+                    )
+                } label: {
+                    GlassCard(padding: 12) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.shield")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                                .frame(width: 34, height: 34)
+                                .background(Color.orange.opacity(0.11), in: RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Review transactions")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("\(budget.plaidReviewItems.count) imported item\(budget.plaidReviewItems.count == 1 ? "" : "s") awaiting review")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(budget.plaidReviewItems.count) financial transactions need review")
+            }
+
             BudgetWorkspaceSectionHeader(
                 title: "Recent activity",
                 subtitle: transactionCount == 0 ? "Nothing logged yet" : "\(transactionCount) entries this month"
@@ -110,6 +144,23 @@ struct BudgetActivityWorkspaceView: View {
             )
 
             VStack(spacing: 8) {
+                NavigationLink {
+                    BudgetFinancialReviewView(
+                        budget: budget,
+                        onEditExpense: onEditExpense,
+                        onEditIncome: onEditIncome
+                    )
+                } label: {
+                    BudgetWorkspaceNavigationRow(
+                        title: "Review transactions",
+                        subtitle: "Fix imports, transfers, and card payments",
+                        systemImage: "checkmark.shield",
+                        tint: .orange,
+                        value: "\(budget.plaidReviewItems.count) to review"
+                    )
+                }
+                .buttonStyle(.plain)
+
                 NavigationLink {
                     BudgetActivityTransactionsView(
                         items: recentItems,
