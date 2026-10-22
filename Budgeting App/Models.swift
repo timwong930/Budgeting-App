@@ -65,6 +65,11 @@ struct Category: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+enum TransactionCorrection: String, Codable, Sendable, Equatable, CaseIterable {
+    case duplicate
+    case bucketTransfer
+}
+
 struct Expense: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
@@ -84,6 +89,11 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     /// Allows a user to classify an observed outgoing transaction as their
     /// own transfer even if the destination is not connected to Plaid.
     var userClassifiedTransfer: Bool?
+    /// Corrections are non-destructive: preserve the imported Plaid row and ID.
+    var reviewCorrection: TransactionCorrection?
+    var bucketFromName: String?
+    var bucketToName: String?
+    var bucketCounterpartSourceId: String?
     var plaidMetadata: PlaidSourceMetadata?
 
     init(
@@ -101,6 +111,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         transferDestinationAccountId: UUID? = nil,
         transferDestinationAccountName: String? = nil,
         userClassifiedTransfer: Bool? = nil,
+        reviewCorrection: TransactionCorrection? = nil,
+        bucketFromName: String? = nil,
+        bucketToName: String? = nil,
+        bucketCounterpartSourceId: String? = nil,
         plaidMetadata: PlaidSourceMetadata? = nil
     ) {
         self.id = id
@@ -117,6 +131,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.transferDestinationAccountId = transferDestinationAccountId
         self.transferDestinationAccountName = transferDestinationAccountName
         self.userClassifiedTransfer = userClassifiedTransfer
+        self.reviewCorrection = reviewCorrection
+        self.bucketFromName = bucketFromName
+        self.bucketToName = bucketToName
+        self.bucketCounterpartSourceId = bucketCounterpartSourceId
         self.plaidMetadata = plaidMetadata
     }
 
@@ -135,6 +153,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case transferDestinationAccountId
         case transferDestinationAccountName
         case userClassifiedTransfer
+        case reviewCorrection
+        case bucketFromName
+        case bucketToName
+        case bucketCounterpartSourceId
         case plaidMetadata
     }
 
@@ -154,6 +176,10 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         transferDestinationAccountId = try container.decodeIfPresent(UUID.self, forKey: .transferDestinationAccountId)
         transferDestinationAccountName = try container.decodeIfPresent(String.self, forKey: .transferDestinationAccountName)
         userClassifiedTransfer = try container.decodeIfPresent(Bool.self, forKey: .userClassifiedTransfer)
+        reviewCorrection = try container.decodeIfPresent(TransactionCorrection.self, forKey: .reviewCorrection)
+        bucketFromName = try container.decodeIfPresent(String.self, forKey: .bucketFromName)
+        bucketToName = try container.decodeIfPresent(String.self, forKey: .bucketToName)
+        bucketCounterpartSourceId = try container.decodeIfPresent(String.self, forKey: .bucketCounterpartSourceId)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
         if creditCardPaymentTarget == nil {
             creditCardPaymentTarget = Self.extractCreditCardTarget(from: &note)
@@ -412,15 +438,23 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
     var date: Date
     var bankName: String
     var bankAccountId: UUID?
+    var reviewCorrection: TransactionCorrection?
+    var bucketFromName: String?
+    var bucketToName: String?
+    var bucketCounterpartSourceId: String?
     var plaidMetadata: PlaidSourceMetadata?
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", bankAccountId: UUID? = nil, plaidMetadata: PlaidSourceMetadata? = nil) {
+    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", bankAccountId: UUID? = nil, reviewCorrection: TransactionCorrection? = nil, bucketFromName: String? = nil, bucketToName: String? = nil, bucketCounterpartSourceId: String? = nil, plaidMetadata: PlaidSourceMetadata? = nil) {
         self.id = id
         self.name = name
         self.amount = amount
         self.date = date
         self.bankName = bankName
         self.bankAccountId = bankAccountId
+        self.reviewCorrection = reviewCorrection
+        self.bucketFromName = bucketFromName
+        self.bucketToName = bucketToName
+        self.bucketCounterpartSourceId = bucketCounterpartSourceId
         self.plaidMetadata = plaidMetadata
     }
 
@@ -431,6 +465,10 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         case date
         case bankName
         case bankAccountId
+        case reviewCorrection
+        case bucketFromName
+        case bucketToName
+        case bucketCounterpartSourceId
         case plaidMetadata
     }
 
@@ -442,6 +480,10 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         date = try container.decode(Date.self, forKey: .date)
         bankName = try container.decodeIfPresent(String.self, forKey: .bankName) ?? ""
         bankAccountId = try container.decodeIfPresent(UUID.self, forKey: .bankAccountId)
+        reviewCorrection = try container.decodeIfPresent(TransactionCorrection.self, forKey: .reviewCorrection)
+        bucketFromName = try container.decodeIfPresent(String.self, forKey: .bucketFromName)
+        bucketToName = try container.decodeIfPresent(String.self, forKey: .bucketToName)
+        bucketCounterpartSourceId = try container.decodeIfPresent(String.self, forKey: .bucketCounterpartSourceId)
         plaidMetadata = try container.decodeIfPresent(PlaidSourceMetadata.self, forKey: .plaidMetadata)
     }
 
@@ -453,6 +495,10 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         try container.encode(date, forKey: .date)
         try container.encode(bankName, forKey: .bankName)
         try container.encodeIfPresent(bankAccountId, forKey: .bankAccountId)
+        try container.encodeIfPresent(reviewCorrection, forKey: .reviewCorrection)
+        try container.encodeIfPresent(bucketFromName, forKey: .bucketFromName)
+        try container.encodeIfPresent(bucketToName, forKey: .bucketToName)
+        try container.encodeIfPresent(bucketCounterpartSourceId, forKey: .bucketCounterpartSourceId)
         try container.encodeIfPresent(plaidMetadata, forKey: .plaidMetadata)
     }
 }
@@ -2527,6 +2573,11 @@ class BudgetModel: ObservableObject {
         let previousEntry = incomes[index]
         applyBalanceImpact(for: previousEntry, multiplier: -1)
         var resolved = updatedEntry
+        // A user edit must not detach the Plaid source ID and re-import income.
+        if resolved.plaidMetadata == nil { resolved.plaidMetadata = previousEntry.plaidMetadata }
+        if resolved.bankAccountId == nil && normalizedAccountName(resolved.bankName) == normalizedAccountName(previousEntry.bankName) {
+            resolved.bankAccountId = previousEntry.bankAccountId
+        }
         if resolved.bankAccountId == nil { resolved.bankAccountId = resolveFinancialAccountId(legacyName: resolved.bankName, allowedKinds: [.depository], metadata: resolved.plaidMetadata) }
         incomes[index] = resolved
         applyBalanceImpact(for: resolved, multiplier: 1)
@@ -2641,8 +2692,15 @@ class BudgetModel: ObservableObject {
     /// Account movements are not new consumption, even when the matching
     /// destination transaction has not yet reached us from Plaid.
     func isExcludedFromSpending(_ expense: Expense) -> Bool {
-        isCreditCardPayment(expense) || isUserClassifiedTransfer(expense)
+        expense.reviewCorrection != nil || isCreditCardPayment(expense) || isUserClassifiedTransfer(expense)
     }
+
+    func isExcludedFromIncome(_ income: IncomeEntry) -> Bool {
+        income.reviewCorrection != nil
+    }
+
+    func isHiddenDuplicate(_ expense: Expense) -> Bool { expense.reviewCorrection == .duplicate }
+    func isHiddenDuplicate(_ income: IncomeEntry) -> Bool { income.reviewCorrection == .duplicate }
 
     func creditCardPaymentTarget(for expense: Expense) -> String? {
         if let targetId = expense.creditCardPaymentTargetId,
@@ -2838,10 +2896,12 @@ class BudgetModel: ObservableObject {
     }
 
     private func applyBalanceImpact(for income: IncomeEntry, multiplier: Double) {
+        guard income.reviewCorrection == nil else { return }
         applyBankAccountDelta(accountId: income.bankAccountId, legacyName: income.bankName, delta: income.amount * multiplier)
     }
 
     private func applyBalanceImpact(for expense: Expense, multiplier: Double) {
+        guard expense.reviewCorrection == nil else { return }
         applyBankAccountDelta(accountId: expense.paymentAccountId, legacyName: expense.paymentAccount, delta: -expense.amount * multiplier)
     }
 
