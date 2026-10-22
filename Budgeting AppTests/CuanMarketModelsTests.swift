@@ -435,8 +435,17 @@ struct CuanMarketModelsTests {
         _ = budget.applyPlaidSyncReconciled(payload)
         assert(budget.cashTransfers.count == 1 && !budget.cashTransfers[0].note.hasPrefix("[PLAID_PAIR:"), "Generic ACH debit should not auto-link to a card payment without corroborating text")
         assert(budget.plaidTransferReviewCandidates(sourceId: "manual-ach-bank").contains(where: { $0.id == "manual-ach-card" }), "Manual review must offer real credit-card-side matching transactions")
+        if let cardId = budget.financialAccounts.first(where: { $0.externalAccountId == "manual-card" })?.id,
+           let imported = budget.expenses.first(where: { $0.plaidMetadata?.transactionId == bank.id }) {
+            var edited = imported
+            edited.creditCardPaymentTargetId = cardId
+            edited.creditCardPaymentTarget = "Rewards Card"
+            edited.note = "Synthetic payment annotation"
+            budget.updateExpense(edited)
+        }
         assert(budget.confirmPlaidTransferReview(sourceId: "manual-ach-bank", counterpartId: "manual-ach-card"), "User should be able to confirm a bank debit and credit card payment")
         assert(budget.cashTransfers.count == 1 && budget.canUndoPlaidTransferMatch(transferId: budget.cashTransfers[0].id), "Reviewed pair must retain both original Plaid transactions for undo")
+        assert(budget.cashTransfers[0].note.contains("Synthetic payment annotation"), "Linking a classified card payment must preserve the user's note")
 
         let pairId = budget.cashTransfers[0].id
         assert(budget.undoPlaidTransferMatch(transferId: pairId), "A wrong card payment match must be reversible")
