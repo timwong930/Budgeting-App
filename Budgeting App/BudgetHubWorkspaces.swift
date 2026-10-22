@@ -64,8 +64,14 @@ struct BudgetActivityWorkspaceView: View {
         let expenses = monthExpenses.map(BudgetActivityItem.expense)
         let income = monthIncome.map(BudgetActivityItem.income)
         let savings = monthSavings.map(BudgetActivityItem.savings)
+        // A confirmed same-account debit/credit is one internal allocation in
+        // Activity, though both original Plaid legs remain in stored history.
+        let pairedCreditIds = Set(monthBucketExpenses.compactMap(\.bucketCounterpartSourceId))
+        let unpairedBucketCredits = monthBucketIncome.filter {
+            !pairedCreditIds.contains($0.plaidMetadata?.transactionId ?? "")
+        }
         let bucketMovements = monthBucketExpenses.map(BudgetActivityItem.expense) +
-            monthBucketIncome.map(BudgetActivityItem.income)
+            unpairedBucketCredits.map(BudgetActivityItem.income)
         return (expenses + income + savings + bucketMovements).sorted { $0.date > $1.date }
     }
 
@@ -333,12 +339,21 @@ private enum BudgetActivityItem: Identifiable {
         }
     }
 
+    var isBucketMovement: Bool {
+        switch self {
+        case .expense(let value): return value.reviewCorrection == .bucketTransfer
+        case .income(let value): return value.reviewCorrection == .bucketTransfer
+        case .savings: return false
+        }
+    }
+
     var isInflow: Bool {
         if case .income = self { return true }
         return false
     }
 
     var systemImage: String {
+        if isBucketMovement { return "arrow.left.arrow.right" }
         switch self {
         case .expense: return "creditcard.fill"
         case .income: return "arrow.down.circle.fill"
@@ -347,6 +362,7 @@ private enum BudgetActivityItem: Identifiable {
     }
 
     var tint: Color {
+        if isBucketMovement { return .teal }
         switch self {
         case .expense: return .pink
         case .income: return .green
@@ -381,7 +397,7 @@ private struct BudgetActivityRow: View {
 
                 Spacer(minLength: 8)
 
-                Text("\(item.isInflow ? "+" : "-")\(item.amount.formatted(.currency(code: "USD")))")
+                Text("\(item.isBucketMovement ? "↔" : (item.isInflow ? "+" : "-"))\(item.amount.formatted(.currency(code: "USD")))")
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .foregroundStyle(item.isInflow ? Color.green : Color.primary)
                     .minimumScaleFactor(0.72)
