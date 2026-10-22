@@ -10553,6 +10553,10 @@ struct EditExpenseView: View {
     @State private var targetCreditAccountId: UUID?
     @State private var isTransfer: Bool
     @State private var destinationAccountId: UUID?
+    @State private var correction: TransactionCorrection?
+    @State private var bucketFrom: String
+    @State private var bucketTo: String
+    @State private var confirmDuplicate = false
     @State private var counterpartToConfirm: PlaidTransferReviewLeg?
     @State private var showingMatchConfirmation = false
     @State private var matchError: String?
@@ -10645,11 +10649,14 @@ struct EditExpenseView: View {
             })
         _isTransfer = State(initialValue: budget.isUserClassifiedTransfer(expense))
         _destinationAccountId = State(initialValue: expense.transferDestinationAccountId)
+        _correction = State(initialValue: expense.reviewCorrection)
+        _bucketFrom = State(initialValue: expense.bucketFromName ?? "")
+        _bucketTo = State(initialValue: expense.bucketToName ?? "")
     }
 
 
     private func confirmObservedCounterpart() {
-        guard let matched = counterpartToConfirm,
+        guard correction == nil, let matched = counterpartToConfirm,
               let sourceId = expense.plaidMetadata?.transactionId,
               matchingAccountMovements.contains(where: { $0.id == matched.id }),
               amount > 0, abs(amount - abs(matched.signedAmount)) < 0.01
@@ -10704,8 +10711,27 @@ struct EditExpenseView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Toggle("Bank / Investment Transfer", isOn: $isTransfer)
-                    if isTransfer {
+                    Picker("Classification", selection: $correction) {
+                        Text("Regular transaction").tag(Optional<TransactionCorrection>.none)
+                        Text("Duplicate · hide from totals").tag(Optional(TransactionCorrection.duplicate))
+                        Text("Internal bucket transfer").tag(Optional(TransactionCorrection.bucketTransfer))
+                    }
+                    if correction == .duplicate {
+                        Text("The extra transaction will be hidden from activity and spending but its original bank record will remain available to restore in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == .bucketTransfer {
+                        TextField("From bucket (optional)", text: $bucketFrom)
+                        TextField("To bucket (optional)", text: $bucketTo)
+                        Text("Moving money between buckets under this same account is not an expense. No second account or deposit is created.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == nil {
+                        Toggle("Bank / Investment Transfer", isOn: $isTransfer)
+                    }
+                    if correction == nil && isTransfer {
                         Picker("Transfer to", selection: $destinationAccountId) {
                             Text("External / not connected").tag(Optional<UUID>.none)
                             ForEach(destinationOptions) { account in
@@ -10721,7 +10747,7 @@ struct EditExpenseView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if !isTransfer {
+                    if correction == nil && !isTransfer {
                         Picker("Section", selection: $section) {
                             ForEach(BudgetSection.allCases) { item in
                                 Text(item.title).tag(item)
@@ -10729,7 +10755,7 @@ struct EditExpenseView: View {
                         }
                         Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
                     }
-                    if isCreditCardPayment {
+                    if correction == nil && isCreditCardPayment {
                         if creditCardOptions.isEmpty {
                             Text("Add a credit card in Credit Accounts first.")
                                 .font(.caption)
@@ -10742,7 +10768,7 @@ struct EditExpenseView: View {
                                 }
                             }
                         }
-                    } else if !isTransfer {
+                    } else if correction == nil && !isTransfer {
                         Toggle("Other category", isOn: $useCustomCategory)
 
                         if useCustomCategory {
@@ -10776,7 +10802,7 @@ struct EditExpenseView: View {
                     Text("Expense Details")
                 }
 
-                if !matchingAccountMovements.isEmpty {
+                if correction == nil && !matchingAccountMovements.isEmpty {
                     Section("Observed Matching Account Activity") {
                         Text("Select a real transaction from the receiving bank or card to link both sides. This is separate from classifying the withdrawal.")
                             .font(.caption)
@@ -10800,6 +10826,16 @@ struct EditExpenseView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .confirmationDialog(
+                "Hide this duplicate transaction?",
+                isPresented: $confirmDuplicate,
+                titleVisibility: .visible
+            ) {
+                Button("Mark as Duplicate") { saveTransaction() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This hides the extra entry and excludes it from spending, but the original Plaid record remains available to restore.")
+            }
             .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog(
@@ -10813,6 +10849,12 @@ struct EditExpenseView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Link only if the two account-side entries represent the same movement. An incorrect match can be undone in the transfer review screen.")
+            }
+            .onChange(of: correction) { _, newValue in
+                if newValue != nil {
+                    isTransfer = false
+                    isCreditCardPayment = false
+                }
             }
             .onChange(of: section) { _, _ in
                 categoryId = categories.first?.id
@@ -10849,81 +10891,83 @@ struct EditExpenseView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let resolvedCategoryId: UUID?
-                        if isTransfer {
-                            guard !paymentAccount.isEmpty,
-                                  destinationAccountId == nil ||
-                                  destinationOptions.contains(where: { $0.id == destinationAccountId }) else { return }
-                            resolvedCategoryId = expense.categoryId
-                        } else if isCreditCardPayment {
-                            guard let targetCreditAccountId,
-                                  creditCardOptions.contains(where: {
-                                      stableCreditAccountId($0) == targetCreditAccountId
-                                  }), !paymentAccount.isEmpty else { return }
-                            resolvedCategoryId = creditCardPaymentCategoryId()
-                        } else if useCustomCategory {
-                            let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmed.isEmpty else { return }
-                            let newCategory = Category(name: trimmed, allocatedAmount: 0)
-                            if section == .needs {
-                                budget.needsCategories.append(newCategory)
-                            } else {
-                                budget.wantsCategories.append(newCategory)
-                            }
-                            resolvedCategoryId = newCategory.id
+                        if correction == .duplicate && expense.reviewCorrection != .duplicate {
+                            confirmDuplicate = true
                         } else {
-                            resolvedCategoryId = categoryId
+                            saveTransaction()
                         }
-
-                        guard let categoryId = resolvedCategoryId else { return }
-                        var savedMetadata = expense.plaidMetadata
-                        if savedMetadata != nil {
-                            if isTransfer || isCreditCardPayment {
-                                savedMetadata?.userConfirmedNotTransfer = false
-                            } else if budget.isUserClassifiedTransfer(expense) ||
-                                      budget.isCreditCardPayment(expense) {
-                                savedMetadata?.userConfirmedNotTransfer = true
-                            }
-                        }
-                        budget.updateExpense(
-                            Expense(
-                                id: expense.id,
-                                name: name,
-                                amount: amount,
-                                date: date,
-                                section: isCreditCardPayment ? .needs : section,
-                                categoryId: categoryId,
-                                paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                                paymentAccountId: expense.paymentAccountId,
-                                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                creditCardPaymentTarget: isCreditCardPayment ?
-                                    creditCardOptions.first(where: {
-                                        stableCreditAccountId($0) == targetCreditAccountId
-                                    })?.name : nil,
-                                creditCardPaymentTargetId: isCreditCardPayment ? targetCreditAccountId : nil,
-                                transferDestinationAccountId: isTransfer ? destinationAccountId : nil,
-                                transferDestinationAccountName: isTransfer ?
-                                    (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ??
-                                     "External / not connected") : nil,
-                                userClassifiedTransfer: isTransfer ? true : nil,
-                                plaidMetadata: savedMetadata
-                            )
-                        )
-                        Haptics.success()
-                        dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || amount <= 0 ||
-                        (isTransfer && (paymentAccount.isEmpty ||
-                            (destinationAccountId != nil &&
-                             !destinationOptions.contains(where: { $0.id == destinationAccountId })))) ||
-                        (isCreditCardPayment && (targetCreditAccountId == nil || paymentAccount.isEmpty ||
-                            !creditCardOptions.contains(where: {
-                                stableCreditAccountId($0) == targetCreditAccountId
-                            }))) ||
-                        (!isTransfer && !isCreditCardPayment && !useCustomCategory && categoryId == nil))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        amount <= 0 ||
+                        (correction == nil && isTransfer && (paymentAccount.isEmpty ||
+                            (destinationAccountId != nil && !destinationOptions.contains(where: { $0.id == destinationAccountId })))) ||
+                        (correction == nil && isCreditCardPayment && (targetCreditAccountId == nil || paymentAccount.isEmpty)) ||
+                        (correction == nil && !isTransfer && !isCreditCardPayment && !useCustomCategory && categoryId == nil))
                 }
             }
         }
+    }
+
+    private func saveTransaction() {
+        let resolvedCategoryId: UUID
+        if correction != nil {
+            resolvedCategoryId = expense.categoryId
+        } else if isTransfer {
+            guard !paymentAccount.isEmpty,
+                  destinationAccountId == nil || destinationOptions.contains(where: { $0.id == destinationAccountId }) else { return }
+            resolvedCategoryId = expense.categoryId
+        } else if isCreditCardPayment {
+            guard let targetCreditAccountId,
+                  creditCardOptions.contains(where: { stableCreditAccountId($0) == targetCreditAccountId }),
+                  !paymentAccount.isEmpty else { return }
+            resolvedCategoryId = creditCardPaymentCategoryId()
+        } else if useCustomCategory {
+            let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let newCategory = Category(name: trimmed, allocatedAmount: 0)
+            if section == .needs {
+                budget.needsCategories.append(newCategory)
+            } else {
+                budget.wantsCategories.append(newCategory)
+            }
+            resolvedCategoryId = newCategory.id
+        } else {
+            guard let categoryId else { return }
+            resolvedCategoryId = categoryId
+        }
+
+        var updated = expense
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.amount = amount
+        updated.date = date
+        updated.section = (correction == nil && isCreditCardPayment) ? .needs : section
+        updated.categoryId = resolvedCategoryId
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.paymentAccount = expense.plaidMetadata != nil ?
+            expense.paymentAccount : paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.reviewCorrection = correction
+        updated.bucketFromName = correction == .bucketTransfer ?
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        updated.bucketToName = correction == .bucketTransfer ?
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
+        updated.userClassifiedTransfer = correction == nil && isTransfer ? true : nil
+        updated.transferDestinationAccountId = correction == nil && isTransfer ? destinationAccountId : nil
+        updated.transferDestinationAccountName = correction == nil && isTransfer ?
+            (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ?? "External / not connected") : nil
+        updated.creditCardPaymentTargetId = correction == nil && isCreditCardPayment ? targetCreditAccountId : nil
+        updated.creditCardPaymentTarget = correction == nil && isCreditCardPayment ?
+            creditCardOptions.first(where: { stableCreditAccountId($0) == targetCreditAccountId })?.name : nil
+        if updated.plaidMetadata != nil {
+            if correction != nil || isTransfer || isCreditCardPayment {
+                updated.plaidMetadata?.userConfirmedNotTransfer = false
+            } else if budget.isUserClassifiedTransfer(expense) || budget.isCreditCardPayment(expense) {
+                updated.plaidMetadata?.userConfirmedNotTransfer = true
+            }
+        }
+        budget.updateExpense(updated)
+        Haptics.success()
+        dismiss()
     }
 }
 
