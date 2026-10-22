@@ -892,6 +892,14 @@ struct CuanMarketModelsTests {
         let decodedIncome = try! JSONDecoder().decode(IncomeEntry.self, from: JSONEncoder().encode(income))
         assert(decodedIncome.reviewCorrection == .bucketTransfer && decodedIncome.bucketToName == "Emergency",
                "Bucket correction and labels survive income JSON roundtrip")
+        let budget = BudgetModel()
+        var hiddenBucket = income
+        hiddenBucket.reviewCorrection = .duplicate
+        hiddenBucket.correctionBeforeDuplicate = .bucketTransfer
+        budget.incomes = [hiddenBucket]
+        assert(budget.restoreDuplicateIncome(id: hiddenBucket.id) &&
+               budget.incomes[0].reviewCorrection == .bucketTransfer,
+               "Restoring duplicate income should reinstate its prior bucket classification")
 
         let expense = Expense(
             name: "Synthetic hidden duplicate", amount: 16,
@@ -900,6 +908,11 @@ struct CuanMarketModelsTests {
         )
         let decodedExpense = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(expense))
         assert(decodedExpense.reviewCorrection == .duplicate, "Duplicate exclusion survives local persistence")
+        var previousBucket = expense
+        previousBucket.correctionBeforeDuplicate = .bucketTransfer
+        let decodedBucket = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(previousBucket))
+        assert(decodedBucket.correctionBeforeDuplicate == .bucketTransfer,
+               "The original bucket status survives a duplicate correction JSON roundtrip")
         let old = Expense(name: "Old entry", amount: 8, section: .needs, categoryId: UUID())
         let decodedOld = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(old))
         assert(decodedOld.reviewCorrection == nil && decodedOld.bucketCounterpartSourceId == nil,
@@ -949,6 +962,16 @@ struct CuanMarketModelsTests {
         _ = budget.applyPlaidSyncReconciled(batch([independent]))
         assert(budget.incomes.count == 2,
                "A new posted income with a distinct ID must not be silently hidden when no pending row remains")
+        let corrected = BudgetModel()
+        _ = corrected.applyPlaidSyncReconciled(batch([pending]))
+        var hidden = corrected.incomes[0]
+        hidden.reviewCorrection = .duplicate
+        corrected.updateIncomeEntry(hidden)
+        _ = corrected.applyPlaidSyncReconciled(batch([posted]))
+        assert(corrected.incomes.count == 1 &&
+               corrected.incomes[0].reviewCorrection == .duplicate &&
+               corrected.incomes[0].plaidMetadata?.transactionId == posted.id,
+               "An explicit duplicate exclusion must survive a pending-to-posted source ID change")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
