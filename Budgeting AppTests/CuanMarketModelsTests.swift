@@ -31,6 +31,7 @@ struct CuanMarketModelsTests {
         testPlaidOneSidedTransferDescriptionPairsACHCredit()
         testPlaidManualTransferReviewPersists()
         testPlaidReviewKeepAsWithdrawalPersists()
+        testBudgetActivityReviewDismissAndUndoPreserveSourceRows()
         testPlaidUnrelatedMatchingAmountDoesNotPair()
         testPlaidAmbiguousTransfersStayUnpaired()
         testPlaidLegacyMispairedTransferIsRemovedOnReplay()
@@ -678,6 +679,51 @@ struct CuanMarketModelsTests {
         assert(!budget.cashTransfers.contains(where: { $0.toAccountName == "Other Bank" }),
                "Wrong destination must not receive the transfer")
         assert(budget.cashTransfers[0].note.hasPrefix("[PLAID_PAIR:"), "A uniquely verified bank credit should become one linked pair")
+    }
+
+
+    /// The Budget Activity review location reuses Plaid's source-of-truth
+    /// queue. Hiding a reminder must never hide or delete a bank transaction.
+    private static func testBudgetActivityReviewDismissAndUndoPreserveSourceRows() {
+        let budget = BudgetModel()
+        let txnID = "synthetic-review-debit-1"
+        let metadata = PlaidSourceMetadata(
+            itemId: "synthetic-item", accountId: "synthetic-checking",
+            transactionId: txnID, status: .needsReview
+        )
+        let expense = Expense(
+            name: "Uncategorized ACH debit", amount: 42.19,
+            section: .needs, categoryId: UUID(),
+            paymentAccount: "Example Checking", plaidMetadata: metadata
+        )
+        let marker = CashTransfer(
+            name: "Unrelated manual transfer", amount: 8,
+            fromAccountName: "Example Checking", toAccountName: "Example Savings"
+        )
+        budget.expenses = [expense]
+        budget.cashTransfers = [marker]
+        let review = PlaidReviewItem(
+            title: "Review bank debit", detail: "Verify its classification",
+            amount: 42.19, sourceId: txnID
+        )
+        budget.plaidReviewItems = [review]
+        assert(budget.plaidReviewItems.count == 1, "Budget Activity must read the existing Plaid review queue")
+
+        let dismissed = budget.dismissPlaidReviewReminder(id: review.id)
+        assert(dismissed?.sourceId == txnID && budget.plaidReviewItems.isEmpty,
+               "Dismiss removes only the review reminder")
+        assert(budget.expenses == [expense] && budget.cashTransfers == [marker],
+               "Dismissing a review must not change imported spending or transfers")
+        assert(budget.dismissPlaidReviewReminder(id: review.id) == nil,
+               "A dismissed reminder cannot be removed again")
+
+        budget.restoreDismissedPlaidReviewReminders([review, review])
+        budget.restoreDismissedPlaidReviewReminders([review])
+        assert(budget.plaidReviewItems.count == 1 &&
+               budget.plaidReviewItems.first?.sourceId == txnID,
+               "Undoing dismissal restores a single original reminder without duplicates")
+        assert(budget.expenses == [expense] && budget.cashTransfers == [marker],
+               "Review reminder restore must leave all financial rows unchanged")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
