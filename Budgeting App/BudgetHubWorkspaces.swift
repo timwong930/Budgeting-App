@@ -2327,3 +2327,287 @@ private struct BudgetWorkspaceEmptyState: View {
         }
     }
 }
+
+
+// Budget > Activity is the financial-review home. Plaid Sync remains a
+// connection-management screen; neither screen maintains a second queue.
+struct BudgetFinancialReviewView: View {
+    @ObservedObject var budget: BudgetModel
+    let onEditExpense: (Expense) -> Void
+    let onEditIncome: (IncomeEntry) -> Void
+
+    @State private var dismissedItems: [PlaidReviewItem] = []
+    @State private var pendingDecision: ReviewDecision?
+    @State private var showingConfirmation = false
+    @State private var feedbackMessage: String?
+
+    private enum ReviewDecision {
+        case pair(sourceID: String, candidateID: String)
+        case withdrawal(sourceID: String)
+        case undoPair(transferID: UUID)
+
+        var explanation: String {
+            switch self {
+            case .pair:
+                return "Only confirm if these are the same movement in two accounts you own. Neither balance will be estimated or fabricated."
+            case .withdrawal:
+                return "Keep this bank withdrawal as spending, not as a transfer. This classification persists on future Plaid syncs."
+            case .undoPair:
+                return "Remove this incorrect link and restore the two original Plaid transactions for review. A rejected pair will not automatically relink."
+            }
+        }
+    }
+
+    private var unmatchedSuggestions: [PlaidTransferReviewLeg] {
+        let queuedIDs = Set(budget.plaidReviewItems.map(\.sourceId))
+        return budget.plaidPotentialTransferReviews()
+            .filter { !queuedIDs.contains($0.id) }
+    }
+
+    private var linkedMovements: [CashTransfer] {
+        Array(budget.cashTransfers
+            .filter { $0.note.hasPrefix("[PLAID_PAIR:") }
+            .sorted { $0.date > $1.date }
+            .prefix(50))
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text("Review imports and account movements without leaving your budget. Pending reviews include all dates, not just the selected budget month.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if let feedbackMessage {
+                    Text(feedbackMessage)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                if !dismissedItems.isEmpty {
+                    Button {
+                        for item in dismissedItems where !budget.plaidReviewItems.contains(where: {
+                            $0.sourceId == item.sourceId
+                        }) {
+                            budget.plaidReviewItems.append(item)
+                        }
+                        dismissedItems.removeAll()
+                        budget.saveNow()
+                        feedbackMessage = "The review reminders were restored."
+                    } label: {
+                        Label("Undo dismissed reminders", systemImage: "arrow.uturn.backward")
+                    }
+                }
+            }
+
+            Section {
+                if budget.plaidReviewItems.isEmpty {
+                    Label("No imported transactions require review", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(budget.plaidReviewItems.sorted(by: { $0.createdAt > $1.createdAt })) { item in
+                        VStack(alignment: .leading, spacing: 9) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer(minLength: 8)
+                                if let amount = item.amount {
+                                    Text(abs(amount), format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.medium).monospacedDigit())
+                                }
+                            }
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let leg = budget.plaidTransferReviewLeg(sourceId: item.sourceId) {
+                                Text("\(leg.accountName) · \(leg.date.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                let candidates = budget.plaidTransferReviewCandidates(sourceId: item.sourceId)
+                                if candidates.isEmpty {
+                                    Text("No verified counterpart available yet. You can review the original transaction or sync the other account.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(candidates) { candidate in
+                                        Button {
+                                            request(.pair(sourceID: item.sourceId, candidateID: candidate.id))
+                                        } label: {
+                                            Label("Match with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))", systemImage: "arrow.left.arrow.right")
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                                if leg.signedAmount > 0 &&
+                                    budget.financialAccounts.contains(where: {
+                                        $0.id == leg.accountId && $0.kind == .depository
+                                    }) {
+                                    Button {
+                                        request(.withdrawal(sourceID: item.sourceId))
+                                    } label: {
+                                        Label("Keep as withdrawal / expense", systemImage: "checkmark.shield")
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+
+                            if let expense = budget.expenses.first(where: {
+                                $0.plaidMetadata?.transactionId == item.sourceId
+                            }) {
+                                Button("Edit transaction") { onEditExpense(expense) }
+                                    .buttonStyle(.bordered)
+                            } else if let income = budget.incomes.first(where: {
+                                $0.plaidMetadata?.transactionId == item.sourceId
+                            }) {
+                                Button("Edit transaction") { onEditIncome(income) }
+                                    .buttonStyle(.bordered)
+                            }
+
+                            Button("Dismiss reminder") {
+                                dismissReminder(item)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHint("Removes only the review notification. The bank transaction is unchanged.")
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            } header: {
+                Text("Needs review · \(budget.plaidReviewItems.count)")
+            } footer: {
+                Text("Dismissing a reminder does not change or delete financial records. Use Undo above to restore it.")
+            }
+
+            Section {
+                if unmatchedSuggestions.isEmpty {
+                    Text("No additional matching bank or credit-card movements are suggested.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(unmatchedSuggestions) { source in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(source.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(source.accountName) · \(source.date.formatted(date: .abbreviated, time: .omitted)) · \(abs(source.signedAmount).formatted(.currency(code: "USD")))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(budget.plaidTransferReviewCandidates(sourceId: source.id)) { candidate in
+                                Button {
+                                    request(.pair(sourceID: source.id, candidateID: candidate.id))
+                                } label: {
+                                    Label("Match with \(candidate.accountName)", systemImage: "arrow.left.arrow.right")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            if source.signedAmount > 0 &&
+                                budget.financialAccounts.contains(where: {
+                                    $0.id == source.accountId && $0.kind == .depository
+                                }) {
+                                Button("Keep as withdrawal / expense") {
+                                    request(.withdrawal(sourceID: source.id))
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            } header: {
+                Text("Possible transfers & card payments")
+            } footer: {
+                Text("Suggestions need a real opposing transaction from another connected account. Matching requires your confirmation.")
+            }
+
+            Section {
+                if linkedMovements.isEmpty {
+                    Text("No linked bank or credit-card movements to correct.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(linkedMovements) { transfer in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(transfer.name)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(transfer.fromAccountName) → \(transfer.toAccountName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(transfer.amount, format: .currency(code: "USD"))
+                                .font(.caption.monospacedDigit())
+                            if budget.canUndoPlaidTransferMatch(transferId: transfer.id) {
+                                Button("Undo incorrect match", role: .destructive) {
+                                    request(.undoPair(transferID: transfer.id))
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Text("Original bank-side records are unavailable. This older link cannot be safely undone here.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                    }
+                }
+            } header: {
+                Text("Correct linked movements")
+            } footer: {
+                Text("Undo restores the original Plaid records to review. No real bank activity or institution-reported balance is changed.")
+            }
+        }
+        .navigationTitle("Review transactions")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Confirm financial classification?",
+            isPresented: $showingConfirmation,
+            titleVisibility: .visible
+        ) {
+            if let pendingDecision {
+                switch pendingDecision {
+                case .pair:
+                    Button("Confirm transaction match") { perform(pendingDecision) }
+                case .withdrawal:
+                    Button("Keep as withdrawal") { perform(pendingDecision) }
+                case .undoPair:
+                    Button("Undo incorrect match", role: .destructive) { perform(pendingDecision) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDecision = nil }
+        } message: {
+            Text(pendingDecision?.explanation ?? "Confirm this decision.")
+        }
+    }
+
+    private func request(_ decision: ReviewDecision) {
+        pendingDecision = decision
+        showingConfirmation = true
+    }
+
+    private func perform(_ decision: ReviewDecision) {
+        pendingDecision = nil
+        switch decision {
+        case let .pair(sourceID, candidateID):
+            if budget.confirmPlaidTransferReview(sourceId: sourceID, counterpartId: candidateID) {
+                feedbackMessage = "Transactions linked. Income and spending will not count this internal movement twice."
+            } else {
+                feedbackMessage = "The match could not be verified. Sync both accounts and review the latest activity."
+            }
+        case let .withdrawal(sourceID):
+            if budget.keepPlaidWithdrawalAsExpense(sourceId: sourceID) {
+                feedbackMessage = "Withdrawal classification saved."
+            } else {
+                feedbackMessage = "This withdrawal could not be classified. The original data was left unchanged."
+            }
+        case let .undoPair(transferID):
+            if budget.undoPlaidTransferMatch(transferId: transferID) {
+                feedbackMessage = "Incorrect match undone. Both original movements are now ready for review."
+            } else {
+                feedbackMessage = "Both original transaction records could not be restored; no correction was made."
+            }
+        }
+    }
+
+    private func dismissReminder(_ item: PlaidReviewItem) {
+        guard let index = budget.plaidReviewItems.firstIndex(where: { $0.id == item.id }) else { return }
+        dismissedItems.append(budget.plaidReviewItems.remove(at: index))
+        budget.saveNow()
+        feedbackMessage = "Review reminder dismissed. The underlying transaction was not changed."
+    }
+}
