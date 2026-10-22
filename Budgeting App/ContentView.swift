@@ -3662,7 +3662,7 @@ struct ContentView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -11537,7 +11537,7 @@ struct CreditAccountsView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -11780,7 +11780,7 @@ struct CreditAccountDetailView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
