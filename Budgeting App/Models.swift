@@ -2681,7 +2681,7 @@ class BudgetModel: ObservableObject {
         let normalizedName = normalizedAccountName(account.name)
         guard !normalizedName.isEmpty else { return 0 }
         let stableAccountId = financialAccountId(for: account)
-        return expenses.reduce(account.startingBalance) { partial, expense in
+        return expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let targetId = expense.creditCardPaymentTargetId {
                 if targetId == stableAccountId {
                     return partial - expense.amount
