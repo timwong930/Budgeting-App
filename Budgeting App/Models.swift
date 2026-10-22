@@ -91,6 +91,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
     var userClassifiedTransfer: Bool?
     /// Corrections are non-destructive: preserve the imported Plaid row and ID.
     var reviewCorrection: TransactionCorrection?
+    var correctionBeforeDuplicate: TransactionCorrection?
     var bucketFromName: String?
     var bucketToName: String?
     var bucketCounterpartSourceId: String?
@@ -112,6 +113,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         transferDestinationAccountName: String? = nil,
         userClassifiedTransfer: Bool? = nil,
         reviewCorrection: TransactionCorrection? = nil,
+        correctionBeforeDuplicate: TransactionCorrection? = nil,
         bucketFromName: String? = nil,
         bucketToName: String? = nil,
         bucketCounterpartSourceId: String? = nil,
@@ -132,6 +134,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         self.transferDestinationAccountName = transferDestinationAccountName
         self.userClassifiedTransfer = userClassifiedTransfer
         self.reviewCorrection = reviewCorrection
+        self.correctionBeforeDuplicate = correctionBeforeDuplicate
         self.bucketFromName = bucketFromName
         self.bucketToName = bucketToName
         self.bucketCounterpartSourceId = bucketCounterpartSourceId
@@ -154,6 +157,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         case transferDestinationAccountName
         case userClassifiedTransfer
         case reviewCorrection
+        case correctionBeforeDuplicate
         case bucketFromName
         case bucketToName
         case bucketCounterpartSourceId
@@ -177,6 +181,7 @@ struct Expense: Identifiable, Codable, Sendable, Equatable {
         transferDestinationAccountName = try container.decodeIfPresent(String.self, forKey: .transferDestinationAccountName)
         userClassifiedTransfer = try container.decodeIfPresent(Bool.self, forKey: .userClassifiedTransfer)
         reviewCorrection = try container.decodeIfPresent(TransactionCorrection.self, forKey: .reviewCorrection)
+        correctionBeforeDuplicate = try container.decodeIfPresent(TransactionCorrection.self, forKey: .correctionBeforeDuplicate)
         bucketFromName = try container.decodeIfPresent(String.self, forKey: .bucketFromName)
         bucketToName = try container.decodeIfPresent(String.self, forKey: .bucketToName)
         bucketCounterpartSourceId = try container.decodeIfPresent(String.self, forKey: .bucketCounterpartSourceId)
@@ -439,12 +444,13 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
     var bankName: String
     var bankAccountId: UUID?
     var reviewCorrection: TransactionCorrection?
+    var correctionBeforeDuplicate: TransactionCorrection?
     var bucketFromName: String?
     var bucketToName: String?
     var bucketCounterpartSourceId: String?
     var plaidMetadata: PlaidSourceMetadata?
 
-    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", bankAccountId: UUID? = nil, reviewCorrection: TransactionCorrection? = nil, bucketFromName: String? = nil, bucketToName: String? = nil, bucketCounterpartSourceId: String? = nil, plaidMetadata: PlaidSourceMetadata? = nil) {
+    init(id: UUID = UUID(), name: String, amount: Double, date: Date = Date(), bankName: String = "", bankAccountId: UUID? = nil, reviewCorrection: TransactionCorrection? = nil, correctionBeforeDuplicate: TransactionCorrection? = nil, bucketFromName: String? = nil, bucketToName: String? = nil, bucketCounterpartSourceId: String? = nil, plaidMetadata: PlaidSourceMetadata? = nil) {
         self.id = id
         self.name = name
         self.amount = amount
@@ -452,6 +458,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         self.bankName = bankName
         self.bankAccountId = bankAccountId
         self.reviewCorrection = reviewCorrection
+        self.correctionBeforeDuplicate = correctionBeforeDuplicate
         self.bucketFromName = bucketFromName
         self.bucketToName = bucketToName
         self.bucketCounterpartSourceId = bucketCounterpartSourceId
@@ -466,6 +473,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         case bankName
         case bankAccountId
         case reviewCorrection
+        case correctionBeforeDuplicate
         case bucketFromName
         case bucketToName
         case bucketCounterpartSourceId
@@ -481,6 +489,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         bankName = try container.decodeIfPresent(String.self, forKey: .bankName) ?? ""
         bankAccountId = try container.decodeIfPresent(UUID.self, forKey: .bankAccountId)
         reviewCorrection = try container.decodeIfPresent(TransactionCorrection.self, forKey: .reviewCorrection)
+        correctionBeforeDuplicate = try container.decodeIfPresent(TransactionCorrection.self, forKey: .correctionBeforeDuplicate)
         bucketFromName = try container.decodeIfPresent(String.self, forKey: .bucketFromName)
         bucketToName = try container.decodeIfPresent(String.self, forKey: .bucketToName)
         bucketCounterpartSourceId = try container.decodeIfPresent(String.self, forKey: .bucketCounterpartSourceId)
@@ -496,6 +505,7 @@ struct IncomeEntry: Identifiable, Codable, Sendable, Equatable {
         try container.encode(bankName, forKey: .bankName)
         try container.encodeIfPresent(bankAccountId, forKey: .bankAccountId)
         try container.encodeIfPresent(reviewCorrection, forKey: .reviewCorrection)
+        try container.encodeIfPresent(correctionBeforeDuplicate, forKey: .correctionBeforeDuplicate)
         try container.encodeIfPresent(bucketFromName, forKey: .bucketFromName)
         try container.encodeIfPresent(bucketToName, forKey: .bucketToName)
         try container.encodeIfPresent(bucketCounterpartSourceId, forKey: .bucketCounterpartSourceId)
