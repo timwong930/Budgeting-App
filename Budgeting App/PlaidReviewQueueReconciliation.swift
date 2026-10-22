@@ -33,6 +33,80 @@ extension BudgetModel {
         if restored { saveNow() }
     }
 
+    /// Bucket reallocations have two signs but the same Plaid account. They
+    /// must never be modeled as a bank-to-bank transfer or a new bank balance.
+    func bucketTransferIncomeCandidates(for expense: Expense) -> [IncomeEntry] {
+        guard expense.reviewCorrection != .duplicate,
+              let metadata = expense.plaidMetadata,
+              let sourceID = metadata.transactionId,
+              let externalAccountID = metadata.accountId,
+              metadata.isPending != true else { return [] }
+        return incomes.filter { income in
+            guard income.reviewCorrection != .duplicate,
+                  income.bucketCounterpartSourceId == nil,
+                  let incomeID = income.plaidMetadata?.transactionId,
+                  incomeID != sourceID,
+                  income.plaidMetadata?.accountId == externalAccountID,
+                  income.plaidMetadata?.isPending != true,
+                  abs(income.amount - expense.amount) < 0.01 else { return false }
+            let days = abs(Calendar.current.dateComponents(
+                [.day], from: Calendar.current.startOfDay(for: expense.date),
+                to: Calendar.current.startOfDay(for: income.date)
+            ).day ?? 999)
+            return days <= 3
+        }.sorted { $0.date > $1.date }
+    }
+
+    /// User confirmation is required: same amount/date alone does not prove a
+    /// bucket pair, even within one Plaid account.
+    @discardableResult
+    func confirmInternalBucketTransfer(expenseID: UUID, incomeID: UUID, fromBucket: String, toBucket: String) -> Bool {
+        guard let expenseIndex = expenses.firstIndex(where: { $0.id == expenseID }),
+              let incomeIndex = incomes.firstIndex(where: { $0.id == incomeID }),
+              let sourceID = expenses[expenseIndex].plaidMetadata?.transactionId,
+              let counterpartID = incomes[incomeIndex].plaidMetadata?.transactionId,
+              expenses[expenseIndex].bucketCounterpartSourceId == nil,
+              bucketTransferIncomeCandidates(for: expenses[expenseIndex]).contains(where: { $0.id == incomeID })
+        else { return false }
+
+        var outgoing = expenses[expenseIndex]
+        outgoing.reviewCorrection = .bucketTransfer
+        outgoing.bucketFromName = fromBucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        outgoing.bucketToName = toBucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        outgoing.bucketCounterpartSourceId = counterpartID
+
+        var incoming = incomes[incomeIndex]
+        incoming.reviewCorrection = .bucketTransfer
+        incoming.bucketFromName = outgoing.bucketFromName
+        incoming.bucketToName = outgoing.bucketToName
+        incoming.bucketCounterpartSourceId = sourceID
+
+        updateExpense(outgoing)
+        updateIncomeEntry(incoming)
+        plaidReviewItems.removeAll {
+            $0.sourceId == sourceID || $0.sourceId == counterpartID
+        }
+        saveNow()
+        return true
+    }
+
+    /// Restoring one side must not leave a phantom link on the opposite side.
+    func clearBucketCounterpartLink(sourceID: String, counterpartID: String?) {
+        guard let counterpartID else { return }
+        if let index = expenses.firstIndex(where: {
+            $0.plaidMetadata?.transactionId == counterpartID &&
+            $0.bucketCounterpartSourceId == sourceID
+        }) {
+            expenses[index].bucketCounterpartSourceId = nil
+        }
+        if let index = incomes.firstIndex(where: {
+            $0.plaidMetadata?.transactionId == counterpartID &&
+            $0.bucketCounterpartSourceId == sourceID
+        }) {
+            incomes[index].bucketCounterpartSourceId = nil
+        }
+    }
+
     /// Replayed Plaid deltas must not silently clear an unresolved review item merely
     /// because the Plaid-owned row already exists locally. Preserve prior review state
     /// until the user removes it or the source transaction is genuinely replaced/removed.
