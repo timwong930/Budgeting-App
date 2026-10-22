@@ -311,12 +311,16 @@ private enum BudgetActivityItem: Identifiable {
         switch self {
         case .expense(let value):
             if value.reviewCorrection == .bucketTransfer {
-                return "Bucket transfer" + ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName!)" : "")
+                return "Bucket transfer" + ((value.bucketFromName?.isEmpty == false && value.bucketToName?.isEmpty == false) ?
+                    " · \(value.bucketFromName ?? "") → \(value.bucketToName ?? "")" :
+                    ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName ?? "")" : ""))
             }
             return value.paymentAccount.isEmpty ? value.section.title : value.paymentAccount
         case .income(let value):
             if value.reviewCorrection == .bucketTransfer {
-                return "Bucket transfer" + ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName!)" : "")
+                return "Bucket transfer" + ((value.bucketFromName?.isEmpty == false && value.bucketToName?.isEmpty == false) ?
+                    " · \(value.bucketFromName ?? "") → \(value.bucketToName ?? "")" :
+                    ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName ?? "")" : ""))
             }
             return value.bankName.isEmpty ? "Income" : value.bankName
         case .savings: return "Savings"
