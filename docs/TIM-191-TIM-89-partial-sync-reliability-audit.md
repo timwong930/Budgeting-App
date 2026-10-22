@@ -87,6 +87,35 @@
 
 **Deployment status:** PR #22 and stacked PR #23 remain drafts. `main` and the installed production app are **not** updated by these changes.
 
+## TIM-193 — Transaction editor conversion fix (October 22)
+
+**Direct screenshot reproduction:** The expense editor exposed an existing credit-card-payment toggle but no explicit transfer classification or destination-account selector. Saving a Plaid-origin expense rebuilt an `Expense` without `plaidMetadata`, potentially losing its transaction ID, user source attribution, and sync idempotency.
+
+**Implemented on this draft branch:**
+
+- Add **Bank / Investment Transfer** selection with an explicit receiving-account picker, plus an **External / not connected** option. The source bank remains Plaid-authoritative; an unobserved receiving deposit is **never created**.
+- Add direct **Observed Matching Account Activity** in the expense editor. Only observed opposite-signed Plaid transactions in the chosen destination are presented, and linking them requires a separate explicit confirmation.
+- Select **Credit Card Payment** targets by stable financial account IDs rather than potentially duplicated card display names; keep transfer and card-payment classifications mutually exclusive.
+- Preserve `plaidMetadata`, original source ID, account references, notes, and user decisions on edits. Explicit transfer and card-payment choices survive source replay; ordinary transactions can be restored to expense classification.
+- Add optional Codable fields (`userClassifiedTransfer`, `transferDestinationAccountId`, `transferDestinationAccountName`) to the existing `Expense` model, preserving older snapshot decoding.
+- Exclude account movements from actual spending aggregates and their corresponding dashboard/Budget Hub views; label them properly in transaction history and account ledgers.
+- Use a user's explicitly selected connected destination only when corroborated by an actual eligible Plaid transaction. Reciprocal uniqueness and anti-false-match protections remain in place.
+- Preserve user notes and names when two observed Plaid movements are linked.
+- Add synthetic regressions for edited depository transfer, edited card payment, persistence, resync, explicit destination preference, and manual pairing annotation preservation. **No screenshot-derived exact amounts or account suffixes are included in the active branch's test fixtures.**
+
+**Required QA before merge:**
+
+- [ ] In the transactions screen, edit an imported bank outflow, choose Bank / Investment Transfer and a destination, save, reopen, and verify the classification persists through repeated Plaid sync and app relaunch.
+- [ ] If the destination account has no matching imported deposit, the UI must show a transfer-out awaiting verification and must **not** increment the receiving account's balance.
+- [ ] If a genuine matching deposit exists, verify the confirmation button links exactly the two observed source records, excludes both income/spending, and can be reversed safely.
+- [ ] Edit an imported bank debit into a credit-card payment, choose the correct stable card ID, save, re-sync and verify no new purchase or duplicate payment is created.
+- [ ] Test multiple same-name credit-card accounts, unavailable bank account, mismatched amount, date window, partial Plaid failure, and previously user-confirmed withdrawal.
+- [ ] Verify changing a transfer/card payment back to an expense recovers spending totals and remains stable after replay.
+- [ ] Confirm the custom regression source is actually executed by the Xcode test runner; the existing separate XCTest scheme is still smoke-only.
+- [ ] Check iOS simulator (light/dark, Dynamic Type), and physical device before/after screenshots with financial details redacted.
+
+**Status:** source changes and synthetic test cases are committed; **Xcode build, functional test execution, simulator and actual Plaid acceptance have not been performed**. Keep [PR #22](https://github.com/timwong930/Budgeting-App/pull/22) and [PR #23](https://github.com/timwong930/Budgeting-App/pull/23) as drafts until accepted.
+
 ## Design reference
 
 - [Apple Human Interface Guidelines — Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
