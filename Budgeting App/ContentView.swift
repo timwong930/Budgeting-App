@@ -10417,6 +10417,10 @@ struct EditIncomeView: View {
     @State private var amount: Double
     @State private var date: Date
     @State private var bankName: String
+    @State private var correction: TransactionCorrection?
+    @State private var bucketFrom: String
+    @State private var bucketTo: String
+    @State private var confirmDuplicate = false
 
     private var bankAccountOptions: [String] {
         let names = (budget.bankAccounts.map(\.name) + [bankName])
@@ -10432,6 +10436,9 @@ struct EditIncomeView: View {
         _amount = State(initialValue: income.amount)
         _date = State(initialValue: income.date)
         _bankName = State(initialValue: income.bankName)
+        _correction = State(initialValue: income.reviewCorrection)
+        _bucketFrom = State(initialValue: income.bucketFromName ?? "")
+        _bucketTo = State(initialValue: income.bucketToName ?? "")
     }
 
     private var entryTitle: String {
@@ -10447,7 +10454,25 @@ struct EditIncomeView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
+                    Picker("Treat as", selection: $correction) {
+                        Text("Income").tag(Optional<TransactionCorrection>.none)
+                        Text("Duplicate · hide from totals").tag(Optional(TransactionCorrection.duplicate))
+                        Text("Internal bucket transfer").tag(Optional(TransactionCorrection.bucketTransfer))
+                    }
+                    if correction == .duplicate {
+                        Text("The bank record will be preserved but hidden from normal activity and income totals. Restore it in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == .bucketTransfer {
+                        TextField("From bucket (optional)", text: $bucketFrom)
+                        TextField("To bucket (optional)", text: $bucketTo)
+                        Text("Moving money between buckets in this same bank account is not income. No bank balance will be changed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("Bank Account", text: $bankName)
+                        .disabled(income.plaidMetadata != nil)
                     if !bankAccountOptions.isEmpty {
                         Picker("Saved Accounts", selection: $bankName) {
                             Text("None").tag("")
@@ -10461,6 +10486,16 @@ struct EditIncomeView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .confirmationDialog(
+                "Hide this duplicate income?",
+                isPresented: $confirmDuplicate,
+                titleVisibility: .visible
+            ) {
+                Button("Mark as Duplicate") { saveCorrection() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This hides only the extra income entry from your activity and totals. The original transaction and Plaid information remain available for restoration.")
+            }
             .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -10469,22 +10504,34 @@ struct EditIncomeView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        budget.updateIncomeEntry(
-                            IncomeEntry(
-                                id: income.id,
-                                name: name.isEmpty ? "Income" : name,
-                                amount: amount,
-                                date: date,
-                                bankName: bankName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            )
-                        )
-                        Haptics.success()
-                        dismiss()
+                        if correction == .duplicate && income.reviewCorrection != .duplicate {
+                            confirmDuplicate = true
+                        } else {
+                            saveCorrection()
+                        }
                     }
                     .disabled(amount <= 0)
                 }
             }
         }
+    }
+
+    private func saveCorrection() {
+        var updated = income
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : name
+        updated.amount = amount
+        updated.date = date
+        updated.bankName = income.plaidMetadata == nil ?
+            bankName.trimmingCharacters(in: .whitespacesAndNewlines) : income.bankName
+        updated.reviewCorrection = correction
+        updated.bucketFromName = correction == .bucketTransfer ?
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        updated.bucketToName = correction == .bucketTransfer ?
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
+        budget.updateIncomeEntry(updated)
+        Haptics.success()
+        dismiss()
     }
 }
 
