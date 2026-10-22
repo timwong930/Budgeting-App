@@ -2718,12 +2718,17 @@ struct ContentView: View {
             return
         }
 
-        monthlyExpenses = budget.expenses.filter { interval.contains($0.date) }
-        monthlyIncomes = budget.incomes.filter { interval.contains($0.date) }
+        monthlyExpenses = budget.expenses.filter {
+            interval.contains($0.date) && !budget.isHiddenDuplicate($0)
+        }
+        monthlyIncomes = budget.incomes.filter {
+            interval.contains($0.date) && !budget.isHiddenDuplicate($0)
+        }
         monthlySavingsEntries = budget.savingsEntries.filter { interval.contains($0.date) }
         let spendingExpenses = monthlyExpenses.filter { !budget.isExcludedFromSpending($0) }
         totalMonthlySpent = spendingExpenses.reduce(0) { $0 + $1.amount }
-        totalMonthlyIncomeLogged = monthlyIncomes.reduce(0) { $0 + $1.amount }
+        totalMonthlyIncomeLogged = monthlyIncomes.filter { !budget.isExcludedFromIncome($0) }
+            .reduce(0) { $0 + $1.amount }
 
         var needsTotals: [UUID: Double] = [:]
         var wantsTotals: [UUID: Double] = [:]
@@ -2753,7 +2758,9 @@ struct ContentView: View {
         )
         dailyIncome = buildDailySeries(
             interval: interval,
-            amountsByDate: dailyTotals(from: monthlyIncomes.map { ($0.date, $0.amount) })
+            amountsByDate: dailyTotals(from: monthlyIncomes.filter {
+                !budget.isExcludedFromIncome($0)
+            }.map { ($0.date, $0.amount) })
         )
     }
 
@@ -3103,7 +3110,7 @@ struct ContentView: View {
     private var calendarVisibleIncome: Double {
         let oneTimeIncome = calendarShowIncome
             ? budget.incomes
-                .filter { isInVisibleCalendarMonth($0.date) }
+                .filter { isInVisibleCalendarMonth($0.date) && !budget.isExcludedFromIncome($0) }
                 .reduce(0) { $0 + $1.amount }
             : 0
         let recurringIncome = calendarShowIncome
@@ -3482,7 +3489,7 @@ struct ContentView: View {
             )
         }
         let oneTimeExpenses = budget.expenses
-            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
             .map {
                 CalendarEventItem(
                     id: $0.id,
@@ -3505,7 +3512,7 @@ struct ContentView: View {
                 )
             }
         let oneTimeIncome = budget.incomes
-            .filter { calendar.isDate($0.date, inSameDayAs: date) }
+            .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
             .map {
                 CalendarEventItem(
                     id: $0.id,
@@ -3741,36 +3748,41 @@ struct ContentView: View {
     }
 
     private var logTransactionItems: [LogTransactionItem] {
-        let expenses = monthlyExpenses.map { expense in
+        let expenses = monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }.map { expense in
             LogTransactionItem(
                 id: expense.id,
                 title: expense.name,
-                subtitle: budget.isUserClassifiedTransfer(expense) ?
+                subtitle: expense.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" :
+                    (budget.isUserClassifiedTransfer(expense) ?
                     "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
                     (budget.isCreditCardPayment(expense) ?
                         "Credit card payment to \(budget.creditCardPaymentTarget(for: expense) ?? "card")" :
-                        budget.categoryName(for: expense)),
+                        budget.categoryName(for: expense))),
                 amount: expense.amount,
                 date: expense.date,
                 isInflow: false,
-                iconName: budget.isUserClassifiedTransfer(expense) ? "arrow.left.arrow.right" :
+                iconName: expense.reviewCorrection == .bucketTransfer ? "arrow.left.arrow.right" :
+                    (budget.isUserClassifiedTransfer(expense) ? "arrow.left.arrow.right" :
                     (budget.isCreditCardPayment(expense) ? "creditcard" :
-                     iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount)),
+                     iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount))),
                 tint: budget.isExcludedFromSpending(expense) ? .teal :
                     colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
                 kind: .expense(expense)
             )
         }
-        let incomes = monthlyIncomes.map { income in
+        let incomes = monthlyIncomes.filter { !budget.isHiddenDuplicate($0) }.map { income in
             LogTransactionItem(
                 id: income.id,
                 title: income.name,
-                subtitle: income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName,
+                subtitle: income.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" :
+                    (income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName),
                 amount: income.amount,
                 date: income.date,
                 isInflow: true,
-                iconName: "dollarsign.circle.fill",
-                tint: .green,
+                iconName: income.reviewCorrection == .bucketTransfer ? "arrow.left.arrow.right" : "dollarsign.circle.fill",
+                tint: income.reviewCorrection == .bucketTransfer ? .teal : .green,
                 kind: .income(income)
             )
         }
@@ -9524,7 +9536,8 @@ struct IncomeHistoryView: View {
                     Text("No income entries this month.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(monthlyIncomes.sorted(by: { $0.date > $1.date })) { income in
+                    ForEach(monthlyIncomes.filter { !budget.isHiddenDuplicate($0) }
+                        .sorted(by: { $0.date > $1.date })) { income in
                         IncomeRowView(
                             income: income,
                             onEdit: { onEdit(income); dismiss() },
@@ -9595,7 +9608,8 @@ struct ExpenseHistoryView: View {
                     Text("No expenses this month.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(monthlyExpenses.sorted(by: { $0.date > $1.date })) { expense in
+                    ForEach(monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }
+                        .sorted(by: { $0.date > $1.date })) { expense in
                         ExpenseRowView(
                             expense: expense,
                             categoryName: budget.categoryName(for: expense),
