@@ -33,6 +33,7 @@ struct CuanMarketModelsTests {
         testPlaidReviewKeepAsWithdrawalPersists()
         testBudgetActivityReviewDismissAndUndoPreserveSourceRows()
         testPlaidDuplicateIncomeCorrectionAndRestore()
+        testPendingIncomePostingDoesNotDuplicatePayroll()
         testManualDuplicateBalancesAreReversible()
         testSameAccountBucketPairRequiresUserConfirmation()
         testCorrectionCodableBackwardsCompatibility()
@@ -903,6 +904,51 @@ struct CuanMarketModelsTests {
         let decodedOld = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(old))
         assert(decodedOld.reviewCorrection == nil && decodedOld.bucketCounterpartSourceId == nil,
                "Older expense files remain readable without correction properties")
+    }
+
+
+    private static func testPendingIncomePostingDoesNotDuplicatePayroll() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_100_000)
+        let account = PlaidSyncedAccount(
+            id: "pending-income-checking", itemId: "pending-income-item",
+            name: "Example Checking", type: .depository, subtype: "checking",
+            currentBalance: 2000, availableBalance: 2000, creditLimit: nil,
+            institutionName: "Example Bank"
+        )
+        let pending = PlaidSyncedTransaction(
+            id: "pending-income-1", accountId: account.id, itemId: account.itemId,
+            name: "PAYROLL ABC", merchantName: nil, amount: -322.41,
+            date: date, pending: true, category: "INCOME", removed: false
+        )
+        var posted = pending
+        posted.id = "posted-income-2"
+        posted.pending = false
+        posted.pendingTransactionId = pending.id
+        func batch(_ transactions: [PlaidSyncedTransaction]) -> PlaidSyncPayload {
+            PlaidSyncPayload(
+                accounts: [account], transactions: transactions,
+                creditLiabilities: [], holdings: [], investmentTransactions: [],
+                connectionStatuses: []
+            )
+        }
+        _ = budget.applyPlaidSyncReconciled(batch([pending]))
+        assert(budget.incomes.count == 1, "Initial pending payroll creates one income row")
+        let originalUUID = budget.incomes[0].id
+        _ = budget.applyPlaidSyncReconciled(batch([posted]))
+        assert(budget.incomes.count == 1 &&
+               budget.incomes[0].id == originalUUID &&
+               budget.incomes[0].plaidMetadata?.transactionId == posted.id,
+               "Posted payroll replaces pending income rather than creating another income")
+        _ = budget.applyPlaidSyncReconciled(batch([posted]))
+        assert(budget.incomes.count == 1, "Posted income replay is idempotent")
+
+        var independent = posted
+        independent.id = "unrelated-second-income"
+        independent.pendingTransactionId = nil
+        _ = budget.applyPlaidSyncReconciled(batch([independent]))
+        assert(budget.incomes.count == 2,
+               "A new posted income with a distinct ID must not be silently hidden when no pending row remains")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
