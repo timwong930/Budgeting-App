@@ -747,6 +747,21 @@ private extension BudgetModel {
             return .reconciled
         }
 
+        // Income has the same pending-to-posted lifecycle as expenses. A
+        // changed Plaid ID is not a second paycheck when it replaces a unique
+        // pending entry from the very same connected account.
+        if transaction.amount < 0, let pendingIndex = pendingIncomeReplacementIndex(for: transaction) {
+            let oldSourceID = incomes[pendingIndex].plaidMetadata?.transactionId
+            incomes[pendingIndex] = mergedPlaidIncome(
+                incomes[pendingIndex],
+                with: transaction,
+                accountName: accountName,
+                syncedAt: syncedAt
+            )
+            clearPlaidReviewItems(sourceIds: [transaction.id, oldSourceID].compactMap { $0 })
+            return .reconciled
+        }
+
         if transaction.amount < 0 {
             let income = makeReconciledIncome(from: transaction, accountName: accountName, syncedAt: syncedAt)
             if let match = bestManualIncomeMatch(for: income) {
@@ -836,6 +851,29 @@ private extension BudgetModel {
         expenses.append(expense)
         clearPlaidReviewItems(sourceIds: [transaction.id])
         return .imported
+    }
+
+    func pendingIncomeReplacementIndex(for transaction: PlaidSyncedTransaction) -> Int? {
+        guard !transaction.pending, transaction.amount < 0 else { return nil }
+        let matches = incomes.indices.filter { index in
+            let old = incomes[index]
+            guard old.plaidMetadata?.isPending == true,
+                  let oldSourceID = old.plaidMetadata?.transactionId,
+                  oldSourceID != transaction.id,
+                  old.plaidMetadata?.accountId == transaction.accountId,
+                  abs(old.amount - abs(transaction.amount)) < 0.01,
+                  dayDistance(old.date, transaction.date) <= 3 else {
+                return false
+            }
+            if let pendingSourceID = transaction.pendingTransactionId {
+                return oldSourceID == pendingSourceID
+            }
+            return namesLikelyMatchForReconciliation(old.name, transactionDisplayName(transaction))
+        }
+        // Refuse an ambiguous same-dollar income match. An explicit Plaid
+        // pending ID takes precedence when available; otherwise exactly one
+        // strong pending candidate is required.
+        return matches.count == 1 ? matches[0] : nil
     }
 
     func pendingExpenseReplacementIndex(for transaction: PlaidSyncedTransaction) -> Int? {
