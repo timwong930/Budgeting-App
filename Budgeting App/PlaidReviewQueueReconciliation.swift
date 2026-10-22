@@ -1,6 +1,31 @@
 import Foundation
 
 extension BudgetModel {
+    /// Review dismissal changes only the notification list. The imported
+    /// expense, income, transfer, and original Plaid source data are untouched.
+    @discardableResult
+    func dismissPlaidReviewReminder(id: UUID) -> PlaidReviewItem? {
+        guard let index = plaidReviewItems.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        let dismissed = plaidReviewItems.remove(at: index)
+        saveNow()
+        return dismissed
+    }
+
+    /// Restore reminders dismissed during the current review session. Source
+    /// IDs, rather than generated review UUIDs, ensure no duplicate reminders.
+    func restoreDismissedPlaidReviewReminders(_ reminders: [PlaidReviewItem]) {
+        var restored = false
+        for reminder in reminders where !plaidReviewItems.contains(where: {
+            $0.sourceId == reminder.sourceId
+        }) {
+            plaidReviewItems.append(reminder)
+            restored = true
+        }
+        if restored { saveNow() }
+    }
+
     /// Replayed Plaid deltas must not silently clear an unresolved review item merely
     /// because the Plaid-owned row already exists locally. Preserve prior review state
     /// until the user removes it or the source transaction is genuinely replaced/removed.
