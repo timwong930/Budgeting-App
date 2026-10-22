@@ -147,10 +147,12 @@ private extension BudgetModel {
                  $0.userClassifiedTransfer == true ||
                  $0.transferDestinationAccountId != nil ||
                  $0.creditCardPaymentTargetId != nil ||
-                 $0.creditCardPaymentTarget != nil)
+                 $0.creditCardPaymentTarget != nil ||
+                 $0.reviewCorrection != nil)
             } || incomes.contains {
                 $0.plaidMetadata?.transactionId == transaction.id &&
-                $0.plaidMetadata?.userConfirmedNotTransfer == true
+                ($0.plaidMetadata?.userConfirmedNotTransfer == true ||
+                 $0.reviewCorrection != nil)
             }
             guard !keptAsTransaction else { continue }
 
@@ -295,7 +297,8 @@ private extension BudgetModel {
             }
         }
         for expense in expenses {
-            guard let metadata = expense.plaidMetadata,
+            guard expense.reviewCorrection == nil,
+                  let metadata = expense.plaidMetadata,
                   let id = metadata.transactionId,
                   let accountId = metadata.accountId,
                   metadata.userConfirmedNotTransfer != true else { continue }
@@ -307,7 +310,8 @@ private extension BudgetModel {
             ))
         }
         for income in incomes {
-            guard let metadata = income.plaidMetadata,
+            guard income.reviewCorrection == nil,
+                  let metadata = income.plaidMetadata,
                   let id = metadata.transactionId,
                   let accountId = metadata.accountId,
                   metadata.userConfirmedNotTransfer != true else { continue }
@@ -923,6 +927,10 @@ private extension BudgetModel {
             date: transaction.date,
             bankName: accountName,
             bankAccountId: stableFinancialAccountId(forPlaidAccountId: transaction.accountId),
+            reviewCorrection: existing.reviewCorrection,
+            bucketFromName: existing.bucketFromName,
+            bucketToName: existing.bucketToName,
+            bucketCounterpartSourceId: existing.bucketCounterpartSourceId,
             plaidMetadata: reconciliationMetadata(
                 for: transaction,
                 syncedAt: syncedAt,
@@ -950,6 +958,10 @@ private extension BudgetModel {
             paymentAccount: accountName,
             paymentAccountId: stableFinancialAccountId(forPlaidAccountId: transaction.accountId),
             note: transaction.pending ? "Plaid pending transaction" : "",
+            reviewCorrection: existing.reviewCorrection,
+            bucketFromName: existing.bucketFromName,
+            bucketToName: existing.bucketToName,
+            bucketCounterpartSourceId: existing.bucketCounterpartSourceId,
             plaidMetadata: reconciliationMetadata(
                 for: transaction,
                 syncedAt: syncedAt,
@@ -992,6 +1004,7 @@ private extension BudgetModel {
     func bestManualExpenseMatch(for imported: Expense) -> PlaidManualMatch? {
         let scored = expenses.enumerated().compactMap { index, existing -> (Int, Double)? in
             guard existing.plaidMetadata?.transactionId == nil,
+                  existing.reviewCorrection == nil,
                   abs(existing.amount - imported.amount) < 0.01 else { return nil }
             guard let score = manualExpenseMatchScore(existing: existing, imported: imported) else { return nil }
             return (index, score)
@@ -1033,6 +1046,7 @@ private extension BudgetModel {
     func bestManualIncomeMatch(for imported: IncomeEntry) -> PlaidManualMatch? {
         let scored = incomes.enumerated().compactMap { index, existing -> (Int, Double)? in
             guard existing.plaidMetadata?.transactionId == nil,
+                  existing.reviewCorrection == nil,
                   abs(existing.amount - imported.amount) < 0.01 else { return nil }
             guard let score = manualIncomeMatchScore(existing: existing, imported: imported) else { return nil }
             return (index, score)
