@@ -640,15 +640,6 @@ private extension BudgetModel {
         )
     }
 
-    func plaidPairTransactionIds(from note: String) -> [String]? {
-        let prefix = "[PLAID_PAIR:"
-        guard note.hasPrefix(prefix),
-              let closingBracket = note.firstIndex(of: "]") else { return nil }
-        let start = note.index(note.startIndex, offsetBy: prefix.count)
-        let ids = note[start..<closingBracket].split(separator: "|").map(String.init)
-        return ids.count == 2 ? ids : nil
-    }
-
     @discardableResult
     func removeStalePlaidTransferPairs(
         presentTransactionIds: Set<String>,
@@ -1269,5 +1260,16 @@ private extension BudgetModel {
 
     func roundedReconciliationCurrency(_ value: Double) -> Double {
         (value * 100).rounded() / 100
+    }
+}
+
+extension BudgetModel {
+    func plaidPairTransactionIds(from note: String) -> [String]? {
+        let prefix = "[PLAID_PAIR:"
+        guard note.hasPrefix(prefix),
+              let closingBracket = note.firstIndex(of: "]") else { return nil }
+        let start = note.index(note.startIndex, offsetBy: prefix.count)
+        let ids = note[start..<closingBracket].split(separator: "|").map(String.init)
+        return ids.count == 2 ? ids : nil
     }
 }
