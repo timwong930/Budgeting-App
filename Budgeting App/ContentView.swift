@@ -10500,6 +10500,7 @@ struct EditExpenseView: View {
     @State private var note: String
     @State private var isCreditCardPayment: Bool
     @State private var targetCreditAccountName: String
+    @State private var targetCreditAccountId: UUID?
     @State private var isTransfer: Bool
     @State private var destinationAccountId: UUID?
 
@@ -10533,12 +10534,22 @@ struct EditExpenseView: View {
         return Array(Set(names)).sorted()
     }
 
-    private var creditCardOptions: [String] {
-        budget.creditAccounts
-            .map(\.name)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted()
+    private var creditCardOptions: [CreditAccount] {
+        budget.creditAccounts.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func stableCreditAccountId(_ card: CreditAccount) -> UUID {
+        if let externalID = card.plaidMetadata?.accountId,
+           let identity = budget.financialAccounts.first(where: {
+               $0.externalAccountId == externalID && $0.kind == .credit
+           }) {
+            return identity.id
+        }
+        return budget.financialAccounts.first(where: {
+            $0.kind == .credit && $0.id == card.id
+        })?.id ?? card.id
     }
 
     private func creditCardPaymentCategoryId() -> UUID {
@@ -10564,6 +10575,13 @@ struct EditExpenseView: View {
         let target = budget.creditCardPaymentTarget(for: expense) ?? ""
         _isCreditCardPayment = State(initialValue: !target.isEmpty)
         _targetCreditAccountName = State(initialValue: target)
+        _targetCreditAccountId = State(initialValue: expense.creditCardPaymentTargetId ??
+            budget.creditAccounts.first(where: { $0.name == target }).map { card in
+                budget.financialAccounts.first(where: {
+                    $0.kind == .credit && $0.externalAccountId == card.plaidMetadata?.accountId &&
+                    card.plaidMetadata?.accountId != nil
+                })?.id ?? card.id
+            })
         _isTransfer = State(initialValue: budget.isUserClassifiedTransfer(expense))
         _destinationAccountId = State(initialValue: expense.transferDestinationAccountId)
     }
@@ -10612,9 +10630,10 @@ struct EditExpenseView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
-                            Picker("Apply to card", selection: $targetCreditAccountName) {
-                                ForEach(creditCardOptions, id: \.self) { accountName in
-                                    Text(accountName).tag(accountName)
+                            Picker("Apply to card", selection: $targetCreditAccountId) {
+                                Text("Choose card").tag(Optional<UUID>.none)
+                                ForEach(creditCardOptions) { card in
+                                    Text(card.name).tag(Optional(stableCreditAccountId(card)))
                                 }
                             }
                         }
@@ -10661,15 +10680,15 @@ struct EditExpenseView: View {
                 customCategoryName = ""
             }
             .onAppear {
-                if isCreditCardPayment && targetCreditAccountName.isEmpty {
-                    targetCreditAccountName = creditCardOptions.first ?? ""
+                if isCreditCardPayment && targetCreditAccountId == nil {
+                    targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
                 }
             }
             .onChange(of: isCreditCardPayment) { _, newValue in
                 if newValue {
                     isTransfer = false
-                    if targetCreditAccountName.isEmpty {
-                        targetCreditAccountName = creditCardOptions.first ?? ""
+                    if targetCreditAccountId == nil {
+                        targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
                     }
                 }
             }
@@ -10697,7 +10716,10 @@ struct EditExpenseView: View {
                                   destinationOptions.contains(where: { $0.id == destinationAccountId }) else { return }
                             resolvedCategoryId = expense.categoryId
                         } else if isCreditCardPayment {
-                            guard creditCardOptions.contains(targetCreditAccountName), !paymentAccount.isEmpty else { return }
+                            guard let targetCreditAccountId,
+                                  creditCardOptions.contains(where: {
+                                      stableCreditAccountId($0) == targetCreditAccountId
+                                  }), !paymentAccount.isEmpty else { return }
                             resolvedCategoryId = creditCardPaymentCategoryId()
                         } else if useCustomCategory {
                             let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -10734,11 +10756,11 @@ struct EditExpenseView: View {
                                 paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
                                 paymentAccountId: expense.paymentAccountId,
                                 note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName : nil,
-                                creditCardPaymentTargetId: isCreditCardPayment ?
-                                    budget.financialAccounts.first(where: {
-                                        $0.kind == .credit && $0.name == targetCreditAccountName
-                                    })?.id : nil,
+                                creditCardPaymentTarget: isCreditCardPayment ?
+                                    creditCardOptions.first(where: {
+                                        stableCreditAccountId($0) == targetCreditAccountId
+                                    })?.name : nil,
+                                creditCardPaymentTargetId: isCreditCardPayment ? targetCreditAccountId : nil,
                                 transferDestinationAccountId: isTransfer ? destinationAccountId : nil,
                                 transferDestinationAccountName: isTransfer ?
                                     (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ??
@@ -10754,7 +10776,10 @@ struct EditExpenseView: View {
                         (isTransfer && (paymentAccount.isEmpty ||
                             (destinationAccountId != nil &&
                              !destinationOptions.contains(where: { $0.id == destinationAccountId })))) ||
-                        (isCreditCardPayment && (!creditCardOptions.contains(targetCreditAccountName) || paymentAccount.isEmpty)) ||
+                        (isCreditCardPayment && (targetCreditAccountId == nil || paymentAccount.isEmpty ||
+                            !creditCardOptions.contains(where: {
+                                stableCreditAccountId($0) == targetCreditAccountId
+                            }))) ||
                         (!isTransfer && !isCreditCardPayment && !useCustomCategory && categoryId == nil))
                 }
             }
