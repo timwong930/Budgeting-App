@@ -116,6 +116,26 @@
 
 **Status:** source changes and synthetic test cases are committed; **Xcode build, functional test execution, simulator and actual Plaid acceptance have not been performed**. Keep [PR #22](https://github.com/timwong930/Budgeting-App/pull/22) and [PR #23](https://github.com/timwong930/Budgeting-App/pull/23) as drafts until accepted.
 
+
+## TIM-193 — Budget Activity review queue relocation (October 22, 2026)
+
+**Request:** Financial review controls were buried in Plaid Sync. Move transaction decisions to an appropriate area of the Budget page.
+
+**Implemented (source-level only):**
+
+- The main **Budget → Activity** navigation row displays the live number of unresolved Plaid review items whenever there are any. When none are outstanding, it displays the existing spending summary.
+- **Activity → Review transactions** is always discoverable under Explore, including when no items are pending; when items exist, a prominent additional review card appears above recent activity.
+- The new **BudgetFinancialReviewView** displays the existing `BudgetModel.plaidReviewItems` array directly. It covers all outstanding dates, independent of the selected budget month.
+- Review items allow edits to original expense/income where present, two-sided matching **only** between observed Plaid account transactions, confirmed classification as a withdrawal/expense, and dismiss reminder with an in-view Undo.
+- The same screen shows additional bank/card potential matches and offers verified, source-backed Undo for existing linked transfers; uncertain/old pairs without original data cannot be fabricated or undone blindly.
+- Match, withdrawal, and unmatch actions require an explicit confirmation and call existing BudgetModel reconciliation APIs. Dismissing a reminder never alters source transactions or balances.
+- Plaid Sync no longer duplicates review actions. It points users to **Budget → Activity → Review transactions** and retains connection, backend, sync, and institution health controls.
+- The account focus area no longer incorrectly sends users to Manage accounts for transaction review.
+- Review dismissal and restoration use testable model functions; restoration deduplicates source IDs and avoids resurrecting already confirmed pairs.
+- Added synthetic regression source for dismissal/undo preserving Plaid rows, deduplication, and suppression of obsolete confirmed reviews.
+
+**Release checks outstanding:** Xcode compile, actual model regression execution, iPhone Simulator and VoiceOver/Dynamic Type/layout check, real Plaid sync and editing persistence, and a review of sheet navigation back to Budget Activity. Neither PR #22 nor stacked draft PR #23 has been merged to main.
+
 ## Design reference
 
 - [Apple Human Interface Guidelines — Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
