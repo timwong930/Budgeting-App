@@ -827,9 +827,9 @@ struct BudgetAccountsWorkspaceView: View {
                             .controlSize(.small)
                     }
                     if !budget.plaidReviewItems.isEmpty {
-                        Button("Manage accounts", action: onManageBanks)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        Text("Resolve imported transactions in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
