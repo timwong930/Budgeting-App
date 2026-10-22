@@ -1395,10 +1395,14 @@ struct ContentView: View {
 
             budgetSubmenuLink(
                 title: "Activity",
-                subtitle: "Recurring charges, trends, and recent transactions",
+                subtitle: budget.plaidReviewItems.isEmpty ?
+                    "Recurring charges, trends, and recent transactions" :
+                    "\(budget.plaidReviewItems.count) to review · recurring charges and recent transactions",
                 systemImage: "list.bullet.rectangle.portrait",
                 tint: .pink,
-                valueLabel: totalMonthlySpent.formatted(.currency(code: "USD"))
+                valueLabel: budget.plaidReviewItems.isEmpty ?
+                    totalMonthlySpent.formatted(.currency(code: "USD")) :
+                    "\(budget.plaidReviewItems.count) to review"
             ) {
                 budgetActivitySubmenu
             }
