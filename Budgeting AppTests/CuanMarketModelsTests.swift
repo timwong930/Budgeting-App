@@ -32,6 +32,10 @@ struct CuanMarketModelsTests {
         testPlaidManualTransferReviewPersists()
         testPlaidReviewKeepAsWithdrawalPersists()
         testBudgetActivityReviewDismissAndUndoPreserveSourceRows()
+        testPlaidDuplicateIncomeCorrectionAndRestore()
+        testManualDuplicateBalancesAreReversible()
+        testSameAccountBucketPairRequiresUserConfirmation()
+        testCorrectionCodableBackwardsCompatibility()
         testPlaidUnrelatedMatchingAmountDoesNotPair()
         testPlaidAmbiguousTransfersStayUnpaired()
         testPlaidLegacyMispairedTransferIsRemovedOnReplay()
@@ -736,6 +740,169 @@ struct CuanMarketModelsTests {
         budget.restoreDismissedPlaidReviewReminders([review])
         assert(budget.plaidReviewItems.isEmpty,
                "Undo dismissal cannot resurrect a review for a transaction already linked to a confirmed pair")
+    }
+
+
+    private static func testPlaidDuplicateIncomeCorrectionAndRestore() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_000_000)
+        let account = PlaidSyncedAccount(
+            id: "synthetic-payroll-check", itemId: "synthetic-payroll-item",
+            name: "Example Checking", type: .depository, subtype: "checking",
+            currentBalance: 1200, availableBalance: 1200, creditLimit: nil,
+            institutionName: "Example Bank"
+        )
+        let payroll1 = PlaidSyncedTransaction(
+            id: "synthetic-payroll-original", accountId: account.id,
+            itemId: account.itemId, name: "PAYROLL POSTING", merchantName: nil,
+            amount: -452.38, date: date, pending: false,
+            category: "INCOME", removed: false
+        )
+        let payroll2 = PlaidSyncedTransaction(
+            id: "synthetic-payroll-duplicate", accountId: account.id,
+            itemId: account.itemId, name: "PAYROLL DUPLICATE", merchantName: nil,
+            amount: -452.38, date: date, pending: false,
+            category: "INCOME", removed: false
+        )
+        let payload = PlaidSyncPayload(
+            accounts: [account], transactions: [payroll1, payroll2],
+            creditLiabilities: [], holdings: [], investmentTransactions: [],
+            connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.incomes.count == 2, "Both distinct source transaction IDs must remain in raw history")
+        guard var duplicate = budget.incomes.first(where: {
+            $0.plaidMetadata?.transactionId == payroll2.id
+        }) else {
+            assertionFailure("Synthetic duplicate must be imported")
+            return
+        }
+        let originalID = duplicate.id
+        duplicate.reviewCorrection = .duplicate
+        duplicate.plaidMetadata = nil // Simulate an older editor save that dropped source metadata.
+        budget.updateIncomeEntry(duplicate)
+        assert(budget.incomes.count == 2, "Mark Duplicate hides the extra income without deleting bank data")
+        assert(budget.incomes.filter { !budget.isExcludedFromIncome($0) }.count == 1,
+               "Exactly one payroll posting should contribute to visible income")
+        assert(budget.incomes.first(where: { $0.id == originalID })?.plaidMetadata?.transactionId == payroll2.id,
+               "Editing a duplicate must preserve the original Plaid ID")
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.incomes.count == 2 &&
+               budget.incomes.first(where: { $0.id == originalID })?.reviewCorrection == .duplicate,
+               "Repeated Plaid sync must not reimport or unhide the marked duplicate")
+        assert(budget.restoreDuplicateIncome(id: originalID), "User must be able to restore a hidden income")
+        assert(budget.incomes.filter { $0.reviewCorrection == nil }.count == 2,
+               "Restore returns the hidden item to income calculations")
+    }
+
+    private static func testManualDuplicateBalancesAreReversible() {
+        let budget = BudgetModel()
+        budget.bankAccounts = [BankAccount(name: "Example Checking", balance: 100)]
+        let manualIncome = IncomeEntry(name: "Manual deposit", amount: 25, bankName: "Example Checking")
+        budget.addIncomeEntry(manualIncome)
+        assert(budget.bankAccounts[0].balance == 125, "Manual deposit initially updates a local account")
+        var excluded = budget.incomes[0]
+        excluded.reviewCorrection = .duplicate
+        budget.updateIncomeEntry(excluded)
+        assert(budget.bankAccounts[0].balance == 100, "Marking a manual deposit duplicate reverses its local balance impact")
+        assert(budget.restoreDuplicateIncome(id: manualIncome.id), "Manual duplicate income can be restored")
+        assert(budget.bankAccounts[0].balance == 125, "Restoring income reapplies the original local impact exactly once")
+
+        let category = Category(name: "Everyday", allocatedAmount: 100)
+        budget.needsCategories = [category]
+        budget.addExpense(Expense(name: "Manual purchase", amount: 20, section: .needs, categoryId: category.id, paymentAccount: "Example Checking"))
+        assert(budget.bankAccounts[0].balance == 105, "Manual expense reduces the account balance")
+        var charge = budget.expenses[0]
+        charge.reviewCorrection = .duplicate
+        budget.updateExpense(charge)
+        assert(budget.bankAccounts[0].balance == 125, "Marking manual purchase duplicate reverses its local balance impact")
+        assert(budget.restoreDuplicateExpense(id: charge.id), "A duplicate expense can be restored")
+        assert(budget.bankAccounts[0].balance == 105, "Restoring manual expense reverses the correction without double counting")
+    }
+
+    private static func testSameAccountBucketPairRequiresUserConfirmation() {
+        let budget = BudgetModel()
+        let date = Date(timeIntervalSince1970: 1_780_020_000)
+        let account = PlaidSyncedAccount(
+            id: "synthetic-bucket-account", itemId: "synthetic-bucket-item",
+            name: "Example Savings", type: .depository, subtype: "savings",
+            currentBalance: 1000, availableBalance: 1000, creditLimit: nil,
+            institutionName: "Example Bank"
+        )
+        let debit = PlaidSyncedTransaction(
+            id: "bucket-debit", accountId: account.id, itemId: account.itemId,
+            name: "ENVELOPE REALLOCATION OUT", merchantName: nil,
+            amount: 73.16, date: date, pending: false,
+            category: "OTHER", removed: false
+        )
+        let credit = PlaidSyncedTransaction(
+            id: "bucket-credit", accountId: account.id, itemId: account.itemId,
+            name: "ENVELOPE REALLOCATION IN", merchantName: nil,
+            amount: -73.16, date: date, pending: false,
+            category: "OTHER", removed: false
+        )
+        let payload = PlaidSyncPayload(
+            accounts: [account], transactions: [debit, credit],
+            creditLiabilities: [], holdings: [], investmentTransactions: [],
+            connectionStatuses: []
+        )
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.cashTransfers.isEmpty, "Never misrepresent same-account bucket allocations as bank-to-bank transfers")
+        guard let outgoing = budget.expenses.first(where: { $0.plaidMetadata?.transactionId == debit.id }),
+              let incoming = budget.incomes.first(where: { $0.plaidMetadata?.transactionId == credit.id }) else {
+            assertionFailure("Synthetic bucket entries should be imported separately")
+            return
+        }
+        assert(outgoing.reviewCorrection == nil && incoming.reviewCorrection == nil,
+               "Same amount/account alone must not auto-pair two movements")
+        assert(budget.bucketTransferIncomeCandidates(for: outgoing).contains(where: { $0.id == incoming.id }),
+               "A real opposite-signed same-account movement should be suggested for manual review")
+        assert(budget.confirmInternalBucketTransfer(expenseID: outgoing.id, incomeID: incoming.id,
+                                                   fromBucket: "Bills", toBucket: "Savings"),
+               "User can confirm two real bucket-side Plaid entries")
+        assert(budget.expenses[0].reviewCorrection == .bucketTransfer &&
+               budget.incomes[0].reviewCorrection == .bucketTransfer,
+               "Both sides must be excluded from income and expenses")
+        assert(budget.expenses[0].bucketCounterpartSourceId == credit.id &&
+               budget.incomes[0].bucketCounterpartSourceId == debit.id,
+               "Both real source IDs must be retained as reciprocal bucket references")
+        assert(budget.bankAccounts.first(where: { $0.name == account.name })?.balance == 1000,
+               "Reclassifying buckets never mutates the real Plaid reported balance")
+        _ = budget.applyPlaidSyncReconciled(payload)
+        assert(budget.expenses.count == 1 && budget.incomes.count == 1 &&
+               budget.expenses[0].reviewCorrection == .bucketTransfer &&
+               budget.incomes[0].reviewCorrection == .bucketTransfer,
+               "Bucket correction must survive Plaid replay without duplicate transactions")
+        var reverted = budget.expenses[0]
+        reverted.reviewCorrection = nil
+        reverted.bucketCounterpartSourceId = nil
+        budget.updateExpense(reverted)
+        assert(budget.incomes[0].bucketCounterpartSourceId == nil,
+               "Changing one side of a bucket pair must clear the stale reference on the other side")
+    }
+
+    private static func testCorrectionCodableBackwardsCompatibility() {
+        let income = IncomeEntry(
+            name: "Synthetic bucket credit", amount: 45,
+            bankName: "Example Checking",
+            reviewCorrection: .bucketTransfer,
+            bucketFromName: "Bills", bucketToName: "Emergency"
+        )
+        let decodedIncome = try! JSONDecoder().decode(IncomeEntry.self, from: JSONEncoder().encode(income))
+        assert(decodedIncome.reviewCorrection == .bucketTransfer && decodedIncome.bucketToName == "Emergency",
+               "Bucket correction and labels survive income JSON roundtrip")
+
+        let expense = Expense(
+            name: "Synthetic hidden duplicate", amount: 16,
+            section: .needs, categoryId: UUID(),
+            reviewCorrection: .duplicate
+        )
+        let decodedExpense = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(expense))
+        assert(decodedExpense.reviewCorrection == .duplicate, "Duplicate exclusion survives local persistence")
+        let old = Expense(name: "Old entry", amount: 8, section: .needs, categoryId: UUID())
+        let decodedOld = try! JSONDecoder().decode(Expense.self, from: JSONEncoder().encode(old))
+        assert(decodedOld.reviewCorrection == nil && decodedOld.bucketCounterpartSourceId == nil,
+               "Older expense files remain readable without correction properties")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
