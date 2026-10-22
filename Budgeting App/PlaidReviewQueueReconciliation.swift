@@ -40,7 +40,8 @@ extension BudgetModel {
             return false
         }
         var restored = entry
-        restored.reviewCorrection = nil
+        restored.reviewCorrection = restored.correctionBeforeDuplicate
+        restored.correctionBeforeDuplicate = nil
         restored.bucketCounterpartSourceId = nil
         updateIncomeEntry(restored)
         saveNow()
@@ -53,7 +54,8 @@ extension BudgetModel {
             return false
         }
         var restored = entry
-        restored.reviewCorrection = nil
+        restored.reviewCorrection = restored.correctionBeforeDuplicate
+        restored.correctionBeforeDuplicate = nil
         restored.bucketCounterpartSourceId = nil
         updateExpense(restored)
         saveNow()
