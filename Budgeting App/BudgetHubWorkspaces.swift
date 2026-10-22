@@ -2538,6 +2538,60 @@ struct BudgetFinancialReviewView: View {
             }
 
             Section {
+                let hiddenIncomes = budget.incomes.filter { $0.reviewCorrection == .duplicate }
+                    .sorted { $0.date > $1.date }
+                let hiddenExpenses = budget.expenses.filter { $0.reviewCorrection == .duplicate }
+                    .sorted { $0.date > $1.date }
+                if hiddenIncomes.isEmpty && hiddenExpenses.isEmpty {
+                    Text("No transactions have been marked as duplicates.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(hiddenIncomes) { income in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(income.name).font(.subheadline.weight(.semibold))
+                                Text("\(income.bankName) · \(income.date.formatted(date: .abbreviated, time: .omitted)) · +\(income.amount.formatted(.currency(code: "USD")))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Restore") {
+                                if budget.restoreDuplicateIncome(id: income.id) {
+                                    feedbackMessage = "Income restored to activity and totals."
+                                } else {
+                                    feedbackMessage = "This duplicate could not be restored."
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    ForEach(hiddenExpenses) { expense in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(expense.name).font(.subheadline.weight(.semibold))
+                                Text("\(expense.paymentAccount) · \(expense.date.formatted(date: .abbreviated, time: .omitted)) · -\(expense.amount.formatted(.currency(code: "USD")))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Restore") {
+                                if budget.restoreDuplicateExpense(id: expense.id) {
+                                    feedbackMessage = "Expense restored to activity and totals."
+                                } else {
+                                    feedbackMessage = "This duplicate could not be restored."
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            } header: {
+                Text("Hidden duplicates")
+            } footer: {
+                Text("Mark duplicates from the transaction editor. Hidden items keep their original Plaid source and can be restored here without losing bank history.")
+            }
+
+            Section {
                 if linkedMovements.isEmpty {
                     Text("No linked bank or credit-card movements to correct.")
                         .foregroundStyle(.secondary)
