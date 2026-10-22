@@ -2385,13 +2385,8 @@ struct BudgetFinancialReviewView: View {
                 }
                 if !dismissedItems.isEmpty {
                     Button {
-                        for item in dismissedItems where !budget.plaidReviewItems.contains(where: {
-                            $0.sourceId == item.sourceId
-                        }) {
-                            budget.plaidReviewItems.append(item)
-                        }
+                        budget.restoreDismissedPlaidReviewReminders(dismissedItems)
                         dismissedItems.removeAll()
-                        budget.saveNow()
                         feedbackMessage = "The review reminders were restored."
                     } label: {
                         Label("Undo dismissed reminders", systemImage: "arrow.uturn.backward")
@@ -2605,9 +2600,8 @@ struct BudgetFinancialReviewView: View {
     }
 
     private func dismissReminder(_ item: PlaidReviewItem) {
-        guard let index = budget.plaidReviewItems.firstIndex(where: { $0.id == item.id }) else { return }
-        dismissedItems.append(budget.plaidReviewItems.remove(at: index))
-        budget.saveNow()
+        guard let dismissed = budget.dismissPlaidReviewReminder(id: item.id) else { return }
+        dismissedItems.append(dismissed)
         feedbackMessage = "Review reminder dismissed. The underlying transaction was not changed."
     }
 }
