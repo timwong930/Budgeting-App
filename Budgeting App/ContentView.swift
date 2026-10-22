@@ -10499,7 +10499,6 @@ struct EditExpenseView: View {
     @State private var paymentAccount: String
     @State private var note: String
     @State private var isCreditCardPayment: Bool
-    @State private var targetCreditAccountName: String
     @State private var targetCreditAccountId: UUID?
     @State private var isTransfer: Bool
     @State private var destinationAccountId: UUID?
@@ -10574,7 +10573,6 @@ struct EditExpenseView: View {
         _note = State(initialValue: expense.note)
         let target = budget.creditCardPaymentTarget(for: expense) ?? ""
         _isCreditCardPayment = State(initialValue: !target.isEmpty)
-        _targetCreditAccountName = State(initialValue: target)
         _targetCreditAccountId = State(initialValue: expense.creditCardPaymentTargetId ??
             budget.creditAccounts.first(where: { $0.name == target }).map { card in
                 budget.financialAccounts.first(where: {
