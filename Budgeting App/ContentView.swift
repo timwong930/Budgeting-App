@@ -3756,7 +3756,9 @@ struct ContentView: View {
                 id: expense.id,
                 title: expense.name,
                 subtitle: expense.reviewCorrection == .bucketTransfer ?
-                    "Internal bucket transfer" :
+                    "Internal bucket transfer" +
+                        ((expense.bucketFromName?.isEmpty == false && expense.bucketToName?.isEmpty == false) ?
+                            " · \(expense.bucketFromName ?? "") → \(expense.bucketToName ?? "")" : "") :
                     (budget.isUserClassifiedTransfer(expense) ?
                     "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
                     (budget.isCreditCardPayment(expense) ?
@@ -3783,7 +3785,9 @@ struct ContentView: View {
                 id: income.id,
                 title: income.name,
                 subtitle: income.reviewCorrection == .bucketTransfer ?
-                    "Internal bucket transfer" :
+                    "Internal bucket transfer" +
+                        ((income.bucketFromName?.isEmpty == false && income.bucketToName?.isEmpty == false) ?
+                            " · \(income.bucketFromName ?? "") → \(income.bucketToName ?? "")" : "") :
                     (income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName),
                 amount: income.amount,
                 date: income.date,
