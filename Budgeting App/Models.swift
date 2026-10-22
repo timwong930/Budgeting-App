@@ -2580,6 +2580,16 @@ class BudgetModel: ObservableObject {
         }
         if resolved.bankAccountId == nil { resolved.bankAccountId = resolveFinancialAccountId(legacyName: resolved.bankName, allowedKinds: [.depository], metadata: resolved.plaidMetadata) }
         incomes[index] = resolved
+        if previousEntry.bucketCounterpartSourceId != resolved.bucketCounterpartSourceId ||
+            (previousEntry.reviewCorrection == .bucketTransfer &&
+             resolved.reviewCorrection != .bucketTransfer) {
+            if let sourceID = previousEntry.plaidMetadata?.transactionId {
+                clearBucketCounterpartLink(
+                    sourceID: sourceID,
+                    counterpartID: previousEntry.bucketCounterpartSourceId
+                )
+            }
+        }
         applyBalanceImpact(for: resolved, multiplier: 1)
     }
 
@@ -2610,6 +2620,16 @@ class BudgetModel: ObservableObject {
             resolved.paymentAccountId = previousExpense.paymentAccountId
         }
         expenses[index] = resolved
+        if previousExpense.bucketCounterpartSourceId != resolved.bucketCounterpartSourceId ||
+            (previousExpense.reviewCorrection == .bucketTransfer &&
+             resolved.reviewCorrection != .bucketTransfer) {
+            if let sourceID = previousExpense.plaidMetadata?.transactionId {
+                clearBucketCounterpartLink(
+                    sourceID: sourceID,
+                    counterpartID: previousExpense.bucketCounterpartSourceId
+                )
+            }
+        }
         // Classifying an individual withdrawal as a transfer or card payment
         // must not train a merchant-wide spending category rule.
         if !isExcludedFromSpending(resolved) {
