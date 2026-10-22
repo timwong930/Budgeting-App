@@ -30,7 +30,7 @@ struct BudgetActivityWorkspaceView: View {
     private var monthIncome: [IncomeEntry] {
         guard let monthInterval else { return [] }
         return budget.incomes
-            .filter { monthInterval.contains($0.date) }
+            .filter { monthInterval.contains($0.date) && !budget.isExcludedFromIncome($0) }
             .sorted { $0.date > $1.date }
     }
 
@@ -39,6 +39,20 @@ struct BudgetActivityWorkspaceView: View {
         return budget.savingsEntries
             .filter { monthInterval.contains($0.date) }
             .sorted { $0.date > $1.date }
+    }
+
+    private var monthBucketExpenses: [Expense] {
+        guard let monthInterval else { return [] }
+        return budget.expenses.filter {
+            monthInterval.contains($0.date) && $0.reviewCorrection == .bucketTransfer
+        }
+    }
+
+    private var monthBucketIncome: [IncomeEntry] {
+        guard let monthInterval else { return [] }
+        return budget.incomes.filter {
+            monthInterval.contains($0.date) && $0.reviewCorrection == .bucketTransfer
+        }
     }
 
     private var inflow: Double { monthIncome.reduce(0) { $0 + $1.amount } }
@@ -50,7 +64,9 @@ struct BudgetActivityWorkspaceView: View {
         let expenses = monthExpenses.map(BudgetActivityItem.expense)
         let income = monthIncome.map(BudgetActivityItem.income)
         let savings = monthSavings.map(BudgetActivityItem.savings)
-        return (expenses + income + savings).sorted { $0.date > $1.date }
+        let bucketMovements = monthBucketExpenses.map(BudgetActivityItem.expense) +
+            monthBucketIncome.map(BudgetActivityItem.income)
+        return (expenses + income + savings + bucketMovements).sorted { $0.date > $1.date }
     }
 
     private var activeRecurring: [RecurringPayment] {
@@ -67,7 +83,7 @@ struct BudgetActivityWorkspaceView: View {
     }
 
     private var transactionCount: Int {
-        monthExpenses.count + monthIncome.count + monthSavings.count
+        recentItems.count
     }
 
     var body: some View {
@@ -287,8 +303,16 @@ private enum BudgetActivityItem: Identifiable {
 
     var subtitle: String {
         switch self {
-        case .expense(let value): return value.paymentAccount.isEmpty ? value.section.title : value.paymentAccount
-        case .income(let value): return value.bankName.isEmpty ? "Income" : value.bankName
+        case .expense(let value):
+            if value.reviewCorrection == .bucketTransfer {
+                return "Bucket transfer" + ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName!)" : "")
+            }
+            return value.paymentAccount.isEmpty ? value.section.title : value.paymentAccount
+        case .income(let value):
+            if value.reviewCorrection == .bucketTransfer {
+                return "Bucket transfer" + ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName!)" : "")
+            }
+            return value.bankName.isEmpty ? "Income" : value.bankName
         case .savings: return "Savings"
         }
     }
@@ -1674,7 +1698,7 @@ struct BudgetReportsWorkspaceView: View {
     }
     private var incomes: [IncomeEntry] {
         guard let interval else { return [] }
-        return budget.incomes.filter { interval.contains($0.date) }
+        return budget.incomes.filter { interval.contains($0.date) && !budget.isExcludedFromIncome($0) }
     }
     private var savings: [SavingsEntry] {
         guard let interval else { return [] }
@@ -1825,7 +1849,7 @@ private enum BudgetReportData {
 
     static func incomes(budget: BudgetModel, month: Date) -> [IncomeEntry] {
         guard let interval = Calendar.current.dateInterval(of: .month, for: month) else { return [] }
-        return budget.incomes.filter { interval.contains($0.date) }
+        return budget.incomes.filter { interval.contains($0.date) && !budget.isExcludedFromIncome($0) }
     }
 
     static func savings(budget: BudgetModel, month: Date) -> [SavingsEntry] {
