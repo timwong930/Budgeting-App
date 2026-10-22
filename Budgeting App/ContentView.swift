@@ -10571,6 +10571,9 @@ struct EditExpenseView: View {
     @State private var bucketFrom: String
     @State private var bucketTo: String
     @State private var confirmDuplicate = false
+    @State private var selectedBucketIncome: IncomeEntry?
+    @State private var confirmBucketMatch = false
+    @State private var bucketMatchError: String?
     @State private var counterpartToConfirm: PlaidTransferReviewLeg?
     @State private var showingMatchConfirmation = false
     @State private var matchError: String?
@@ -10816,6 +10819,35 @@ struct EditExpenseView: View {
                     Text("Expense Details")
                 }
 
+                if correction == .bucketTransfer && expense.plaidMetadata != nil {
+                    Section("Pair bucket movements") {
+                        if let pairedID = expense.bucketCounterpartSourceId {
+                            Text("Linked to observed bucket transaction \(pairedID.suffix(6)). Change classification to unlink.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            let candidates = budget.bucketTransferIncomeCandidates(for: expense)
+                            if candidates.isEmpty {
+                                Text("No opposite entry in this same account has been observed yet. You can still mark this as a bucket transfer without adding a fictional deposit.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(candidates) { candidate in
+                                    Button {
+                                        selectedBucketIncome = candidate
+                                        confirmBucketMatch = true
+                                    } label: {
+                                        Label("Link \(candidate.name) · \(candidate.amount.formatted(.currency(code: "USD")))", systemImage: "arrow.left.arrow.right")
+                                    }
+                                }
+                            }
+                        }
+                        if let bucketMatchError {
+                            Text(bucketMatchError).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
+
                 if correction == nil && !matchingAccountMovements.isEmpty {
                     Section("Observed Matching Account Activity") {
                         Text("Select a real transaction from the receiving bank or card to link both sides. This is separate from classifying the withdrawal.")
@@ -10840,6 +10872,29 @@ struct EditExpenseView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .confirmationDialog(
+                "Confirm this internal bucket transfer?",
+                isPresented: $confirmBucketMatch,
+                titleVisibility: .visible
+            ) {
+                Button("Link both bucket movements") {
+                    guard let selectedBucketIncome,
+                          budget.confirmInternalBucketTransfer(
+                            expenseID: expense.id,
+                            incomeID: selectedBucketIncome.id,
+                            fromBucket: bucketFrom,
+                            toBucket: bucketTo
+                          ) else {
+                        bucketMatchError = "The opposing transaction is no longer eligible. No link was created."
+                        return
+                    }
+                    Haptics.success()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Only link two actual opposite-signed Plaid entries belonging to the same bank account. Both will be excluded from income and spending; Plaid balances remain unchanged.")
+            }
             .confirmationDialog(
                 "Hide this duplicate transaction?",
                 isPresented: $confirmDuplicate,
