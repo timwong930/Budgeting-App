@@ -20,6 +20,13 @@ extension BudgetModel {
         for reminder in reminders where !plaidReviewItems.contains(where: {
             $0.sourceId == reminder.sourceId
         }) {
+            // A match may have been confirmed after the reminder was
+            // dismissed. Undoing dismissal cannot resurrect stale advice for
+            // a Plaid transaction that is already part of a confirmed pair.
+            let nowLinked = cashTransfers.contains { transfer in
+                plaidPairTransactionIds(from: transfer.note)?.contains(reminder.sourceId) == true
+            }
+            guard !nowLinked else { continue }
             plaidReviewItems.append(reminder)
             restored = true
         }
