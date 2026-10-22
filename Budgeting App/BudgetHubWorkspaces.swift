@@ -904,7 +904,7 @@ struct BudgetAccountsWorkspaceView: View {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1445,7 +1445,7 @@ private struct BudgetCreditAccountsWorkspaceView: View {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1465,7 +1465,7 @@ private struct BudgetCreditCardWorkspaceDetail: View {
     private var balance: Double {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1486,11 +1486,11 @@ private struct BudgetCreditCardWorkspaceDetail: View {
 
     private var activity: [(id: String, date: Date, name: String, amount: Double, isPayment: Bool)] {
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let charges = budget.expenses.compactMap { expense -> (String, Date, String, Double, Bool)? in
+        let charges = budget.expenses.filter { $0.reviewCorrection == nil }.compactMap { expense -> (String, Date, String, Double, Bool)? in
             guard expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized else { return nil }
             return ("charge-\(expense.id.uuidString)", expense.date, expense.name, expense.amount, false)
         }
-        let payments = budget.expenses.compactMap { expense -> (String, Date, String, Double, Bool)? in
+        let payments = budget.expenses.filter { $0.reviewCorrection == nil }.compactMap { expense -> (String, Date, String, Double, Bool)? in
             guard let target = budget.creditCardPaymentTarget(for: expense),
                   target.caseInsensitiveCompare(account.name) == .orderedSame else { return nil }
             return ("payment-\(expense.id.uuidString)", expense.date, expense.name, expense.amount, true)
