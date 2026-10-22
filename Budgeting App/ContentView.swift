@@ -10502,6 +10502,18 @@ struct EditExpenseView: View {
     @State private var targetCreditAccountId: UUID?
     @State private var isTransfer: Bool
     @State private var destinationAccountId: UUID?
+    @State private var counterpartToConfirm: PlaidTransferReviewLeg?
+    @State private var showingMatchConfirmation = false
+    @State private var matchError: String?
+
+    private var matchingAccountMovements: [PlaidTransferReviewLeg] {
+        guard let sourceId = expense.plaidMetadata?.transactionId,
+              let destination = isTransfer ? destinationAccountId :
+                (isCreditCardPayment ? targetCreditAccountId : nil)
+        else { return [] }
+        return budget.plaidTransferReviewCandidates(sourceId: sourceId)
+            .filter { $0.accountId == destination }
+    }
 
     private var destinationOptions: [FinancialAccount] {
         let source = expense.paymentAccountId ??
@@ -10582,6 +10594,50 @@ struct EditExpenseView: View {
             })
         _isTransfer = State(initialValue: budget.isUserClassifiedTransfer(expense))
         _destinationAccountId = State(initialValue: expense.transferDestinationAccountId)
+    }
+
+
+    private func confirmObservedCounterpart() {
+        guard let matched = counterpartToConfirm,
+              let sourceId = expense.plaidMetadata?.transactionId,
+              matchingAccountMovements.contains(where: { $0.id == matched.id }),
+              amount > 0, abs(amount - abs(matched.signedAmount)) < 0.01
+        else {
+            matchError = "The matching transaction changed or the amounts differ. Review the latest account activity before linking."
+            return
+        }
+
+        // Update the source row before pairing, retaining the original Plaid
+        // identity and the user's edits. The pairing code itself also requires
+        // an observed opposite leg and rejects duplicate or ambiguous matches.
+        var updated = expense
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.amount = amount
+        updated.date = date
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.userClassifiedTransfer = isTransfer ? true : nil
+        updated.transferDestinationAccountId = isTransfer ? destinationAccountId : nil
+        updated.transferDestinationAccountName = isTransfer ?
+            (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ??
+                "External / not connected") : nil
+        if isCreditCardPayment {
+            updated.creditCardPaymentTargetId = targetCreditAccountId
+            updated.creditCardPaymentTarget = creditCardOptions.first(where: {
+                stableCreditAccountId($0) == targetCreditAccountId
+            })?.name
+        } else {
+            updated.creditCardPaymentTargetId = nil
+            updated.creditCardPaymentTarget = nil
+        }
+        updated.plaidMetadata?.userConfirmedNotTransfer = false
+        budget.updateExpense(updated)
+
+        if budget.confirmPlaidTransferReview(sourceId: sourceId, counterpartId: matched.id) {
+            Haptics.success()
+            dismiss()
+        } else {
+            matchError = "The match could not be verified. Your classification was saved, but no linked transfer was created."
+        }
     }
 
     private var entryTitle: String {
@@ -10668,10 +10724,45 @@ struct EditExpenseView: View {
                 } header: {
                     Text("Expense Details")
                 }
+
+                if !matchingAccountMovements.isEmpty {
+                    Section("Observed Matching Account Activity") {
+                        Text("Select a real transaction from the receiving bank or card to link both sides. This is separate from classifying the withdrawal.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(matchingAccountMovements) { candidate in
+                            Button {
+                                counterpartToConfirm = candidate
+                                showingMatchConfirmation = true
+                            } label: {
+                                Label("Confirm with \(candidate.accountName) · \(abs(candidate.signedAmount).formatted(.currency(code: "USD")))", systemImage: "arrow.left.arrow.right")
+                            }
+                        }
+                    }
+                }
+                if let matchError {
+                    Section {
+                        Text(matchError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(entryTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(
+                "Link these account transactions?",
+                isPresented: $showingMatchConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Confirm Two-Sided Match") {
+                    confirmObservedCounterpart()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Link only if the two account-side entries represent the same movement. An incorrect match can be undone in the transfer review screen.")
+            }
             .onChange(of: section) { _, _ in
                 categoryId = categories.first?.id
                 useCustomCategory = false
