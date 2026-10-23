@@ -583,6 +583,7 @@ private struct PlaidUnpairedMovementView: View {
     @ObservedObject var budget: BudgetModel
     @Environment(\.dismiss) private var dismiss
     @State private var statusMessage: String?
+    @State private var proposedMatch: PlaidTransferMatchProposal?
 
     private var sourceId: String? {
         guard transfer.note.hasPrefix("[PLAID_SINGLE:"),
@@ -594,27 +595,45 @@ private struct PlaidUnpairedMovementView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Awaiting Verification") {
+                Section("Unlinked movement") {
                     LabeledContent("Amount", value: transfer.amount.formatted(.currency(code: "USD")))
-                    Text("No other connected account has been confirmed for this movement. Select an observed matching bank or credit-card transaction, or classify a withdrawal separately.")
-                        .font(.caption)
+                    if let sourceId, let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Recorded in")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(source.accountName)
+                                .font(.body.weight(.semibold))
+                            Text(source.date, format: .dateTime.month(.abbreviated).day().year())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Nothing has been linked to a receiving account yet.")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 if let sourceId {
                     Section("Possible Matching Transactions") {
                         let candidates = budget.plaidTransferReviewCandidates(sourceId: sourceId)
                         if candidates.isEmpty {
-                            Text("No eligible matching transaction is available yet. Synchronize both accounts and review again.")
+                            Text("No other observed bank or card movement is available to compare. Sync the other account and try again.")
                                 .foregroundStyle(.secondary)
-                        } else {
+                        } else if let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
                             ForEach(candidates) { item in
-                                Button("Match with \(item.accountName) · \(item.date.formatted(date: .abbreviated, time: .omitted))") {
-                                    if budget.confirmPlaidTransferReview(sourceId: sourceId, counterpartId: item.id) {
-                                        dismiss()
-                                    } else {
-                                        statusMessage = "This candidate can no longer be linked. Refresh the accounts and try again."
-                                    }
+                                Button {
+                                    proposedMatch = PlaidTransferMatchProposal(
+                                        source: source, candidate: item
+                                    )
+                                } label: {
+                                    PlaidTransferMatchCandidateRow(
+                                        proposal: PlaidTransferMatchProposal(
+                                            source: source, candidate: item
+                                        ),
+                                        budget: budget
+                                    )
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -638,8 +657,20 @@ private struct PlaidUnpairedMovementView: View {
                     Text(statusMessage).font(.caption).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Review Transaction")
+            .navigationTitle("Review transaction")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $proposedMatch) { proposal in
+                PlaidTransferMatchReviewSheet(
+                    proposal: proposal, budget: budget,
+                    onConfirm: {
+                        budget.confirmPlaidTransferReview(
+                            sourceId: proposal.source.id,
+                            counterpartId: proposal.candidate.id
+                        )
+                    },
+                    onMatched: { dismiss() }
+                )
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
