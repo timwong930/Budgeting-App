@@ -66,9 +66,8 @@ struct BudgetActivityWorkspaceView: View {
         let savings = monthSavings.map(BudgetActivityItem.savings)
         // A confirmed same-account debit/credit is one internal allocation in
         // Activity, though both original Plaid legs remain in stored history.
-        let pairedCreditIds = Set(monthBucketExpenses.compactMap(\.bucketCounterpartSourceId))
         let unpairedBucketCredits = monthBucketIncome.filter {
-            !pairedCreditIds.contains($0.plaidMetadata?.transactionId ?? "")
+            !budget.isPairedBucketCredit($0)
         }
         let bucketMovements = monthBucketExpenses.map(BudgetActivityItem.expense) +
             unpairedBucketCredits.map(BudgetActivityItem.income)
