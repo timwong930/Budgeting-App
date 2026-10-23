@@ -56,6 +56,33 @@ extension BudgetModel {
         return nil
     }
 
+    /// The current Plaid payload does not expose a last-four identifier in
+    /// FinancialAccount. Do not allow a manual confirmation when multiple
+    /// accounts would display as the exact same account to the user.
+    func plaidAccountLabelIsAmbiguous(_ accountID: UUID) -> Bool {
+        guard let account = financialAccounts.first(where: { $0.id == accountID }) else {
+            return true
+        }
+        let name = account.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let institution = (account.institutionName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return financialAccounts.filter {
+            $0.isActive && $0.kind == account.kind &&
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(name) == .orderedSame &&
+            ($0.institutionName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(institution) == .orderedSame
+        }.count > 1
+    }
+
+    func canClearlyIdentifyPlaidMatch(sourceID: String, counterpartID: String) -> Bool {
+        guard let source = plaidTransferReviewLeg(sourceId: sourceID),
+              let candidate = plaidTransferReviewLeg(sourceId: counterpartID),
+              source.accountId != candidate.accountId else { return false }
+        return !plaidAccountLabelIsAmbiguous(source.accountId) &&
+            !plaidAccountLabelIsAmbiguous(candidate.accountId)
+    }
+
     private func isConfirmedNonTransfer(sourceId: String) -> Bool {
         expenses.contains {
             $0.plaidMetadata?.transactionId == sourceId &&
@@ -164,7 +191,8 @@ extension BudgetModel {
     /// PLAID_PAIR marker plus USER_CONFIRMED tag.
     @discardableResult
     func confirmPlaidTransferReview(sourceId: String, counterpartId: String) -> Bool {
-        guard let source = plaidTransferReviewLeg(sourceId: sourceId),
+        guard canClearlyIdentifyPlaidMatch(sourceID: sourceId, counterpartID: counterpartId),
+              let source = plaidTransferReviewLeg(sourceId: sourceId),
               let candidate = plaidTransferReviewCandidates(sourceId: sourceId)
                   .first(where: { $0.id == counterpartId }) else { return false }
 
