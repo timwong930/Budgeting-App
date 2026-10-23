@@ -3454,7 +3454,7 @@ struct ContentView: View {
     private func calendarEventPassesFilters(_ event: CalendarEventItem) -> Bool {
         if event.portfolioTransaction != nil { return calendarShowPortfolio }
         if event.isCreditDue { return calendarShowCreditDue }
-        if event.cashTransfer != nil { return calendarShowTransfers }
+        if event.isTransfer { return calendarShowTransfers }
         if event.isIncome { return calendarShowIncome }
         return calendarShowExpenses
     }
@@ -3490,46 +3490,70 @@ struct ContentView: View {
         }
         let oneTimeExpenses = budget.expenses
             .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
-            .map {
-                CalendarEventItem(
-                    id: $0.id,
-                    name: $0.name,
-                    amount: $0.amount,
+            .map { expense in
+                let isMovement = budget.isExcludedFromSpending(expense)
+                let isBucket = expense.reviewCorrection == .bucketTransfer
+                let destination = isBucket ?
+                    [expense.bucketFromName, expense.bucketToName]
+                        .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " → ") :
+                    (expense.transferDestinationAccountName ??
+                        budget.creditCardPaymentTarget(for: expense) ?? "")
+                return CalendarEventItem(
+                    id: expense.id,
+                    name: isBucket ? "Internal bucket transfer" : (isMovement ? "Account transfer" : expense.name),
+                    amount: expense.amount,
                     isIncome: false,
-                    date: $0.date,
+                    date: expense.date,
                     recurringPayment: nil,
-                    expense: $0,
+                    expense: expense,
                     income: nil,
                     cashTransfer: nil,
                     isPaid: true,
-                    isTransfer: false,
-                    tint: colorFor(section: $0.section, categoryId: $0.categoryId, isIncome: false),
+                    isTransfer: isMovement,
+                    tint: isMovement ? .teal : colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
                     isCreditDue: false,
-                    paymentAccount: $0.paymentAccount,
-                    iconName: iconName(for: $0.name, isCreditDue: false, paymentAccount: $0.paymentAccount),
+                    paymentAccount: destination.isEmpty ? expense.paymentAccount : destination,
+                    iconName: isMovement ? "arrow.left.arrow.right" :
+                        iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount),
                     creditAccount: nil,
                     portfolioTransaction: nil
                 )
             }
         let oneTimeIncome = budget.incomes
-            .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
-            .map {
-                CalendarEventItem(
-                    id: $0.id,
-                    name: $0.name,
-                    amount: $0.amount,
-                    isIncome: true,
-                    date: $0.date,
+            .filter { income in
+                guard calendar.isDate(income.date, inSameDayAs: date),
+                      !budget.isHiddenDuplicate(income) else { return false }
+                // A confirmed debit/credit bucket pair is one transfer in the
+                // calendar, even if the bank dates the two sides differently.
+                if income.reviewCorrection == .bucketTransfer,
+                   let linkedID = income.bucketCounterpartSourceId,
+                   budget.expenses.contains(where: {
+                       $0.plaidMetadata?.transactionId == linkedID &&
+                       $0.reviewCorrection == .bucketTransfer
+                   }) { return false }
+                return true
+            }
+            .map { income in
+                let isBucket = income.reviewCorrection == .bucketTransfer
+                let bucketPath = [income.bucketFromName, income.bucketToName]
+                    .compactMap { $0?.isEmpty == false ? $0 : nil }
+                    .joined(separator: " → ")
+                return CalendarEventItem(
+                    id: income.id,
+                    name: isBucket ? "Internal bucket transfer" : income.name,
+                    amount: income.amount,
+                    isIncome: !isBucket,
+                    date: income.date,
                     recurringPayment: nil,
                     expense: nil,
-                    income: $0,
+                    income: income,
                     cashTransfer: nil,
                     isPaid: true,
-                    isTransfer: false,
-                    tint: colorFor(section: .needs, categoryId: nil, isIncome: true),
+                    isTransfer: isBucket,
+                    tint: isBucket ? .teal : colorFor(section: .needs, categoryId: nil, isIncome: true),
                     isCreditDue: false,
-                    paymentAccount: "",
-                    iconName: "dollarsign.circle",
+                    paymentAccount: isBucket ? (bucketPath.isEmpty ? income.bankName : bucketPath) : income.bankName,
+                    iconName: isBucket ? "arrow.left.arrow.right" : "dollarsign.circle",
                     creditAccount: nil,
                     portfolioTransaction: nil
                 )
