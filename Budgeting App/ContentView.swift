@@ -3491,7 +3491,7 @@ struct ContentView: View {
         let oneTimeExpenses = budget.expenses
             .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
             .map { expense in
-                let isMovement = budget.isExcludedFromSpending(expense)
+                let isMovement = budget.isTransferMovement(expense)
                 let isBucket = expense.reviewCorrection == .bucketTransfer
                 let destination = isBucket ?
                     [expense.bucketFromName, expense.bucketToName]
@@ -3525,16 +3525,11 @@ struct ContentView: View {
                       !budget.isHiddenDuplicate(income) else { return false }
                 // A confirmed debit/credit bucket pair is one transfer in the
                 // calendar, even if the bank dates the two sides differently.
-                if income.reviewCorrection == .bucketTransfer,
-                   let linkedID = income.bucketCounterpartSourceId,
-                   budget.expenses.contains(where: {
-                       $0.plaidMetadata?.transactionId == linkedID &&
-                       $0.reviewCorrection == .bucketTransfer
-                   }) { return false }
+                if budget.isPairedBucketCredit(income) { return false }
                 return true
             }
             .map { income in
-                let isBucket = income.reviewCorrection == .bucketTransfer
+                let isBucket = budget.isTransferMovement(income)
                 let bucketPath = [income.bucketFromName, income.bucketToName]
                     .compactMap { $0?.isEmpty == false ? $0 : nil }
                     .joined(separator: " → ")
@@ -3772,9 +3767,6 @@ struct ContentView: View {
     }
 
     private var logTransactionItems: [LogTransactionItem] {
-        let pairedBucketCreditIds = Set(monthlyExpenses.compactMap {
-            $0.reviewCorrection == .bucketTransfer ? $0.bucketCounterpartSourceId : nil
-        })
         let expenses = monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }.map { expense in
             LogTransactionItem(
                 id: expense.id,
@@ -3802,8 +3794,7 @@ struct ContentView: View {
         }
         let incomes = monthlyIncomes.filter { income in
             !budget.isHiddenDuplicate(income) &&
-                !(income.reviewCorrection == .bucketTransfer &&
-                  pairedBucketCreditIds.contains(income.plaidMetadata?.transactionId ?? ""))
+                !budget.isPairedBucketCredit(income)
         }.map { income in
             LogTransactionItem(
                 id: income.id,
@@ -10512,7 +10503,7 @@ struct EditIncomeView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Picker("Treat as", selection: $correction) {
+                    Picker("Transaction type", selection: $correction) {
                         Text("Income").tag(Optional<TransactionCorrection>.none)
                         Text("Duplicate · hide from totals").tag(Optional(TransactionCorrection.duplicate))
                         Text("Internal bucket transfer").tag(Optional(TransactionCorrection.bucketTransfer))
@@ -10610,7 +10601,7 @@ struct EditIncomeView: View {
             } message: {
                 Text("This hides only the extra income entry from your activity and totals. The original transaction and Plaid information remain available for restoration.")
             }
-            .navigationTitle(entryTitle)
+            .navigationTitle("Edit income")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -11063,7 +11054,7 @@ struct EditExpenseView: View {
             } message: {
                 Text("This hides the extra entry and excludes it from spending, but the original Plaid record remains available to restore.")
             }
-            .navigationTitle(entryTitle)
+            .navigationTitle("Edit transaction")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $counterpartToConfirm) { candidate in
                 if let sourceId = expense.plaidMetadata?.transactionId,
