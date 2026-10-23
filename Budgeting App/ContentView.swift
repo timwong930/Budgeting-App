@@ -10681,6 +10681,46 @@ struct EditExpenseView: View {
     @State private var counterpartToConfirm: PlaidTransferReviewLeg?
     @State private var matchError: String?
 
+    private enum EntryType: String, CaseIterable, Identifiable {
+        case spending = "Expense"
+        case transfer = "Account transfer"
+        case cardPayment = "Credit card payment"
+        case bucket = "Internal bucket transfer"
+        case duplicate = "Duplicate"
+
+        var id: Self { self }
+    }
+
+    /// One type control replaces overlapping toggles and keeps classification
+    /// mutually exclusive across the expense, bank-transfer and card flows.
+    private var transactionType: Binding<EntryType> {
+        Binding(
+            get: {
+                if correction == .duplicate { return .duplicate }
+                if correction == .bucketTransfer { return .bucket }
+                if isTransfer { return .transfer }
+                if isCreditCardPayment { return .cardPayment }
+                return .spending
+            },
+            set: { newValue in
+                correction = nil
+                isTransfer = false
+                isCreditCardPayment = false
+                switch newValue {
+                case .spending: break
+                case .transfer: isTransfer = true
+                case .cardPayment:
+                    isCreditCardPayment = true
+                    if targetCreditAccountId == nil {
+                        targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
+                    }
+                case .bucket: correction = .bucketTransfer
+                case .duplicate: correction = .duplicate
+                }
+            }
+        )
+    }
+
     private var matchingAccountMovements: [PlaidTransferReviewLeg] {
         guard let sourceId = expense.plaidMetadata?.transactionId,
               let destination = isTransfer ? destinationAccountId :
@@ -10830,10 +10870,15 @@ struct EditExpenseView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Picker("Classification", selection: $correction) {
-                        Text("Regular transaction").tag(Optional<TransactionCorrection>.none)
-                        Text("Duplicate · hide from totals").tag(Optional(TransactionCorrection.duplicate))
-                        Text("Internal bucket transfer").tag(Optional(TransactionCorrection.bucketTransfer))
+                } header: {
+                    Text("Transaction")
+                }
+
+                Section("Classification") {
+                    Picker("Transaction type", selection: transactionType) {
+                        ForEach(EntryType.allCases) { type in
+                            Text(type.rawValue).tag(type)
+                        }
                     }
                     if correction == .duplicate {
                         Text("The extra transaction will be hidden from activity and spending but its original bank record will remain available to restore in Budget → Activity → Review transactions.")
@@ -10846,9 +10891,6 @@ struct EditExpenseView: View {
                         Text("Moving money between buckets under this same account is not an expense. No second account or deposit is created.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                    if correction == nil {
-                        Toggle("Bank / Investment Transfer", isOn: $isTransfer)
                     }
                     if correction == nil && isTransfer {
                         Picker("Transfer to", selection: $destinationAccountId) {
@@ -10866,13 +10908,12 @@ struct EditExpenseView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if correction == nil && !isTransfer {
+                    if correction == nil && !isTransfer && !isCreditCardPayment {
                         Picker("Section", selection: $section) {
                             ForEach(BudgetSection.allCases) { item in
                                 Text(item.title).tag(item)
                             }
                         }
-                        Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
                     }
                     if correction == nil && isCreditCardPayment {
                         if creditCardOptions.isEmpty {
@@ -10904,21 +10945,29 @@ struct EditExpenseView: View {
                             }
                         }
                     }
-                    Picker(isTransfer ? "Transfer from" : (isCreditCardPayment ? "Pay from" : "Paid with"), selection: $paymentAccount) {
-                        Text("None").tag("")
-                        ForEach((isCreditCardPayment || isTransfer) ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
-                            Text(accountName).tag(accountName)
-                        }
-                    }
-                    .disabled(expense.plaidMetadata != nil)
                     if expense.plaidMetadata != nil {
-                        Text("The originating account is controlled by Plaid. You can change how this transaction is classified, but not which bank reported it.")
+                        LabeledContent("Recorded in") {
+                            Text(expense.paymentAccount.isEmpty ? "Connected account" : expense.paymentAccount)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("The bank that recorded this transaction cannot be changed here.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else {
+                        Picker(isTransfer ? "Transfer from" :
+                            (isCreditCardPayment ? "Pay from" : "Paid with"),
+                               selection: $paymentAccount) {
+                            Text("None").tag("")
+                            ForEach((isCreditCardPayment || isTransfer) ?
+                                bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
+                        }
                     }
+                }
+
+                Section("Notes") {
                     TextField("Note", text: $note, axis: .vertical)
-                } header: {
-                    Text("Expense Details")
                 }
 
                 if correction == .bucketTransfer && expense.plaidMetadata != nil {
