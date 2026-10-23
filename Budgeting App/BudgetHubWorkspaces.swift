@@ -2482,6 +2482,12 @@ struct PlaidTransferMatchReviewSheet: View {
         )
     }
 
+    private var isCardPayment: Bool {
+        budget.financialAccounts.contains {
+            $0.id == proposal.credit.accountId && $0.kind == .credit
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -2511,8 +2517,11 @@ struct PlaidTransferMatchReviewSheet: View {
                 }
 
                 Section("Transactions recorded by your accounts") {
-                    LabeledContent("Amount", value:
+                    LabeledContent("Withdrawal", value:
                         abs(proposal.debit.signedAmount).formatted(.currency(code: "USD"))
+                    )
+                    LabeledContent("Deposit / payment", value:
+                        abs(proposal.credit.signedAmount).formatted(.currency(code: "USD"))
                     )
                     LabeledContent("Withdrawal date", value:
                         proposal.debit.date.formatted(date: .abbreviated, time: .omitted)
@@ -2560,7 +2569,7 @@ struct PlaidTransferMatchReviewSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Review transfer")
+            .navigationTitle(isCardPayment ? "Review card payment" : "Review transfer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
