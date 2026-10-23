@@ -2600,16 +2600,14 @@ struct BudgetFinancialReviewView: View {
     @State private var pendingDecision: ReviewDecision?
     @State private var showingConfirmation = false
     @State private var feedbackMessage: String?
+    @State private var matchProposal: PlaidTransferMatchProposal?
 
     private enum ReviewDecision {
-        case pair(sourceID: String, candidateID: String)
         case withdrawal(sourceID: String)
         case undoPair(transferID: UUID)
 
         var explanation: String {
             switch self {
-            case .pair:
-                return "Only confirm if these are the same movement in two accounts you own. Neither balance will be estimated or fabricated."
             case .withdrawal:
                 return "Keep this bank withdrawal as spending, not as a transfer. This classification persists on future Plaid syncs."
             case .undoPair:
@@ -2634,9 +2632,20 @@ struct BudgetFinancialReviewView: View {
     var body: some View {
         List {
             Section {
-                Text("Review imports and account movements without leaving your budget. Pending reviews include all dates, not just the selected budget month.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Make your activity accurate")
+                            .font(.headline)
+                        Text("Confirm transfers, correct categories, or restore hidden duplicates. Reviews include every date.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
                 if let feedbackMessage {
                     Text(feedbackMessage)
                         .font(.caption)
@@ -2675,22 +2684,29 @@ struct BudgetFinancialReviewView: View {
                                 .foregroundStyle(.secondary)
 
                             if let leg = budget.plaidTransferReviewLeg(sourceId: item.sourceId) {
-                                Text("\(leg.accountName) · \(leg.date.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                PlaidMatchAccountIdentity(
+                                    title: "Recorded in", leg: leg, budget: budget
+                                )
                                 let candidates = budget.plaidTransferReviewCandidates(sourceId: item.sourceId)
                                 if candidates.isEmpty {
-                                    Text("No verified counterpart available yet. You can review the original transaction or sync the other account.")
+                                    Text("No second account transaction is available to compare. Sync the other account, or edit this entry.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 } else {
                                     ForEach(candidates) { candidate in
                                         Button {
-                                            request(.pair(sourceID: item.sourceId, candidateID: candidate.id))
+                                            matchProposal = PlaidTransferMatchProposal(
+                                                source: leg, candidate: candidate
+                                            )
                                         } label: {
-                                            Label("Match with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))", systemImage: "arrow.left.arrow.right")
+                                            PlaidTransferMatchCandidateRow(
+                                                proposal: PlaidTransferMatchProposal(
+                                                    source: leg, candidate: candidate
+                                                ),
+                                                budget: budget
+                                            )
                                         }
-                                        .buttonStyle(.bordered)
+                                        .buttonStyle(.plain)
                                     }
                                 }
                                 if leg.signedAmount > 0 &&
@@ -2743,16 +2759,23 @@ struct BudgetFinancialReviewView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(source.title)
                                 .font(.subheadline.weight(.semibold))
-                            Text("\(source.accountName) · \(source.date.formatted(date: .abbreviated, time: .omitted)) · \(abs(source.signedAmount).formatted(.currency(code: "USD")))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            PlaidMatchAccountIdentity(
+                                title: "Suggested movement", leg: source, budget: budget
+                            )
                             ForEach(budget.plaidTransferReviewCandidates(sourceId: source.id)) { candidate in
                                 Button {
-                                    request(.pair(sourceID: source.id, candidateID: candidate.id))
+                                    matchProposal = PlaidTransferMatchProposal(
+                                        source: source, candidate: candidate
+                                    )
                                 } label: {
-                                    Label("Match with \(candidate.accountName)", systemImage: "arrow.left.arrow.right")
+                                    PlaidTransferMatchCandidateRow(
+                                        proposal: PlaidTransferMatchProposal(
+                                            source: source, candidate: candidate
+                                        ),
+                                        budget: budget
+                                    )
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.plain)
                             }
                             if source.signedAmount > 0 &&
                                 budget.financialAccounts.contains(where: {
@@ -2770,7 +2793,7 @@ struct BudgetFinancialReviewView: View {
             } header: {
                 Text("Possible transfers & card payments")
             } footer: {
-                Text("Suggestions need a real opposing transaction from another connected account. Matching requires your confirmation.")
+                Text("These are possible matches, not confirmed transfers. Open a pair to compare both account identities and bank dates.")
             }
 
             Section {
@@ -2863,6 +2886,21 @@ struct BudgetFinancialReviewView: View {
         }
         .navigationTitle("Review transactions")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $matchProposal) { proposal in
+            PlaidTransferMatchReviewSheet(
+                proposal: proposal,
+                budget: budget,
+                onConfirm: {
+                    budget.confirmPlaidTransferReview(
+                        sourceId: proposal.source.id,
+                        counterpartId: proposal.candidate.id
+                    )
+                },
+                onMatched: {
+                    feedbackMessage = "Transfer linked between \(proposal.debit.accountName) and \(proposal.credit.accountName)."
+                }
+            )
+        }
         .confirmationDialog(
             "Confirm financial classification?",
             isPresented: $showingConfirmation,
@@ -2870,8 +2908,6 @@ struct BudgetFinancialReviewView: View {
         ) {
             if let pendingDecision {
                 switch pendingDecision {
-                case .pair:
-                    Button("Confirm transaction match") { perform(pendingDecision) }
                 case .withdrawal:
                     Button("Keep as withdrawal") { perform(pendingDecision) }
                 case .undoPair:
@@ -2892,12 +2928,6 @@ struct BudgetFinancialReviewView: View {
     private func perform(_ decision: ReviewDecision) {
         pendingDecision = nil
         switch decision {
-        case let .pair(sourceID, candidateID):
-            if budget.confirmPlaidTransferReview(sourceId: sourceID, counterpartId: candidateID) {
-                feedbackMessage = "Transactions linked. Income and spending will not count this internal movement twice."
-            } else {
-                feedbackMessage = "The match could not be verified. Sync both accounts and review the latest activity."
-            }
         case let .withdrawal(sourceID):
             if budget.keepPlaidWithdrawalAsExpense(sourceId: sourceID) {
                 feedbackMessage = "Withdrawal classification saved."
