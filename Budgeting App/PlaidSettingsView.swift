@@ -11,7 +11,6 @@ struct PlaidSettingsView: View {
     @State private var statusMessage: String?
     @State private var errorMessage: String?
     @State private var lastResult: PlaidSyncResult?
-    @State private var isTransferReviewExpanded = false
 
     private var client: PlaidAPIClient {
         PlaidAPIClient(configuration: PlaidBackendConfiguration(backendURL: backendURL))
@@ -99,6 +98,15 @@ struct PlaidSettingsView: View {
                                     Text("Last sync \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if Date().timeIntervalSince(lastSyncedAt) > 24 * 60 * 60 {
+                                        Label("Last sync was over 24 hours ago. Balances may be out of date.", systemImage: "exclamationmark.triangle")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                } else {
+                                    Label("No successful sync time available. Balances may be out of date.", systemImage: "clock")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 if let errorMessage = connection.errorMessage {
                                     Text(errorMessage)
@@ -115,133 +123,21 @@ struct PlaidSettingsView: View {
                     }
                 }
 
-                Section("Review Queue") {
-                    if budget.plaidReviewItems.isEmpty {
-                        Text("No Plaid imports need review.")
-                            .foregroundStyle(.secondary)
+                Section("Transaction Reviews") {
+                    Label("Review and correct imported transactions in Budget → Activity → Review transactions.", systemImage: "checkmark.shield")
+                        .font(.subheadline)
+                    if !budget.plaidReviewItems.isEmpty {
+                        Text("\(budget.plaidReviewItems.count) imported item\(budget.plaidReviewItems.count == 1 ? "" : "s") need review.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     } else {
-                        Text("Review uncertain bank movements here. Matching never creates a destination account without a real transaction from that account.")
+                        Text("No imported items currently require review.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-
-                        ForEach(budget.plaidReviewItems) { item in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(item.title)
-                                    .font(.headline)
-                                Text(item.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if let amount = item.amount {
-                                    Text(amount, format: .currency(code: "USD"))
-                                        .font(.caption)
-                                }
-                                if let leg = budget.plaidTransferReviewLeg(sourceId: item.sourceId) {
-                                    Text("\(leg.accountName) · \(leg.date.formatted(date: .abbreviated, time: .omitted))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-
-                                    let candidates = budget.plaidTransferReviewCandidates(sourceId: item.sourceId)
-                                    if !candidates.isEmpty {
-                                        Text("Possible matching bank transactions")
-                                            .font(.caption.weight(.semibold))
-                                        ForEach(candidates) { candidate in
-                                            Button {
-                                                if budget.confirmPlaidTransferReview(sourceId: item.sourceId, counterpartId: candidate.id) {
-                                                    statusMessage = "Bank transfer confirmed between \(leg.accountName) and \(candidate.accountName)."
-                                                } else {
-                                                    errorMessage = "The candidate is no longer eligible. Sync again and review the latest transactions."
-                                                }
-                                            } label: {
-                                                Label(
-                                                    "Confirm with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))",
-                                                    systemImage: "arrow.left.arrow.right.circle"
-                                                )
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .disabled(isWorking)
-                                        }
-                                    } else {
-                                        Text("No matching transaction found in another linked bank account.")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if leg.signedAmount > 0 {
-                                        Button {
-                                            if budget.keepPlaidWithdrawalAsExpense(sourceId: item.sourceId) {
-                                                statusMessage = "Kept as withdrawal. This choice will survive future Plaid syncs."
-                                            } else {
-                                                errorMessage = "Could not confirm this withdrawal. Sync again and review the account."
-                                            }
-                                        } label: {
-                                            Label("Keep as Withdrawal / Expense", systemImage: "checkmark.shield")
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .disabled(isWorking)
-                                    }
-                                }
-                                Text("To dismiss this review without changing classification, swipe left.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(.vertical, 6)
-                        }
-                        .onDelete { offsets in
-                            budget.plaidReviewItems.remove(atOffsets: offsets)
-                            budget.saveNow()
-                        }
                     }
-                }
-
-                Section("Bank Transfer Review") {
-                    Toggle("Review possible bank transfers", isOn: $isTransferReviewExpanded)
-                    Text("Matches here are suggestions only. Each requires confirmation of a transaction on both connected bank accounts.")
+                    Text("Plaid Sync remains for connecting accounts and checking sync health. Transfer, withdrawal, and card-payment decisions now live alongside your Budget activity.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    if isTransferReviewExpanded {
-                        let suggestions = budget.plaidPotentialTransferReviews()
-                        if suggestions.isEmpty {
-                            Text("No matching bank transactions found to review.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(suggestions) { source in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(source.title)
-                                        .font(.subheadline.weight(.semibold))
-                                    Text("\(source.accountName) · \(source.date.formatted(date: .abbreviated, time: .omitted)) · \(abs(source.signedAmount).formatted(.currency(code: "USD")))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    ForEach(budget.plaidTransferReviewCandidates(sourceId: source.id)) { candidate in
-                                        Button {
-                                            if budget.confirmPlaidTransferReview(sourceId: source.id, counterpartId: candidate.id) {
-                                                statusMessage = "Confirmed transfer from \(source.accountName) to \(candidate.accountName)."
-                                            } else {
-                                                errorMessage = "Could not confirm this match. Refresh transactions and try again."
-                                            }
-                                        } label: {
-                                            Label(
-                                                "Match with \(candidate.accountName) · \(candidate.date.formatted(date: .abbreviated, time: .omitted))",
-                                                systemImage: "checkmark.circle"
-                                            )
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .disabled(isWorking)
-                                    }
-                                    if budget.plaidTransferReviewLeg(sourceId: source.id) != nil {
-                                        Button("Keep as Withdrawal / Expense") {
-                                            if budget.keepPlaidWithdrawalAsExpense(sourceId: source.id) {
-                                                statusMessage = "Kept \(source.title) as an expense."
-                                            }
-                                        }
-                                        .font(.caption)
-                                        .disabled(isWorking)
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        }
-                    }
                 }
 
                 Section("Production Checklist") {

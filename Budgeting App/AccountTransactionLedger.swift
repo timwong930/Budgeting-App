@@ -56,16 +56,25 @@ extension BudgetModel {
         let normalizedName = ledgerNormalizedAccountName(account.name)
         var entries: [AccountLedgerEntry] = []
 
-        for expense in expenses where ledgerExpenseUsesAccount(expense, accountId: accountId, normalizedName: normalizedName) {
+        for expense in expenses where expense.reviewCorrection != .duplicate &&
+            ledgerExpenseUsesAccount(expense, accountId: accountId, normalizedName: normalizedName) {
             let isCardPayment = creditCardPaymentTarget(for: expense) != nil
+            let isBucket = expense.reviewCorrection == .bucketTransfer
+            let isTransfer = isUserClassifiedTransfer(expense) || isBucket
+            let destination = expense.transferDestinationAccountName ??
+                financialAccounts.first(where: { $0.id == expense.transferDestinationAccountId })?.name ??
+                "selected account"
             entries.append(
                 AccountLedgerEntry(
                     id: "expense|\(expense.id.uuidString)",
                     date: expense.date,
                     title: expense.name,
-                    detail: isCardPayment ? "Credit card payment" : ledgerExpenseDetail(expense),
+                    detail: isBucket ? "Internal bucket transfer" :
+                        (isTransfer ? "Transfer to \(destination) · awaiting account-side confirmation" :
+                        (isCardPayment ? "Credit card payment · awaiting account-side confirmation" :
+                            ledgerExpenseDetail(expense))),
                     signedAmount: -abs(expense.amount),
-                    kind: isCardPayment ? .payment : .expense,
+                    kind: isTransfer ? .transferOut : (isCardPayment ? .payment : .expense),
                     isPending: ledgerIsPending(expense.plaidMetadata, note: expense.note),
                     sourceLabel: expense.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: expense.plaidMetadata?.status,
@@ -74,15 +83,17 @@ extension BudgetModel {
             )
         }
 
-        for income in incomes where ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
+        for income in incomes where income.reviewCorrection != .duplicate &&
+            ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
             entries.append(
                 AccountLedgerEntry(
                     id: "income|\(income.id.uuidString)",
                     date: income.date,
                     title: income.name,
-                    detail: "Deposit / income",
+                    detail: income.reviewCorrection == .bucketTransfer ?
+                        "Internal bucket transfer" : "Deposit / income",
                     signedAmount: abs(income.amount),
-                    kind: .income,
+                    kind: income.reviewCorrection == .bucketTransfer ? .transferIn : .income,
                     isPending: income.plaidMetadata?.isPending == true,
                     sourceLabel: income.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: income.plaidMetadata?.status,
@@ -143,7 +154,7 @@ extension BudgetModel {
         let normalizedName = ledgerNormalizedAccountName(account.name)
         var entries: [AccountLedgerEntry] = []
 
-        for expense in expenses {
+        for expense in expenses where expense.reviewCorrection != .duplicate {
             if ledgerCreditPaymentTargetsAccount(expense, accountId: accountId, normalizedName: normalizedName) {
                 entries.append(
                     AccountLedgerEntry(
@@ -179,15 +190,17 @@ extension BudgetModel {
             )
         }
 
-        for income in incomes where ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
+        for income in incomes where income.reviewCorrection != .duplicate &&
+            ledgerIncomeUsesAccount(income, accountId: accountId, normalizedName: normalizedName) {
             entries.append(
                 AccountLedgerEntry(
                     id: "refund|\(income.id.uuidString)",
                     date: income.date,
                     title: income.name,
-                    detail: "Refund / statement credit",
+                    detail: income.reviewCorrection == .bucketTransfer ?
+                        "Internal bucket transfer" : "Refund / statement credit",
                     signedAmount: abs(income.amount),
-                    kind: .refund,
+                    kind: income.reviewCorrection == .bucketTransfer ? .transferIn : .refund,
                     isPending: income.plaidMetadata?.isPending == true,
                     sourceLabel: income.plaidMetadata == nil ? "Manual" : "Plaid",
                     plaidStatus: income.plaidMetadata?.status,
@@ -505,6 +518,166 @@ struct CreditAccountLedgerView: View {
     }
 }
 
+
+private struct PlaidLinkedTransferCorrectionView: View {
+    let transfer: CashTransfer
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingUndoConfirmation = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Linked Accounts") {
+                    LabeledContent("From", value: transfer.fromAccountName)
+                    LabeledContent("To", value: transfer.toAccountName)
+                    LabeledContent("Amount", value: transfer.amount.formatted(.currency(code: "USD")))
+                    Text("This match connects two observed Plaid transactions. Undoing it will restore each original movement to review, without altering reported bank balances.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Correct an Incorrect Match") {
+                    if budget.canUndoPlaidTransferMatch(transferId: transfer.id) {
+                        Button("Undo Incorrect Match", role: .destructive) {
+                            showingUndoConfirmation = true
+                        }
+                    } else {
+                        Text("Original transaction details were not saved for this older match. Reimport complete history before attempting to undo; this screen will not invent missing transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let errorMessage {
+                        Text(errorMessage).foregroundStyle(.red).font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Review Linked Movement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .confirmationDialog(
+                "Undo this linked transfer?",
+                isPresented: $showingUndoConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Undo Match", role: .destructive) {
+                    if budget.undoPlaidTransferMatch(transferId: transfer.id) {
+                        dismiss()
+                    } else {
+                        errorMessage = "Could not restore the original transactions. No changes were saved."
+                    }
+                }
+            } message: {
+                Text("Both bank-side transactions will return as separate review items. The incorrect pair will not be suggested again automatically.")
+            }
+        }
+    }
+}
+
+private struct PlaidUnpairedMovementView: View {
+    let transfer: CashTransfer
+    @ObservedObject var budget: BudgetModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var statusMessage: String?
+    @State private var proposedMatch: PlaidTransferMatchProposal?
+
+    private var sourceId: String? {
+        guard transfer.note.hasPrefix("[PLAID_SINGLE:"),
+              let end = transfer.note.firstIndex(of: "]") else { return nil }
+        let start = transfer.note.index(transfer.note.startIndex, offsetBy: "[PLAID_SINGLE:".count)
+        return String(transfer.note[start..<end])
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Unlinked movement") {
+                    LabeledContent("Amount", value: transfer.amount.formatted(.currency(code: "USD")))
+                    if let sourceId, let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Recorded in")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(source.accountName)
+                                .font(.body.weight(.semibold))
+                            Text(source.date, format: .dateTime.month(.abbreviated).day().year())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Nothing has been linked to a receiving account yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let sourceId {
+                    Section("Possible Matching Transactions") {
+                        let candidates = budget.plaidTransferReviewCandidates(sourceId: sourceId)
+                        if candidates.isEmpty {
+                            Text("No other observed bank or card movement is available to compare. Sync the other account and try again.")
+                                .foregroundStyle(.secondary)
+                        } else if let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
+                            ForEach(candidates) { item in
+                                Button {
+                                    proposedMatch = PlaidTransferMatchProposal(
+                                        source: source, candidate: item
+                                    )
+                                } label: {
+                                    PlaidTransferMatchCandidateRow(
+                                        proposal: PlaidTransferMatchProposal(
+                                            source: source, candidate: item
+                                        ),
+                                        budget: budget
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    if let leg = budget.plaidTransferReviewLeg(sourceId: sourceId),
+                       leg.signedAmount > 0,
+                       budget.financialAccounts.contains(where: {
+                           $0.id == leg.accountId && $0.kind == .depository
+                       }) {
+                        Section("Separate Withdrawal") {
+                            Button("Keep as Withdrawal / Expense") {
+                                if budget.keepPlaidWithdrawalAsExpense(sourceId: sourceId) {
+                                    dismiss()
+                                } else {
+                                    statusMessage = "Could not reclassify this withdrawal. No changes were saved."
+                                }
+                            }
+                        }
+                    }
+                }
+                if let statusMessage {
+                    Text(statusMessage).font(.caption).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Review transaction")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $proposedMatch) { proposal in
+                PlaidTransferMatchReviewSheet(
+                    proposal: proposal, budget: budget,
+                    onConfirm: {
+                        budget.confirmPlaidTransferReview(
+                            sourceId: proposal.source.id,
+                            counterpartId: proposal.candidate.id
+                        )
+                    },
+                    onMatched: { dismiss() }
+                )
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
 private struct AccountLedgerTransactionEditor: View {
     let entry: AccountLedgerEntry
     @ObservedObject var budget: BudgetModel
@@ -534,11 +707,17 @@ private struct AccountLedgerTransactionEditor: View {
                 }
             case "transfer", "card-transfer":
                 if let transfer = budget.cashTransfers.first(where: { $0.id == sourceId }) {
-                    CashTransferEditorView(
-                        budget: budget,
-                        selectedDate: transfer.date,
-                        existingTransfer: transfer
-                    )
+                    if transfer.note.hasPrefix("[PLAID_PAIR:") {
+                        PlaidLinkedTransferCorrectionView(transfer: transfer, budget: budget)
+                    } else if transfer.note.hasPrefix("[PLAID_SINGLE:") {
+                        PlaidUnpairedMovementView(transfer: transfer, budget: budget)
+                    } else {
+                        CashTransferEditorView(
+                            budget: budget,
+                            selectedDate: transfer.date,
+                            existingTransfer: transfer
+                        )
+                    }
                 } else {
                     missingTransaction
                 }

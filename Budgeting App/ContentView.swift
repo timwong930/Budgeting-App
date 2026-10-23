@@ -1395,10 +1395,14 @@ struct ContentView: View {
 
             budgetSubmenuLink(
                 title: "Activity",
-                subtitle: "Recurring charges, trends, and recent transactions",
+                subtitle: budget.plaidReviewItems.isEmpty ?
+                    "Recurring charges, trends, and recent transactions" :
+                    "\(budget.plaidReviewItems.count) to review · recurring charges and recent transactions",
                 systemImage: "list.bullet.rectangle.portrait",
                 tint: .pink,
-                valueLabel: totalMonthlySpent.formatted(.currency(code: "USD"))
+                valueLabel: budget.plaidReviewItems.isEmpty ?
+                    totalMonthlySpent.formatted(.currency(code: "USD")) :
+                    "\(budget.plaidReviewItems.count) to review"
             ) {
                 budgetActivitySubmenu
             }
@@ -2603,7 +2607,7 @@ struct ContentView: View {
     }
 
     private var monthlySpendingExpenses: [Expense] {
-        monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
+        monthlyExpenses.filter { !budget.isExcludedFromSpending($0) }
     }
 
     private var trendRangeStart: Date? {
@@ -2714,12 +2718,17 @@ struct ContentView: View {
             return
         }
 
-        monthlyExpenses = budget.expenses.filter { interval.contains($0.date) }
-        monthlyIncomes = budget.incomes.filter { interval.contains($0.date) }
+        monthlyExpenses = budget.expenses.filter {
+            interval.contains($0.date) && !budget.isHiddenDuplicate($0)
+        }
+        monthlyIncomes = budget.incomes.filter {
+            interval.contains($0.date) && !budget.isHiddenDuplicate($0)
+        }
         monthlySavingsEntries = budget.savingsEntries.filter { interval.contains($0.date) }
-        let spendingExpenses = monthlyExpenses.filter { !budget.isCreditCardPayment($0) }
+        let spendingExpenses = monthlyExpenses.filter { !budget.isExcludedFromSpending($0) }
         totalMonthlySpent = spendingExpenses.reduce(0) { $0 + $1.amount }
-        totalMonthlyIncomeLogged = monthlyIncomes.reduce(0) { $0 + $1.amount }
+        totalMonthlyIncomeLogged = monthlyIncomes.filter { !budget.isExcludedFromIncome($0) }
+            .reduce(0) { $0 + $1.amount }
 
         var needsTotals: [UUID: Double] = [:]
         var wantsTotals: [UUID: Double] = [:]
@@ -2749,7 +2758,9 @@ struct ContentView: View {
         )
         dailyIncome = buildDailySeries(
             interval: interval,
-            amountsByDate: dailyTotals(from: monthlyIncomes.map { ($0.date, $0.amount) })
+            amountsByDate: dailyTotals(from: monthlyIncomes.filter {
+                !budget.isExcludedFromIncome($0)
+            }.map { ($0.date, $0.amount) })
         )
     }
 
@@ -3099,7 +3110,7 @@ struct ContentView: View {
     private var calendarVisibleIncome: Double {
         let oneTimeIncome = calendarShowIncome
             ? budget.incomes
-                .filter { isInVisibleCalendarMonth($0.date) }
+                .filter { isInVisibleCalendarMonth($0.date) && !budget.isExcludedFromIncome($0) }
                 .reduce(0) { $0 + $1.amount }
             : 0
         let recurringIncome = calendarShowIncome
@@ -3119,7 +3130,7 @@ struct ContentView: View {
     private var calendarVisibleOutflow: Double {
         guard calendarShowExpenses else { return 0 }
         let oneTimeExpenses = budget.expenses
-            .filter { isInVisibleCalendarMonth($0.date) && !budget.isCreditCardPayment($0) }
+            .filter { isInVisibleCalendarMonth($0.date) && !budget.isExcludedFromSpending($0) }
             .reduce(0) { $0 + $1.amount }
         let recurringExpenses = visibleCalendarMonthDays
             .flatMap(recurringOccurrences)
@@ -3443,7 +3454,7 @@ struct ContentView: View {
     private func calendarEventPassesFilters(_ event: CalendarEventItem) -> Bool {
         if event.portfolioTransaction != nil { return calendarShowPortfolio }
         if event.isCreditDue { return calendarShowCreditDue }
-        if event.cashTransfer != nil { return calendarShowTransfers }
+        if event.isTransfer { return calendarShowTransfers }
         if event.isIncome { return calendarShowIncome }
         return calendarShowExpenses
     }
@@ -3478,47 +3489,66 @@ struct ContentView: View {
             )
         }
         let oneTimeExpenses = budget.expenses
-            .filter { calendar.isDate($0.date, inSameDayAs: date) }
-            .map {
-                CalendarEventItem(
-                    id: $0.id,
-                    name: $0.name,
-                    amount: $0.amount,
+            .filter { calendar.isDate($0.date, inSameDayAs: date) && !budget.isHiddenDuplicate($0) }
+            .map { expense in
+                let isMovement = budget.isTransferMovement(expense)
+                let isBucket = expense.reviewCorrection == .bucketTransfer
+                let destination = isBucket ?
+                    [expense.bucketFromName, expense.bucketToName]
+                        .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " → ") :
+                    (expense.transferDestinationAccountName ??
+                        budget.creditCardPaymentTarget(for: expense) ?? "")
+                return CalendarEventItem(
+                    id: expense.id,
+                    name: isBucket ? "Internal bucket transfer" : (isMovement ? "Account transfer" : expense.name),
+                    amount: expense.amount,
                     isIncome: false,
-                    date: $0.date,
+                    date: expense.date,
                     recurringPayment: nil,
-                    expense: $0,
+                    expense: expense,
                     income: nil,
                     cashTransfer: nil,
                     isPaid: true,
-                    isTransfer: false,
-                    tint: colorFor(section: $0.section, categoryId: $0.categoryId, isIncome: false),
+                    isTransfer: isMovement,
+                    tint: isMovement ? .teal : colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
                     isCreditDue: false,
-                    paymentAccount: $0.paymentAccount,
-                    iconName: iconName(for: $0.name, isCreditDue: false, paymentAccount: $0.paymentAccount),
+                    paymentAccount: destination.isEmpty ? expense.paymentAccount : destination,
+                    iconName: isMovement ? "arrow.left.arrow.right" :
+                        iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount),
                     creditAccount: nil,
                     portfolioTransaction: nil
                 )
             }
         let oneTimeIncome = budget.incomes
-            .filter { calendar.isDate($0.date, inSameDayAs: date) }
-            .map {
-                CalendarEventItem(
-                    id: $0.id,
-                    name: $0.name,
-                    amount: $0.amount,
-                    isIncome: true,
-                    date: $0.date,
+            .filter { income in
+                guard calendar.isDate(income.date, inSameDayAs: date),
+                      !budget.isHiddenDuplicate(income) else { return false }
+                // A confirmed debit/credit bucket pair is one transfer in the
+                // calendar, even if the bank dates the two sides differently.
+                if budget.isPairedBucketCredit(income) { return false }
+                return true
+            }
+            .map { income in
+                let isBucket = budget.isTransferMovement(income)
+                let bucketPath = [income.bucketFromName, income.bucketToName]
+                    .compactMap { $0?.isEmpty == false ? $0 : nil }
+                    .joined(separator: " → ")
+                return CalendarEventItem(
+                    id: income.id,
+                    name: isBucket ? "Internal bucket transfer" : income.name,
+                    amount: income.amount,
+                    isIncome: !isBucket,
+                    date: income.date,
                     recurringPayment: nil,
                     expense: nil,
-                    income: $0,
+                    income: income,
                     cashTransfer: nil,
                     isPaid: true,
-                    isTransfer: false,
-                    tint: colorFor(section: .needs, categoryId: nil, isIncome: true),
+                    isTransfer: isBucket,
+                    tint: isBucket ? .teal : colorFor(section: .needs, categoryId: nil, isIncome: true),
                     isCreditDue: false,
-                    paymentAccount: "",
-                    iconName: "dollarsign.circle",
+                    paymentAccount: isBucket ? (bucketPath.isEmpty ? income.bankName : bucketPath) : income.bankName,
+                    iconName: isBucket ? "arrow.left.arrow.right" : "dollarsign.circle",
                     creditAccount: nil,
                     portfolioTransaction: nil
                 )
@@ -3651,7 +3681,7 @@ struct ContentView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -3737,29 +3767,48 @@ struct ContentView: View {
     }
 
     private var logTransactionItems: [LogTransactionItem] {
-        let expenses = monthlyExpenses.map { expense in
+        let expenses = monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }.map { expense in
             LogTransactionItem(
                 id: expense.id,
                 title: expense.name,
-                subtitle: budget.categoryName(for: expense),
+                subtitle: expense.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" +
+                        ((expense.bucketFromName?.isEmpty == false && expense.bucketToName?.isEmpty == false) ?
+                            " · \(expense.bucketFromName ?? "") → \(expense.bucketToName ?? "")" : "") :
+                    (budget.isUserClassifiedTransfer(expense) ?
+                    "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
+                    (budget.isCreditCardPayment(expense) ?
+                        "Credit card payment to \(budget.creditCardPaymentTarget(for: expense) ?? "card")" :
+                        budget.categoryName(for: expense))),
                 amount: expense.amount,
                 date: expense.date,
                 isInflow: false,
-                iconName: iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount),
-                tint: colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
+                iconName: expense.reviewCorrection == .bucketTransfer ? "arrow.left.arrow.right" :
+                    (budget.isUserClassifiedTransfer(expense) ? "arrow.left.arrow.right" :
+                    (budget.isCreditCardPayment(expense) ? "creditcard" :
+                     iconName(for: expense.name, isCreditDue: false, paymentAccount: expense.paymentAccount))),
+                tint: budget.isExcludedFromSpending(expense) ? .teal :
+                    colorFor(section: expense.section, categoryId: expense.categoryId, isIncome: false),
                 kind: .expense(expense)
             )
         }
-        let incomes = monthlyIncomes.map { income in
+        let incomes = monthlyIncomes.filter { income in
+            !budget.isHiddenDuplicate(income) &&
+                !budget.isPairedBucketCredit(income)
+        }.map { income in
             LogTransactionItem(
                 id: income.id,
                 title: income.name,
-                subtitle: income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName,
+                subtitle: income.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" +
+                        ((income.bucketFromName?.isEmpty == false && income.bucketToName?.isEmpty == false) ?
+                            " · \(income.bucketFromName ?? "") → \(income.bucketToName ?? "")" : "") :
+                    (income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : income.bankName),
                 amount: income.amount,
                 date: income.date,
                 isInflow: true,
-                iconName: "dollarsign.circle.fill",
-                tint: .green,
+                iconName: income.reviewCorrection == .bucketTransfer ? "arrow.left.arrow.right" : "dollarsign.circle.fill",
+                tint: income.reviewCorrection == .bucketTransfer ? .teal : .green,
                 kind: .income(income)
             )
         }
@@ -3830,10 +3879,10 @@ struct ContentView: View {
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text("\(item.isInflow ? "+" : "-")\(item.amount, format: .currency(code: "USD"))")
+                                    Text("\(item.subtitle.hasPrefix("Internal bucket transfer") ? "↔" : (item.isInflow ? "+" : "-"))\(item.amount, format: .currency(code: "USD"))")
                                         .font(.subheadline)
                                         .fontWeight(.semibold)
-                                        .foregroundStyle(item.isInflow ? .green : .primary)
+                                        .foregroundStyle(item.subtitle.hasPrefix("Internal bucket transfer") ? .teal : (item.isInflow ? .green : .primary))
                                     Text(item.date, style: .date)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
@@ -9405,7 +9454,12 @@ struct ExpenseRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(expense.name)
                     .font(.subheadline)
-                Text(categoryName)
+                Text(expense.reviewCorrection == .bucketTransfer ?
+                    "Internal bucket transfer" :
+                    (expense.userClassifiedTransfer == true || expense.transferDestinationAccountId != nil ?
+                    "Transfer to \(expense.transferDestinationAccountName ?? "external account")" :
+                    ((expense.creditCardPaymentTargetId != nil || expense.creditCardPaymentTarget != nil) ?
+                        "Credit card payment" : categoryName)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -9458,7 +9512,11 @@ struct IncomeRowView: View {
                 Text(income.date, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if !income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if income.reviewCorrection == .bucketTransfer {
+                    Text("Internal bucket transfer")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if !income.bankName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(income.bankName)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -9510,7 +9568,8 @@ struct IncomeHistoryView: View {
                     Text("No income entries this month.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(monthlyIncomes.sorted(by: { $0.date > $1.date })) { income in
+                    ForEach(monthlyIncomes.filter { !budget.isHiddenDuplicate($0) }
+                        .sorted(by: { $0.date > $1.date })) { income in
                         IncomeRowView(
                             income: income,
                             onEdit: { onEdit(income); dismiss() },
@@ -9581,7 +9640,8 @@ struct ExpenseHistoryView: View {
                     Text("No expenses this month.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(monthlyExpenses.sorted(by: { $0.date > $1.date })) { expense in
+                    ForEach(monthlyExpenses.filter { !budget.isHiddenDuplicate($0) }
+                        .sorted(by: { $0.date > $1.date })) { expense in
                         ExpenseRowView(
                             expense: expense,
                             categoryName: budget.categoryName(for: expense),
@@ -10403,6 +10463,13 @@ struct EditIncomeView: View {
     @State private var amount: Double
     @State private var date: Date
     @State private var bankName: String
+    @State private var correction: TransactionCorrection?
+    @State private var bucketFrom: String
+    @State private var bucketTo: String
+    @State private var confirmDuplicate = false
+    @State private var selectedBucketExpense: Expense?
+    @State private var confirmBucketPair = false
+    @State private var bucketPairError: String?
 
     private var bankAccountOptions: [String] {
         let names = (budget.bankAccounts.map(\.name) + [bankName])
@@ -10418,6 +10485,9 @@ struct EditIncomeView: View {
         _amount = State(initialValue: income.amount)
         _date = State(initialValue: income.date)
         _bankName = State(initialValue: income.bankName)
+        _correction = State(initialValue: income.reviewCorrection)
+        _bucketFrom = State(initialValue: income.bucketFromName ?? "")
+        _bucketTo = State(initialValue: income.bucketToName ?? "")
     }
 
     private var entryTitle: String {
@@ -10433,7 +10503,25 @@ struct EditIncomeView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
+                    Picker("Transaction type", selection: $correction) {
+                        Text("Income").tag(Optional<TransactionCorrection>.none)
+                        Text("Duplicate · hide from totals").tag(Optional(TransactionCorrection.duplicate))
+                        Text("Internal bucket transfer").tag(Optional(TransactionCorrection.bucketTransfer))
+                    }
+                    if correction == .duplicate {
+                        Text("The bank record will be preserved but hidden from normal activity and income totals. Restore it in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == .bucketTransfer {
+                        TextField("From bucket (optional)", text: $bucketFrom)
+                        TextField("To bucket (optional)", text: $bucketTo)
+                        Text("Moving money between buckets in this same bank account is not income. No bank balance will be changed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("Bank Account", text: $bankName)
+                        .disabled(income.plaidMetadata != nil)
                     if !bankAccountOptions.isEmpty {
                         Picker("Saved Accounts", selection: $bankName) {
                             Text("None").tag("")
@@ -10445,9 +10533,75 @@ struct EditIncomeView: View {
                 } header: {
                     Text("Income Details")
                 }
+
+                if correction == .bucketTransfer && income.plaidMetadata != nil {
+                    Section("Pair bucket movements") {
+                        if let pairedID = income.bucketCounterpartSourceId {
+                            Text("Linked to observed bucket transaction \(pairedID.suffix(6)). Change classification to unlink.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            let candidates = budget.expenses.filter { expense in
+                                budget.bucketTransferIncomeCandidates(for: expense).contains {
+                                    $0.id == income.id
+                                }
+                            }
+                            if candidates.isEmpty {
+                                Text("No matching debit was observed in this account. You can still classify the incoming entry as a bucket transfer without creating another bank transaction.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(candidates) { expense in
+                                    Button {
+                                        selectedBucketExpense = expense
+                                        confirmBucketPair = true
+                                    } label: {
+                                        Label("Link \(expense.name) · \(expense.amount.formatted(.currency(code: "USD")))", systemImage: "arrow.left.arrow.right")
+                                    }
+                                }
+                            }
+                        }
+                        if let bucketPairError {
+                            Text(bucketPairError).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(entryTitle)
+            .confirmationDialog(
+                "Confirm internal bucket movement?",
+                isPresented: $confirmBucketPair,
+                titleVisibility: .visible
+            ) {
+                Button("Link both bucket movements") {
+                    guard let selectedBucketExpense,
+                          budget.confirmInternalBucketTransfer(
+                            expenseID: selectedBucketExpense.id,
+                            incomeID: income.id,
+                            fromBucket: bucketFrom,
+                            toBucket: bucketTo
+                          ) else {
+                        bucketPairError = "These two entries are no longer eligible. No link was made."
+                        return
+                    }
+                    Haptics.success()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Link only if these are the opposite sides of a bucket transfer inside the same account. Neither income nor spending is created, and the actual bank balance stays unchanged.")
+            }
+            .confirmationDialog(
+                "Hide this duplicate income?",
+                isPresented: $confirmDuplicate,
+                titleVisibility: .visible
+            ) {
+                Button("Mark as Duplicate") { saveCorrection() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This hides only the extra income entry from your activity and totals. The original transaction and Plaid information remain available for restoration.")
+            }
+            .navigationTitle("Edit income")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -10455,22 +10609,38 @@ struct EditIncomeView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        budget.updateIncomeEntry(
-                            IncomeEntry(
-                                id: income.id,
-                                name: name.isEmpty ? "Income" : name,
-                                amount: amount,
-                                date: date,
-                                bankName: bankName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            )
-                        )
-                        Haptics.success()
-                        dismiss()
+                        if correction == .duplicate && income.reviewCorrection != .duplicate {
+                            confirmDuplicate = true
+                        } else {
+                            saveCorrection()
+                        }
                     }
                     .disabled(amount <= 0)
                 }
             }
         }
+    }
+
+    private func saveCorrection() {
+        var updated = income
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Income" : name
+        updated.amount = amount
+        updated.date = date
+        updated.bankName = income.plaidMetadata == nil ?
+            bankName.trimmingCharacters(in: .whitespacesAndNewlines) : income.bankName
+        updated.reviewCorrection = correction
+        updated.correctionBeforeDuplicate = correction == .duplicate ?
+            (income.reviewCorrection == .duplicate ? income.correctionBeforeDuplicate : income.reviewCorrection) : nil
+        updated.bucketFromName = correction == .bucketTransfer ?
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? income.bucketFromName : nil)
+        updated.bucketToName = correction == .bucketTransfer ?
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? income.bucketToName : nil)
+        if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
+        budget.updateIncomeEntry(updated)
+        Haptics.success()
+        dismiss()
     }
 }
 
@@ -10489,7 +10659,79 @@ struct EditExpenseView: View {
     @State private var paymentAccount: String
     @State private var note: String
     @State private var isCreditCardPayment: Bool
-    @State private var targetCreditAccountName: String
+    @State private var targetCreditAccountId: UUID?
+    @State private var isTransfer: Bool
+    @State private var destinationAccountId: UUID?
+    @State private var correction: TransactionCorrection?
+    @State private var bucketFrom: String
+    @State private var bucketTo: String
+    @State private var confirmDuplicate = false
+    @State private var selectedBucketIncome: IncomeEntry?
+    @State private var confirmBucketMatch = false
+    @State private var bucketMatchError: String?
+    @State private var counterpartToConfirm: PlaidTransferReviewLeg?
+    @State private var matchError: String?
+
+    private enum EntryType: String, CaseIterable, Identifiable {
+        case spending = "Expense"
+        case transfer = "Account transfer"
+        case cardPayment = "Credit card payment"
+        case bucket = "Internal bucket transfer"
+        case duplicate = "Duplicate"
+
+        var id: Self { self }
+    }
+
+    /// One type control replaces overlapping toggles and keeps classification
+    /// mutually exclusive across the expense, bank-transfer and card flows.
+    private var transactionType: Binding<EntryType> {
+        Binding(
+            get: {
+                if correction == .duplicate { return .duplicate }
+                if correction == .bucketTransfer { return .bucket }
+                if isTransfer { return .transfer }
+                if isCreditCardPayment { return .cardPayment }
+                return .spending
+            },
+            set: { newValue in
+                correction = nil
+                isTransfer = false
+                isCreditCardPayment = false
+                switch newValue {
+                case .spending: break
+                case .transfer: isTransfer = true
+                case .cardPayment:
+                    isCreditCardPayment = true
+                    if targetCreditAccountId == nil {
+                        targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
+                    }
+                case .bucket: correction = .bucketTransfer
+                case .duplicate: correction = .duplicate
+                }
+            }
+        )
+    }
+
+    private var matchingAccountMovements: [PlaidTransferReviewLeg] {
+        guard let sourceId = expense.plaidMetadata?.transactionId,
+              let destination = isTransfer ? destinationAccountId :
+                (isCreditCardPayment ? targetCreditAccountId : nil)
+        else { return [] }
+        return budget.plaidTransferReviewCandidates(sourceId: sourceId)
+            .filter { $0.accountId == destination }
+    }
+
+    private var destinationOptions: [FinancialAccount] {
+        let source = expense.paymentAccountId ??
+            budget.financialAccounts.first(where: {
+                $0.name.caseInsensitiveCompare(paymentAccount) == .orderedSame &&
+                $0.kind == .depository
+            })?.id
+        return budget.financialAccounts.filter {
+            $0.isActive && ($0.kind == .depository || $0.kind == .investment) &&
+            $0.id != source
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
 
     private var categories: [Category] {
         section == .needs ? budget.needsCategories : budget.wantsCategories
@@ -10509,12 +10751,22 @@ struct EditExpenseView: View {
         return Array(Set(names)).sorted()
     }
 
-    private var creditCardOptions: [String] {
-        budget.creditAccounts
-            .map(\.name)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted()
+    private var creditCardOptions: [CreditAccount] {
+        budget.creditAccounts.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func stableCreditAccountId(_ card: CreditAccount) -> UUID {
+        if let externalID = card.plaidMetadata?.accountId,
+           let identity = budget.financialAccounts.first(where: {
+               $0.externalAccountId == externalID && $0.kind == .credit
+           }) {
+            return identity.id
+        }
+        return budget.financialAccounts.first(where: {
+            $0.kind == .credit && $0.id == card.id
+        })?.id ?? card.id
     }
 
     private func creditCardPaymentCategoryId() -> UUID {
@@ -10539,7 +10791,61 @@ struct EditExpenseView: View {
         _note = State(initialValue: expense.note)
         let target = budget.creditCardPaymentTarget(for: expense) ?? ""
         _isCreditCardPayment = State(initialValue: !target.isEmpty)
-        _targetCreditAccountName = State(initialValue: target)
+        _targetCreditAccountId = State(initialValue: expense.creditCardPaymentTargetId ??
+            budget.creditAccounts.first(where: { $0.name == target }).map { card in
+                budget.financialAccounts.first(where: {
+                    $0.kind == .credit && $0.externalAccountId == card.plaidMetadata?.accountId &&
+                    card.plaidMetadata?.accountId != nil
+                })?.id ?? card.id
+            })
+        _isTransfer = State(initialValue: budget.isUserClassifiedTransfer(expense))
+        _destinationAccountId = State(initialValue: expense.transferDestinationAccountId)
+        _correction = State(initialValue: expense.reviewCorrection)
+        _bucketFrom = State(initialValue: expense.bucketFromName ?? "")
+        _bucketTo = State(initialValue: expense.bucketToName ?? "")
+    }
+
+
+    private func confirmObservedCounterpart(_ matched: PlaidTransferReviewLeg) -> Bool {
+        guard correction == nil,
+              let sourceId = expense.plaidMetadata?.transactionId,
+              matchingAccountMovements.contains(where: { $0.id == matched.id }),
+              amount > 0, abs(amount - abs(matched.signedAmount)) < 0.01
+        else {
+            matchError = "The matching transaction changed or the amounts differ. Review the latest account activity before linking."
+            return false
+        }
+
+        // Update the source row before pairing, retaining the original Plaid
+        // identity and the user's edits. The pairing code itself also requires
+        // an observed opposite leg and rejects duplicate or ambiguous matches.
+        var updated = expense
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.amount = amount
+        updated.date = date
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.userClassifiedTransfer = isTransfer ? true : nil
+        updated.transferDestinationAccountId = isTransfer ? destinationAccountId : nil
+        updated.transferDestinationAccountName = isTransfer ?
+            (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ??
+                "External / not connected") : nil
+        if isCreditCardPayment {
+            updated.creditCardPaymentTargetId = targetCreditAccountId
+            updated.creditCardPaymentTarget = creditCardOptions.first(where: {
+                stableCreditAccountId($0) == targetCreditAccountId
+            })?.name
+        } else {
+            updated.creditCardPaymentTargetId = nil
+            updated.creditCardPaymentTarget = nil
+        }
+        updated.plaidMetadata?.userConfirmedNotTransfer = false
+        budget.updateExpense(updated)
+
+        if budget.confirmPlaidTransferReview(sourceId: sourceId, counterpartId: matched.id) {
+            return true
+        }
+        matchError = "The match could not be verified. Your classification was saved, but no linked transfer was created."
+        return false
     }
 
     private var entryTitle: String {
@@ -10555,25 +10861,65 @@ struct EditExpenseView: View {
                     TextField("Amount", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Picker("Section", selection: $section) {
-                        ForEach(BudgetSection.allCases) { item in
-                            Text(item.title).tag(item)
+                } header: {
+                    Text("Transaction")
+                }
+
+                Section("Classification") {
+                    Picker("Transaction type", selection: transactionType) {
+                        ForEach(EntryType.allCases) { type in
+                            Text(type.rawValue).tag(type)
                         }
                     }
-                    Toggle("Credit Card Payment", isOn: $isCreditCardPayment)
-                    if isCreditCardPayment {
+                    if correction == .duplicate {
+                        Text("The extra transaction will be hidden from activity and spending but its original bank record will remain available to restore in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == .bucketTransfer {
+                        TextField("From bucket (optional)", text: $bucketFrom)
+                        TextField("To bucket (optional)", text: $bucketTo)
+                        Text("Moving money between buckets under this same account is not an expense. No second account or deposit is created.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == nil && isTransfer {
+                        Picker("Transfer to", selection: $destinationAccountId) {
+                            Text("External / not connected").tag(Optional<UUID>.none)
+                            ForEach(destinationOptions) { account in
+                                Text(account.name).tag(Optional(account.id))
+                            }
+                        }
+                        if destinationOptions.isEmpty {
+                            Text("No other account is connected. You can classify this as a transfer to an external account you own without creating a deposit.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("This excludes the withdrawal from your spending budget. The receiving balance only updates when that account actually syncs; no deposit is invented.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if correction == nil && !isTransfer && !isCreditCardPayment {
+                        Picker("Section", selection: $section) {
+                            ForEach(BudgetSection.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                    }
+                    if correction == nil && isCreditCardPayment {
                         if creditCardOptions.isEmpty {
                             Text("Add a credit card in Credit Accounts first.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
-                            Picker("Apply to card", selection: $targetCreditAccountName) {
-                                ForEach(creditCardOptions, id: \.self) { accountName in
-                                    Text(accountName).tag(accountName)
+                            Picker("Apply to card", selection: $targetCreditAccountId) {
+                                Text("Choose card").tag(Optional<UUID>.none)
+                                ForEach(creditCardOptions) { card in
+                                    Text(card.name).tag(Optional(stableCreditAccountId(card)))
                                 }
                             }
                         }
-                    } else {
+                    } else if correction == nil && !isTransfer {
                         Toggle("Other category", isOn: $useCustomCategory)
 
                         if useCustomCategory {
@@ -10590,33 +10936,181 @@ struct EditExpenseView: View {
                             }
                         }
                     }
-                    Picker(isCreditCardPayment ? "Pay from" : "Paid with", selection: $paymentAccount) {
-                        Text("None").tag("")
-                        ForEach(isCreditCardPayment ? bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
-                            Text(accountName).tag(accountName)
+                    if expense.plaidMetadata != nil {
+                        LabeledContent("Recorded in") {
+                            Text(expense.paymentAccount.isEmpty ? "Connected account" : expense.paymentAccount)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("The bank that recorded this transaction cannot be changed here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(isTransfer ? "Transfer from" :
+                            (isCreditCardPayment ? "Pay from" : "Paid with"),
+                               selection: $paymentAccount) {
+                            Text("None").tag("")
+                            ForEach((isCreditCardPayment || isTransfer) ?
+                                bankPaymentAccountOptions : paymentAccountOptions, id: \.self) { accountName in
+                                Text(accountName).tag(accountName)
+                            }
                         }
                     }
+                }
+
+                Section("Notes") {
                     TextField("Note", text: $note, axis: .vertical)
-                } header: {
-                    Text("Expense Details")
+                }
+
+                if correction == .bucketTransfer && expense.plaidMetadata != nil {
+                    Section("Pair bucket movements") {
+                        if let pairedID = expense.bucketCounterpartSourceId {
+                            Text("Linked to observed bucket transaction \(pairedID.suffix(6)). Change classification to unlink.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            let candidates = budget.bucketTransferIncomeCandidates(for: expense)
+                            if candidates.isEmpty {
+                                Text("No opposite entry in this same account has been observed yet. You can still mark this as a bucket transfer without adding a fictional deposit.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(candidates) { candidate in
+                                    Button {
+                                        selectedBucketIncome = candidate
+                                        confirmBucketMatch = true
+                                    } label: {
+                                        Label("Link \(candidate.name) · \(candidate.amount.formatted(.currency(code: "USD")))", systemImage: "arrow.left.arrow.right")
+                                    }
+                                }
+                            }
+                        }
+                        if let bucketMatchError {
+                            Text(bucketMatchError).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
+
+                if correction == nil && !matchingAccountMovements.isEmpty {
+                    Section("Observed Matching Account Activity") {
+                        Text("Check both bank entries before linking. Selecting a candidate will show its exact source and destination accounts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(matchingAccountMovements) { candidate in
+                            Button {
+                                counterpartToConfirm = candidate
+                            } label: {
+                                if let sourceId = expense.plaidMetadata?.transactionId,
+                                   let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
+                                    PlaidTransferMatchCandidateRow(
+                                        proposal: PlaidTransferMatchProposal(
+                                            source: source, candidate: candidate
+                                        ),
+                                        budget: budget
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if let matchError {
+                    Section {
+                        Text(matchError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(entryTitle)
+            .confirmationDialog(
+                "Confirm this internal bucket transfer?",
+                isPresented: $confirmBucketMatch,
+                titleVisibility: .visible
+            ) {
+                Button("Link both bucket movements") {
+                    guard let selectedBucketIncome,
+                          budget.confirmInternalBucketTransfer(
+                            expenseID: expense.id,
+                            incomeID: selectedBucketIncome.id,
+                            fromBucket: bucketFrom,
+                            toBucket: bucketTo
+                          ) else {
+                        bucketMatchError = "The opposing transaction is no longer eligible. No link was created."
+                        return
+                    }
+                    Haptics.success()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Only link two actual opposite-signed Plaid entries belonging to the same bank account. Both will be excluded from income and spending; Plaid balances remain unchanged.")
+            }
+            .confirmationDialog(
+                "Hide this duplicate transaction?",
+                isPresented: $confirmDuplicate,
+                titleVisibility: .visible
+            ) {
+                Button("Mark as Duplicate") { saveTransaction() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This hides the extra entry and excludes it from spending, but the original Plaid record remains available to restore.")
+            }
+            .navigationTitle("Edit transaction")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $counterpartToConfirm) { candidate in
+                if let sourceId = expense.plaidMetadata?.transactionId,
+                   let source = budget.plaidTransferReviewLeg(sourceId: sourceId) {
+                    PlaidTransferMatchReviewSheet(
+                        proposal: PlaidTransferMatchProposal(
+                            source: source, candidate: candidate
+                        ),
+                        budget: budget,
+                        onConfirm: { confirmObservedCounterpart(candidate) },
+                        onMatched: {
+                            Haptics.success()
+                            dismiss()
+                        }
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "Transaction no longer available",
+                        systemImage: "arrow.triangle.2.circlepath",
+                        description: Text("Refresh your bank connections and review again.")
+                    )
+                }
+            }
+            .onChange(of: correction) { _, newValue in
+                if newValue != nil {
+                    isTransfer = false
+                    isCreditCardPayment = false
+                }
+            }
             .onChange(of: section) { _, _ in
                 categoryId = categories.first?.id
                 useCustomCategory = false
                 customCategoryName = ""
             }
             .onAppear {
-                if isCreditCardPayment && targetCreditAccountName.isEmpty {
-                    targetCreditAccountName = creditCardOptions.first ?? ""
+                if isCreditCardPayment && targetCreditAccountId == nil {
+                    targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
                 }
             }
             .onChange(of: isCreditCardPayment) { _, newValue in
-                if newValue && targetCreditAccountName.isEmpty {
-                    targetCreditAccountName = creditCardOptions.first ?? ""
+                if newValue {
+                    isTransfer = false
+                    if targetCreditAccountId == nil {
+                        targetCreditAccountId = creditCardOptions.first.map(stableCreditAccountId)
+                    }
+                }
+            }
+            .onChange(of: isTransfer) { _, newValue in
+                if newValue {
+                    isCreditCardPayment = false
+                }
+            }
+            .onChange(of: paymentAccount) { _, _ in
+                if let destinationAccountId,
+                   !destinationOptions.contains(where: { $0.id == destinationAccountId }) {
+                    self.destinationAccountId = nil
                 }
             }
             .toolbar {
@@ -10625,45 +11119,92 @@ struct EditExpenseView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let resolvedCategoryId: UUID?
-                        if isCreditCardPayment {
-                            guard !targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            resolvedCategoryId = creditCardPaymentCategoryId()
-                        } else if useCustomCategory {
-                            let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmed.isEmpty else { return }
-                            let newCategory = Category(name: trimmed, allocatedAmount: 0)
-                            if section == .needs {
-                                budget.needsCategories.append(newCategory)
-                            } else {
-                                budget.wantsCategories.append(newCategory)
-                            }
-                            resolvedCategoryId = newCategory.id
+                        if correction == .duplicate && expense.reviewCorrection != .duplicate {
+                            confirmDuplicate = true
                         } else {
-                            resolvedCategoryId = categoryId
+                            saveTransaction()
                         }
-
-                        guard let categoryId = resolvedCategoryId else { return }
-                        budget.updateExpense(
-                            Expense(
-                                id: expense.id,
-                                name: name,
-                                amount: amount,
-                                date: date,
-                                section: isCreditCardPayment ? .needs : section,
-                                categoryId: categoryId,
-                                paymentAccount: paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines),
-                                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                creditCardPaymentTarget: isCreditCardPayment ? targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
-                            )
-                        )
-                        Haptics.success()
-                        dismiss()
                     }
-                    .disabled(name.isEmpty || amount <= 0 || (!isCreditCardPayment && !useCustomCategory && categoryId == nil) || (isCreditCardPayment && targetCreditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        amount <= 0 ||
+                        (correction == nil && isTransfer && (paymentAccount.isEmpty ||
+                            (destinationAccountId != nil && !destinationOptions.contains(where: { $0.id == destinationAccountId })))) ||
+                        (correction == nil && isCreditCardPayment && (targetCreditAccountId == nil || paymentAccount.isEmpty)) ||
+                        (correction == nil && !isTransfer && !isCreditCardPayment && !useCustomCategory && categoryId == nil))
                 }
             }
         }
+    }
+
+    private func saveTransaction() {
+        let resolvedCategoryId: UUID
+        if correction != nil {
+            resolvedCategoryId = expense.categoryId
+        } else if isTransfer {
+            guard !paymentAccount.isEmpty,
+                  destinationAccountId == nil || destinationOptions.contains(where: { $0.id == destinationAccountId }) else { return }
+            resolvedCategoryId = expense.categoryId
+        } else if isCreditCardPayment {
+            guard let targetCreditAccountId,
+                  creditCardOptions.contains(where: { stableCreditAccountId($0) == targetCreditAccountId }),
+                  !paymentAccount.isEmpty else { return }
+            resolvedCategoryId = creditCardPaymentCategoryId()
+        } else if useCustomCategory {
+            let trimmed = customCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let newCategory = Category(name: trimmed, allocatedAmount: 0)
+            if section == .needs {
+                budget.needsCategories.append(newCategory)
+            } else {
+                budget.wantsCategories.append(newCategory)
+            }
+            resolvedCategoryId = newCategory.id
+        } else {
+            guard let categoryId else { return }
+            resolvedCategoryId = categoryId
+        }
+
+        var updated = expense
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.amount = amount
+        updated.date = date
+        updated.section = (correction == nil && isCreditCardPayment) ? .needs : section
+        updated.categoryId = resolvedCategoryId
+        updated.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.paymentAccount = expense.plaidMetadata != nil ?
+            expense.paymentAccount : paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.reviewCorrection = correction
+        updated.correctionBeforeDuplicate = correction == .duplicate ?
+            (expense.reviewCorrection == .duplicate ? expense.correctionBeforeDuplicate : expense.reviewCorrection) : nil
+        updated.bucketFromName = correction == .bucketTransfer ?
+            bucketFrom.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? expense.bucketFromName : nil)
+        updated.bucketToName = correction == .bucketTransfer ?
+            bucketTo.trimmingCharacters(in: .whitespacesAndNewlines) :
+            (correction == .duplicate ? expense.bucketToName : nil)
+        if correction != .bucketTransfer { updated.bucketCounterpartSourceId = nil }
+        updated.userClassifiedTransfer = correction == .duplicate ? expense.userClassifiedTransfer :
+            (correction == nil && isTransfer ? true : nil)
+        updated.transferDestinationAccountId = correction == .duplicate ? expense.transferDestinationAccountId :
+            (correction == nil && isTransfer ? destinationAccountId : nil)
+        updated.transferDestinationAccountName = correction == .duplicate ? expense.transferDestinationAccountName :
+            (correction == nil && isTransfer ?
+                (destinationOptions.first(where: { $0.id == destinationAccountId })?.name ?? "External / not connected") : nil)
+        updated.creditCardPaymentTargetId = correction == .duplicate ? expense.creditCardPaymentTargetId :
+            (correction == nil && isCreditCardPayment ? targetCreditAccountId : nil)
+        updated.creditCardPaymentTarget = correction == .duplicate ? expense.creditCardPaymentTarget :
+            (correction == nil && isCreditCardPayment ?
+                creditCardOptions.first(where: { stableCreditAccountId($0) == targetCreditAccountId })?.name : nil)
+        if updated.plaidMetadata != nil {
+            if correction != nil || isTransfer || isCreditCardPayment {
+                updated.plaidMetadata?.userConfirmedNotTransfer = false
+            } else if budget.isUserClassifiedTransfer(expense) || budget.isCreditCardPayment(expense) {
+                updated.plaidMetadata?.userConfirmedNotTransfer = true
+            }
+        }
+        budget.updateExpense(updated)
+        Haptics.success()
+        dismiss()
     }
 }
 
@@ -11105,7 +11646,7 @@ struct CreditAccountsView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -11348,7 +11889,7 @@ struct CreditAccountDetailView: View {
         }
         let normalizedAccountName = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalizedAccountName.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount

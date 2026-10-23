@@ -23,14 +23,14 @@ struct BudgetActivityWorkspaceView: View {
     private var monthExpenses: [Expense] {
         guard let monthInterval else { return [] }
         return budget.expenses
-            .filter { monthInterval.contains($0.date) && !budget.isCreditCardPayment($0) }
+            .filter { monthInterval.contains($0.date) && !budget.isExcludedFromSpending($0) }
             .sorted { $0.date > $1.date }
     }
 
     private var monthIncome: [IncomeEntry] {
         guard let monthInterval else { return [] }
         return budget.incomes
-            .filter { monthInterval.contains($0.date) }
+            .filter { monthInterval.contains($0.date) && !budget.isExcludedFromIncome($0) }
             .sorted { $0.date > $1.date }
     }
 
@@ -39,6 +39,20 @@ struct BudgetActivityWorkspaceView: View {
         return budget.savingsEntries
             .filter { monthInterval.contains($0.date) }
             .sorted { $0.date > $1.date }
+    }
+
+    private var monthBucketExpenses: [Expense] {
+        guard let monthInterval else { return [] }
+        return budget.expenses.filter {
+            monthInterval.contains($0.date) && $0.reviewCorrection == .bucketTransfer
+        }
+    }
+
+    private var monthBucketIncome: [IncomeEntry] {
+        guard let monthInterval else { return [] }
+        return budget.incomes.filter {
+            monthInterval.contains($0.date) && $0.reviewCorrection == .bucketTransfer
+        }
     }
 
     private var inflow: Double { monthIncome.reduce(0) { $0 + $1.amount } }
@@ -50,7 +64,14 @@ struct BudgetActivityWorkspaceView: View {
         let expenses = monthExpenses.map(BudgetActivityItem.expense)
         let income = monthIncome.map(BudgetActivityItem.income)
         let savings = monthSavings.map(BudgetActivityItem.savings)
-        return (expenses + income + savings).sorted { $0.date > $1.date }
+        // A confirmed same-account debit/credit is one internal allocation in
+        // Activity, though both original Plaid legs remain in stored history.
+        let unpairedBucketCredits = monthBucketIncome.filter {
+            !budget.isPairedBucketCredit($0)
+        }
+        let bucketMovements = monthBucketExpenses.map(BudgetActivityItem.expense) +
+            unpairedBucketCredits.map(BudgetActivityItem.income)
+        return (expenses + income + savings + bucketMovements).sorted { $0.date > $1.date }
     }
 
     private var activeRecurring: [RecurringPayment] {
@@ -67,7 +88,7 @@ struct BudgetActivityWorkspaceView: View {
     }
 
     private var transactionCount: Int {
-        monthExpenses.count + monthIncome.count + monthSavings.count
+        recentItems.count
     }
 
     var body: some View {
@@ -75,6 +96,40 @@ struct BudgetActivityWorkspaceView: View {
             BudgetWorkspaceMonthSelector(selectedMonth: $selectedMonth)
             activityHero
             quickActions
+
+            if !budget.plaidReviewItems.isEmpty {
+                NavigationLink {
+                    BudgetFinancialReviewView(
+                        budget: budget,
+                        onEditExpense: onEditExpense,
+                        onEditIncome: onEditIncome
+                    )
+                } label: {
+                    GlassCard(padding: 12) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.shield")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.orange)
+                                .frame(width: 34, height: 34)
+                                .background(Color.orange.opacity(0.11), in: RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Review transactions")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("\(budget.plaidReviewItems.count) imported item\(budget.plaidReviewItems.count == 1 ? "" : "s") awaiting review")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(budget.plaidReviewItems.count) financial transactions need review")
+            }
 
             BudgetWorkspaceSectionHeader(
                 title: "Recent activity",
@@ -110,6 +165,23 @@ struct BudgetActivityWorkspaceView: View {
             )
 
             VStack(spacing: 8) {
+                NavigationLink {
+                    BudgetFinancialReviewView(
+                        budget: budget,
+                        onEditExpense: onEditExpense,
+                        onEditIncome: onEditIncome
+                    )
+                } label: {
+                    BudgetWorkspaceNavigationRow(
+                        title: "Review transactions",
+                        subtitle: "Fix imports, transfers, and card payments",
+                        systemImage: "checkmark.shield",
+                        tint: .orange,
+                        value: "\(budget.plaidReviewItems.count) to review"
+                    )
+                }
+                .buttonStyle(.plain)
+
                 NavigationLink {
                     BudgetActivityTransactionsView(
                         items: recentItems,
@@ -236,8 +308,20 @@ private enum BudgetActivityItem: Identifiable {
 
     var subtitle: String {
         switch self {
-        case .expense(let value): return value.paymentAccount.isEmpty ? value.section.title : value.paymentAccount
-        case .income(let value): return value.bankName.isEmpty ? "Income" : value.bankName
+        case .expense(let value):
+            if value.reviewCorrection == .bucketTransfer {
+                return "Bucket transfer" + ((value.bucketFromName?.isEmpty == false && value.bucketToName?.isEmpty == false) ?
+                    " · \(value.bucketFromName ?? "") → \(value.bucketToName ?? "")" :
+                    ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName ?? "")" : ""))
+            }
+            return value.paymentAccount.isEmpty ? value.section.title : value.paymentAccount
+        case .income(let value):
+            if value.reviewCorrection == .bucketTransfer {
+                return "Bucket transfer" + ((value.bucketFromName?.isEmpty == false && value.bucketToName?.isEmpty == false) ?
+                    " · \(value.bucketFromName ?? "") → \(value.bucketToName ?? "")" :
+                    ((value.bucketToName?.isEmpty == false) ? " → \(value.bucketToName ?? "")" : ""))
+            }
+            return value.bankName.isEmpty ? "Income" : value.bankName
         case .savings: return "Savings"
         }
     }
@@ -258,12 +342,21 @@ private enum BudgetActivityItem: Identifiable {
         }
     }
 
+    var isBucketMovement: Bool {
+        switch self {
+        case .expense(let value): return value.reviewCorrection == .bucketTransfer
+        case .income(let value): return value.reviewCorrection == .bucketTransfer
+        case .savings: return false
+        }
+    }
+
     var isInflow: Bool {
         if case .income = self { return true }
         return false
     }
 
     var systemImage: String {
+        if isBucketMovement { return "arrow.left.arrow.right" }
         switch self {
         case .expense: return "creditcard.fill"
         case .income: return "arrow.down.circle.fill"
@@ -272,6 +365,7 @@ private enum BudgetActivityItem: Identifiable {
     }
 
     var tint: Color {
+        if isBucketMovement { return .teal }
         switch self {
         case .expense: return .pink
         case .income: return .green
@@ -306,7 +400,7 @@ private struct BudgetActivityRow: View {
 
                 Spacer(minLength: 8)
 
-                Text("\(item.isInflow ? "+" : "-")\(item.amount.formatted(.currency(code: "USD")))")
+                Text("\(item.isBucketMovement ? "↔" : (item.isInflow ? "+" : "-"))\(item.amount.formatted(.currency(code: "USD")))")
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .foregroundStyle(item.isInflow ? Color.green : Color.primary)
                     .minimumScaleFactor(0.72)
@@ -776,9 +870,9 @@ struct BudgetAccountsWorkspaceView: View {
                             .controlSize(.small)
                     }
                     if !budget.plaidReviewItems.isEmpty {
-                        Button("Manage accounts", action: onManageBanks)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        Text("Resolve imported transactions in Budget → Activity → Review transactions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -829,7 +923,7 @@ struct BudgetAccountsWorkspaceView: View {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1370,7 +1464,7 @@ private struct BudgetCreditAccountsWorkspaceView: View {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return 0 }
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1390,7 +1484,7 @@ private struct BudgetCreditCardWorkspaceDetail: View {
     private var balance: Double {
         if account.plaidMetadata != nil { return account.startingBalance }
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return budget.expenses.reduce(account.startingBalance) { partial, expense in
+        return budget.expenses.filter { $0.reviewCorrection == nil }.reduce(account.startingBalance) { partial, expense in
             if let paidCard = budget.creditCardPaymentTarget(for: expense),
                paidCard.caseInsensitiveCompare(account.name) == .orderedSame {
                 return partial - expense.amount
@@ -1411,11 +1505,11 @@ private struct BudgetCreditCardWorkspaceDetail: View {
 
     private var activity: [(id: String, date: Date, name: String, amount: Double, isPayment: Bool)] {
         let normalized = account.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let charges = budget.expenses.compactMap { expense -> (String, Date, String, Double, Bool)? in
+        let charges = budget.expenses.filter { $0.reviewCorrection == nil }.compactMap { expense -> (String, Date, String, Double, Bool)? in
             guard expense.paymentAccount.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized else { return nil }
             return ("charge-\(expense.id.uuidString)", expense.date, expense.name, expense.amount, false)
         }
-        let payments = budget.expenses.compactMap { expense -> (String, Date, String, Double, Bool)? in
+        let payments = budget.expenses.filter { $0.reviewCorrection == nil }.compactMap { expense -> (String, Date, String, Double, Bool)? in
             guard let target = budget.creditCardPaymentTarget(for: expense),
                   target.caseInsensitiveCompare(account.name) == .orderedSame else { return nil }
             return ("payment-\(expense.id.uuidString)", expense.date, expense.name, expense.amount, true)
@@ -1619,11 +1713,11 @@ struct BudgetReportsWorkspaceView: View {
 
     private var expenses: [Expense] {
         guard let interval else { return [] }
-        return budget.expenses.filter { interval.contains($0.date) && !budget.isCreditCardPayment($0) }
+        return budget.expenses.filter { interval.contains($0.date) && !budget.isExcludedFromSpending($0) }
     }
     private var incomes: [IncomeEntry] {
         guard let interval else { return [] }
-        return budget.incomes.filter { interval.contains($0.date) }
+        return budget.incomes.filter { interval.contains($0.date) && !budget.isExcludedFromIncome($0) }
     }
     private var savings: [SavingsEntry] {
         guard let interval else { return [] }
@@ -1769,12 +1863,12 @@ private enum BudgetReportData {
 
     static func expenses(budget: BudgetModel, month: Date) -> [Expense] {
         guard let interval = Calendar.current.dateInterval(of: .month, for: month) else { return [] }
-        return budget.expenses.filter { interval.contains($0.date) && !budget.isCreditCardPayment($0) }
+        return budget.expenses.filter { interval.contains($0.date) && !budget.isExcludedFromSpending($0) }
     }
 
     static func incomes(budget: BudgetModel, month: Date) -> [IncomeEntry] {
         guard let interval = Calendar.current.dateInterval(of: .month, for: month) else { return [] }
-        return budget.incomes.filter { interval.contains($0.date) }
+        return budget.incomes.filter { interval.contains($0.date) && !budget.isExcludedFromIncome($0) }
     }
 
     static func savings(budget: BudgetModel, month: Date) -> [SavingsEntry] {
@@ -2274,5 +2368,592 @@ private struct BudgetWorkspaceEmptyState: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+
+// Budget > Activity is the financial-review home. Plaid Sync remains a
+// connection-management screen; neither screen maintains a second queue.
+
+struct PlaidTransferMatchProposal: Identifiable {
+    let source: PlaidTransferReviewLeg
+    let candidate: PlaidTransferReviewLeg
+
+    var id: String { "\(source.id)|\(candidate.id)" }
+    var debit: PlaidTransferReviewLeg { source.signedAmount > 0 ? source : candidate }
+    var credit: PlaidTransferReviewLeg { source.signedAmount < 0 ? source : candidate }
+}
+
+/// One account presentation, reused by Activity, account-ledger review, and
+/// transaction-editor match confirmation. Never infer masked digits from an
+/// opaque Plaid ID: only display information actually supplied by the bank.
+private struct PlaidMatchAccountIdentity: View {
+    let title: String
+    let leg: PlaidTransferReviewLeg
+    @ObservedObject var budget: BudgetModel
+
+    private var account: FinancialAccount? {
+        budget.financialAccounts.first(where: { $0.id == leg.accountId })
+    }
+
+    private var typeName: String {
+        switch account?.kind {
+        case .credit: return "Credit card"
+        case .depository: return "Bank account"
+        case .investment: return "Investment account"
+        default: return "Connected account"
+        }
+    }
+
+    private var institution: String? {
+        guard let text = account?.institutionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(leg.accountName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text([institution, typeName].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Compact, two-sided account preview. The button contains no nested buttons.
+struct PlaidTransferMatchCandidateRow: View {
+    let proposal: PlaidTransferMatchProposal
+    @ObservedObject var budget: BudgetModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Possible match")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(abs(proposal.debit.signedAmount), format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+            }
+            PlaidMatchAccountIdentity(title: "From · withdrawal", leg: proposal.debit, budget: budget)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.semibold))
+                Text("To")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            PlaidMatchAccountIdentity(title: "To · deposit or card payment", leg: proposal.credit, budget: budget)
+            Text("\(proposal.debit.date.formatted(date: .abbreviated, time: .omitted)) · \(proposal.credit.date.formatted(date: .abbreviated, time: .omitted))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens a confirmation screen showing both real bank transactions")
+    }
+}
+
+struct PlaidTransferMatchReviewSheet: View {
+    let proposal: PlaidTransferMatchProposal
+    @ObservedObject var budget: BudgetModel
+    let onConfirm: () -> Bool
+    let onMatched: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+
+    private var identifiable: Bool {
+        budget.canClearlyIdentifyPlaidMatch(
+            sourceID: proposal.source.id, counterpartID: proposal.candidate.id
+        )
+    }
+
+    private var isCardPayment: Bool {
+        budget.financialAccounts.contains {
+            $0.id == proposal.credit.accountId && $0.kind == .credit
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Confirm both accounts")
+                            .font(.title3.weight(.semibold))
+                        Text("This is a suggested match, not a verified transfer. Compare both bank entries before linking them.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Money movement") {
+                    PlaidMatchAccountIdentity(
+                        title: "From · money leaving", leg: proposal.debit, budget: budget
+                    )
+                    .padding(.vertical, 6)
+                    Label("Money moved to", systemImage: "arrow.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    PlaidMatchAccountIdentity(
+                        title: "To · money arriving", leg: proposal.credit, budget: budget
+                    )
+                    .padding(.vertical, 6)
+                }
+
+                Section("Transactions recorded by your accounts") {
+                    LabeledContent("Withdrawal", value:
+                        abs(proposal.debit.signedAmount).formatted(.currency(code: "USD"))
+                    )
+                    LabeledContent("Deposit / payment", value:
+                        abs(proposal.credit.signedAmount).formatted(.currency(code: "USD"))
+                    )
+                    LabeledContent("Withdrawal date", value:
+                        proposal.debit.date.formatted(date: .abbreviated, time: .omitted)
+                    )
+                    LabeledContent("Deposit / payment date", value:
+                        proposal.credit.date.formatted(date: .abbreviated, time: .omitted)
+                    )
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Withdrawal description")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(proposal.debit.title)
+                            .font(.subheadline)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Receiving description")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(proposal.credit.title)
+                            .font(.subheadline)
+                    }
+                }
+
+                if !identifiable {
+                    Section {
+                        Label("Account names are not unique", systemImage: "exclamationmark.triangle")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Two linked accounts have identical names, institutions, and types. Distinguish their display names in account settings before confirming this match.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.circle")
+                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                    }
+                }
+
+                Section {
+                    Text("Confirming will link the two observed transactions and prevent double-counting. It will not initiate a transfer or change bank-reported balances. You can undo an incorrect match in Review transactions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(isCardPayment ? "Review card payment" : "Review transfer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    if onConfirm() {
+                        onMatched()
+                        dismiss()
+                    } else {
+                        errorMessage = "These entries could not be linked. Refresh both accounts and review the latest activity."
+                    }
+                } label: {
+                    Text("Confirm these accounts")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!identifiable)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
+            }
+        }
+    }
+}
+
+struct BudgetFinancialReviewView: View {
+    @ObservedObject var budget: BudgetModel
+    let onEditExpense: (Expense) -> Void
+    let onEditIncome: (IncomeEntry) -> Void
+
+    @State private var dismissedItems: [PlaidReviewItem] = []
+    @State private var pendingDecision: ReviewDecision?
+    @State private var showingConfirmation = false
+    @State private var feedbackMessage: String?
+    @State private var matchProposal: PlaidTransferMatchProposal?
+
+    private enum ReviewDecision {
+        case withdrawal(sourceID: String)
+        case undoPair(transferID: UUID)
+
+        var explanation: String {
+            switch self {
+            case .withdrawal:
+                return "Keep this bank withdrawal as spending, not as a transfer. This classification persists on future Plaid syncs."
+            case .undoPair:
+                return "Remove this incorrect link and restore the two original Plaid transactions for review. A rejected pair will not automatically relink."
+            }
+        }
+    }
+
+    private var unmatchedSuggestions: [PlaidTransferReviewLeg] {
+        let queuedIDs = Set(budget.plaidReviewItems.map(\.sourceId))
+        return budget.plaidPotentialTransferReviews()
+            .filter { !queuedIDs.contains($0.id) }
+    }
+
+    private var linkedMovements: [CashTransfer] {
+        Array(budget.cashTransfers
+            .filter { $0.note.hasPrefix("[PLAID_PAIR:") }
+            .sorted { $0.date > $1.date }
+            .prefix(50))
+    }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Make your activity accurate")
+                            .font(.headline)
+                        Text("Confirm transfers, correct categories, or restore hidden duplicates. Reviews include every date.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+                if let feedbackMessage {
+                    Text(feedbackMessage)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+                if !dismissedItems.isEmpty {
+                    Button {
+                        budget.restoreDismissedPlaidReviewReminders(dismissedItems)
+                        dismissedItems.removeAll()
+                        feedbackMessage = "The review reminders were restored."
+                    } label: {
+                        Label("Undo dismissed reminders", systemImage: "arrow.uturn.backward")
+                    }
+                }
+            }
+
+            Section {
+                if budget.plaidReviewItems.isEmpty {
+                    Label("No imported transactions require review", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(budget.plaidReviewItems.sorted(by: { $0.createdAt > $1.createdAt })) { item in
+                        VStack(alignment: .leading, spacing: 9) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer(minLength: 8)
+                                if let amount = item.amount {
+                                    Text(abs(amount), format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.medium).monospacedDigit())
+                                }
+                            }
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let leg = budget.plaidTransferReviewLeg(sourceId: item.sourceId) {
+                                PlaidMatchAccountIdentity(
+                                    title: "Recorded in", leg: leg, budget: budget
+                                )
+                                let candidates = budget.plaidTransferReviewCandidates(sourceId: item.sourceId)
+                                if candidates.isEmpty {
+                                    Text("No second account transaction is available to compare. Sync the other account, or edit this entry.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(candidates) { candidate in
+                                        Button {
+                                            matchProposal = PlaidTransferMatchProposal(
+                                                source: leg, candidate: candidate
+                                            )
+                                        } label: {
+                                            PlaidTransferMatchCandidateRow(
+                                                proposal: PlaidTransferMatchProposal(
+                                                    source: leg, candidate: candidate
+                                                ),
+                                                budget: budget
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                if leg.signedAmount > 0 &&
+                                    budget.financialAccounts.contains(where: {
+                                        $0.id == leg.accountId && $0.kind == .depository
+                                    }) {
+                                    Button {
+                                        request(.withdrawal(sourceID: item.sourceId))
+                                    } label: {
+                                        Label("Keep as withdrawal / expense", systemImage: "checkmark.shield")
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+
+                            if let expense = budget.expenses.first(where: {
+                                $0.plaidMetadata?.transactionId == item.sourceId
+                            }) {
+                                Button("Edit transaction") { onEditExpense(expense) }
+                                    .buttonStyle(.bordered)
+                            } else if let income = budget.incomes.first(where: {
+                                $0.plaidMetadata?.transactionId == item.sourceId
+                            }) {
+                                Button("Edit transaction") { onEditIncome(income) }
+                                    .buttonStyle(.bordered)
+                            }
+
+                            Button("Dismiss reminder") {
+                                dismissReminder(item)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHint("Removes only the review notification. The bank transaction is unchanged.")
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            } header: {
+                Text("Needs review · \(budget.plaidReviewItems.count)")
+            } footer: {
+                Text("Dismissing a reminder does not change or delete financial records. Use Undo above to restore it.")
+            }
+
+            Section {
+                if unmatchedSuggestions.isEmpty {
+                    Text("No additional matching bank or credit-card movements are suggested.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(unmatchedSuggestions) { source in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(source.title)
+                                .font(.subheadline.weight(.semibold))
+                            PlaidMatchAccountIdentity(
+                                title: "Suggested movement", leg: source, budget: budget
+                            )
+                            ForEach(budget.plaidTransferReviewCandidates(sourceId: source.id)) { candidate in
+                                Button {
+                                    matchProposal = PlaidTransferMatchProposal(
+                                        source: source, candidate: candidate
+                                    )
+                                } label: {
+                                    PlaidTransferMatchCandidateRow(
+                                        proposal: PlaidTransferMatchProposal(
+                                            source: source, candidate: candidate
+                                        ),
+                                        budget: budget
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            if source.signedAmount > 0 &&
+                                budget.financialAccounts.contains(where: {
+                                    $0.id == source.accountId && $0.kind == .depository
+                                }) {
+                                Button("Keep as withdrawal / expense") {
+                                    request(.withdrawal(sourceID: source.id))
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            } header: {
+                Text("Possible transfers & card payments")
+            } footer: {
+                Text("These are possible matches, not confirmed transfers. Open a pair to compare both account identities and bank dates.")
+            }
+
+            Section {
+                let hiddenIncomes = budget.incomes.filter { $0.reviewCorrection == .duplicate }
+                    .sorted { $0.date > $1.date }
+                let hiddenExpenses = budget.expenses.filter { $0.reviewCorrection == .duplicate }
+                    .sorted { $0.date > $1.date }
+                if hiddenIncomes.isEmpty && hiddenExpenses.isEmpty {
+                    Text("No transactions have been marked as duplicates.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(hiddenIncomes) { income in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(income.name).font(.subheadline.weight(.semibold))
+                                Text("\(income.bankName) · \(income.date.formatted(date: .abbreviated, time: .omitted)) · +\(income.amount.formatted(.currency(code: "USD")))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Restore") {
+                                if budget.restoreDuplicateIncome(id: income.id) {
+                                    feedbackMessage = "Income restored to activity and totals."
+                                } else {
+                                    feedbackMessage = "This duplicate could not be restored."
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    ForEach(hiddenExpenses) { expense in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(expense.name).font(.subheadline.weight(.semibold))
+                                Text("\(expense.paymentAccount) · \(expense.date.formatted(date: .abbreviated, time: .omitted)) · -\(expense.amount.formatted(.currency(code: "USD")))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Restore") {
+                                if budget.restoreDuplicateExpense(id: expense.id) {
+                                    feedbackMessage = "Expense restored to activity and totals."
+                                } else {
+                                    feedbackMessage = "This duplicate could not be restored."
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            } header: {
+                Text("Hidden duplicates")
+            } footer: {
+                Text("Mark duplicates from the transaction editor. Hidden items keep their original Plaid source and can be restored here without losing bank history.")
+            }
+
+            Section {
+                if linkedMovements.isEmpty {
+                    Text("No linked bank or credit-card movements to correct.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(linkedMovements) { transfer in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(transfer.name)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(transfer.fromAccountName) → \(transfer.toAccountName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(transfer.amount, format: .currency(code: "USD"))
+                                .font(.caption.monospacedDigit())
+                            if budget.canUndoPlaidTransferMatch(transferId: transfer.id) {
+                                Button("Undo incorrect match", role: .destructive) {
+                                    request(.undoPair(transferID: transfer.id))
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Text("Original bank-side records are unavailable. This older link cannot be safely undone here.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                    }
+                }
+            } header: {
+                Text("Correct linked movements")
+            } footer: {
+                Text("Undo restores the original Plaid records to review. No real bank activity or institution-reported balance is changed.")
+            }
+        }
+        .navigationTitle("Review transactions")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $matchProposal) { proposal in
+            PlaidTransferMatchReviewSheet(
+                proposal: proposal,
+                budget: budget,
+                onConfirm: {
+                    budget.confirmPlaidTransferReview(
+                        sourceId: proposal.source.id,
+                        counterpartId: proposal.candidate.id
+                    )
+                },
+                onMatched: {
+                    feedbackMessage = "Transfer linked between \(proposal.debit.accountName) and \(proposal.credit.accountName)."
+                }
+            )
+        }
+        .confirmationDialog(
+            "Confirm financial classification?",
+            isPresented: $showingConfirmation,
+            titleVisibility: .visible
+        ) {
+            if let pendingDecision {
+                switch pendingDecision {
+                case .withdrawal:
+                    Button("Keep as withdrawal") { perform(pendingDecision) }
+                case .undoPair:
+                    Button("Undo incorrect match", role: .destructive) { perform(pendingDecision) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDecision = nil }
+        } message: {
+            Text(pendingDecision?.explanation ?? "Confirm this decision.")
+        }
+    }
+
+    private func request(_ decision: ReviewDecision) {
+        pendingDecision = decision
+        showingConfirmation = true
+    }
+
+    private func perform(_ decision: ReviewDecision) {
+        pendingDecision = nil
+        switch decision {
+        case let .withdrawal(sourceID):
+            if budget.keepPlaidWithdrawalAsExpense(sourceId: sourceID) {
+                feedbackMessage = "Withdrawal classification saved."
+            } else {
+                feedbackMessage = "This withdrawal could not be classified. The original data was left unchanged."
+            }
+        case let .undoPair(transferID):
+            if budget.undoPlaidTransferMatch(transferId: transferID) {
+                feedbackMessage = "Incorrect match undone. Both original movements are now ready for review."
+            } else {
+                feedbackMessage = "Both original transaction records could not be restored; no correction was made."
+            }
+        }
+    }
+
+    private func dismissReminder(_ item: PlaidReviewItem) {
+        guard let dismissed = budget.dismissPlaidReviewReminder(id: item.id) else { return }
+        dismissedItems.append(dismissed)
+        feedbackMessage = "Review reminder dismissed. The underlying transaction was not changed."
     }
 }
