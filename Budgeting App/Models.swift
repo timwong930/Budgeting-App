@@ -2729,6 +2729,28 @@ class BudgetModel: ObservableObject {
         income.reviewCorrection != nil
     }
 
+    /// Shared across the calendar, Activity and transaction history so
+    /// reclassifying a bank movement never makes it appear as spending/income.
+    func isTransferMovement(_ expense: Expense) -> Bool {
+        !isHiddenDuplicate(expense) && isExcludedFromSpending(expense)
+    }
+
+    func isTransferMovement(_ income: IncomeEntry) -> Bool {
+        income.reviewCorrection == .bucketTransfer
+    }
+
+    /// A confirmed bucket pair is one movement in every user-facing timeline.
+    /// Both original bank entries remain separately stored for audit/undo.
+    func isPairedBucketCredit(_ income: IncomeEntry) -> Bool {
+        guard income.reviewCorrection == .bucketTransfer,
+              let debitSourceID = income.bucketCounterpartSourceId else { return false }
+        return expenses.contains {
+            $0.plaidMetadata?.transactionId == debitSourceID &&
+            $0.reviewCorrection == .bucketTransfer &&
+            $0.bucketCounterpartSourceId == income.plaidMetadata?.transactionId
+        }
+    }
+
     func isHiddenDuplicate(_ expense: Expense) -> Bool { expense.reviewCorrection == .duplicate }
     func isHiddenDuplicate(_ income: IncomeEntry) -> Bool { income.reviewCorrection == .duplicate }
 
