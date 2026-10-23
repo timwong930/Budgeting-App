@@ -36,6 +36,8 @@ struct CuanMarketModelsTests {
         testPendingIncomePostingDoesNotDuplicatePayroll()
         testManualDuplicateBalancesAreReversible()
         testSameAccountBucketPairRequiresUserConfirmation()
+        testInternalBucketCalendarSemantics()
+        testPlaidMatchingRequiresDistinctAccountLabels()
         testCorrectionCodableBackwardsCompatibility()
         testPlaidUnrelatedMatchingAmountDoesNotPair()
         testPlaidAmbiguousTransfersStayUnpaired()
@@ -972,6 +974,97 @@ struct CuanMarketModelsTests {
                corrected.incomes[0].reviewCorrection == .duplicate &&
                corrected.incomes[0].plaidMetadata?.transactionId == posted.id,
                "An explicit duplicate exclusion must survive a pending-to-posted source ID change")
+    }
+
+
+    private static func testInternalBucketCalendarSemantics() {
+        let budget = BudgetModel()
+        let debitID = "bucket-calendar-out"
+        let creditID = "bucket-calendar-in"
+        var debit = Expense(
+            name: "Synthetic savings reallocation", amount: 31.27,
+            section: .needs, categoryId: UUID(),
+            paymentAccount: "Example Savings",
+            reviewCorrection: .bucketTransfer,
+            bucketFromName: "Bills", bucketToName: "Emergency",
+            bucketCounterpartSourceId: creditID,
+            plaidMetadata: PlaidSourceMetadata(
+                itemId: "calendar-item", accountId: "calendar-bank", transactionId: debitID
+            )
+        )
+        let credit = IncomeEntry(
+            name: "Synthetic savings reallocation", amount: 31.27,
+            bankName: "Example Savings",
+            reviewCorrection: .bucketTransfer,
+            bucketFromName: "Bills", bucketToName: "Emergency",
+            bucketCounterpartSourceId: debitID,
+            plaidMetadata: PlaidSourceMetadata(
+                itemId: "calendar-item", accountId: "calendar-bank", transactionId: creditID
+            )
+        )
+        budget.expenses = [debit]
+        budget.incomes = [credit]
+        assert(budget.isTransferMovement(debit) &&
+               budget.isTransferMovement(credit), "Both bucket legs must be classified as transfers, never income or expenses")
+        assert(budget.isExcludedFromIncome(credit) &&
+               budget.isExcludedFromSpending(debit), "Bucket allocation must not change financial totals")
+        assert(budget.isPairedBucketCredit(credit), "A verified reciprocal credit is suppressed from the calendar and Activity")
+        debit.bucketCounterpartSourceId = nil
+        budget.expenses = [debit]
+        assert(!budget.isPairedBucketCredit(credit),
+               "Unlinked bucket credits must remain individually visible as transfers, not disappear silently")
+    }
+
+    private static func testPlaidMatchingRequiresDistinctAccountLabels() {
+        let budget = BudgetModel()
+        let sourceID = UUID()
+        let ambiguousID = UUID()
+        let destinationID = UUID()
+        budget.financialAccounts = [
+            FinancialAccount(
+                id: sourceID, name: "Checking", institutionName: "Example Bank",
+                kind: .depository, source: .plaid, externalAccountId: "bank-one"
+            ),
+            FinancialAccount(
+                id: ambiguousID, name: "Checking", institutionName: "Example Bank",
+                kind: .depository, source: .plaid, externalAccountId: "bank-two"
+            ),
+            FinancialAccount(
+                id: destinationID, name: "Card", institutionName: "Example Card",
+                kind: .credit, source: .plaid, externalAccountId: "card-one"
+            )
+        ]
+        let date = Date(timeIntervalSince1970: 1_783_000_000)
+        budget.expenses = [
+            Expense(
+                name: "Example Card Payment", amount: 62.30, date: date,
+                section: .needs, categoryId: UUID(), paymentAccount: "Checking",
+                paymentAccountId: sourceID,
+                plaidMetadata: PlaidSourceMetadata(
+                    itemId: "example-item", accountId: "bank-one", transactionId: "example-bank-debit"
+                )
+            )
+        ]
+        budget.incomes = [
+            IncomeEntry(
+                name: "Payment received", amount: 62.30, date: date,
+                bankName: "Card", bankAccountId: destinationID,
+                plaidMetadata: PlaidSourceMetadata(
+                    itemId: "example-card-item", accountId: "card-one", transactionId: "example-card-credit"
+                )
+            )
+        ]
+        assert(budget.plaidAccountLabelIsAmbiguous(sourceID),
+               "Two same-named bank accounts with the same institution cannot be clearly distinguished visually")
+        assert(!budget.canClearlyIdentifyPlaidMatch(
+            sourceID: "example-bank-debit", counterpartID: "example-card-credit"
+        ), "Confirmation must be blocked rather than guessing which checking account is involved")
+
+        budget.financialAccounts[1].name = "Vacation Checking"
+        assert(!budget.plaidAccountLabelIsAmbiguous(sourceID) &&
+               budget.canClearlyIdentifyPlaidMatch(
+                   sourceID: "example-bank-debit", counterpartID: "example-card-credit"
+               ), "Distinct source and destination labels permit explicit visual verification")
     }
 
     private static func testPlaidOneSidedTransferDescriptionPairsACHCredit() {
