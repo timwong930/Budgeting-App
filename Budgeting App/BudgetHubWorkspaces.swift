@@ -2375,6 +2375,222 @@ private struct BudgetWorkspaceEmptyState: View {
 
 // Budget > Activity is the financial-review home. Plaid Sync remains a
 // connection-management screen; neither screen maintains a second queue.
+
+struct PlaidTransferMatchProposal: Identifiable {
+    let source: PlaidTransferReviewLeg
+    let candidate: PlaidTransferReviewLeg
+
+    var id: String { "\(source.id)|\(candidate.id)" }
+    var debit: PlaidTransferReviewLeg { source.signedAmount > 0 ? source : candidate }
+    var credit: PlaidTransferReviewLeg { source.signedAmount < 0 ? source : candidate }
+}
+
+/// One account presentation, reused by Activity, account-ledger review, and
+/// transaction-editor match confirmation. Never infer masked digits from an
+/// opaque Plaid ID: only display information actually supplied by the bank.
+private struct PlaidMatchAccountIdentity: View {
+    let title: String
+    let leg: PlaidTransferReviewLeg
+    @ObservedObject var budget: BudgetModel
+
+    private var account: FinancialAccount? {
+        budget.financialAccounts.first(where: { $0.id == leg.accountId })
+    }
+
+    private var typeName: String {
+        switch account?.kind {
+        case .credit: return "Credit card"
+        case .depository: return "Bank account"
+        case .investment: return "Investment account"
+        default: return "Connected account"
+        }
+    }
+
+    private var institution: String? {
+        guard let text = account?.institutionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(leg.accountName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text([institution, typeName].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Compact, two-sided account preview. The button contains no nested buttons.
+struct PlaidTransferMatchCandidateRow: View {
+    let proposal: PlaidTransferMatchProposal
+    @ObservedObject var budget: BudgetModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Possible match")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(abs(proposal.debit.signedAmount), format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+            }
+            PlaidMatchAccountIdentity(title: "From · withdrawal", leg: proposal.debit, budget: budget)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.semibold))
+                Text("To")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            PlaidMatchAccountIdentity(title: "To · deposit or card payment", leg: proposal.credit, budget: budget)
+            Text("\(proposal.debit.date.formatted(date: .abbreviated, time: .omitted)) · \(proposal.credit.date.formatted(date: .abbreviated, time: .omitted))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens a confirmation screen showing both real bank transactions")
+    }
+}
+
+struct PlaidTransferMatchReviewSheet: View {
+    let proposal: PlaidTransferMatchProposal
+    @ObservedObject var budget: BudgetModel
+    let onConfirm: () -> Bool
+    let onMatched: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+
+    private var identifiable: Bool {
+        budget.canClearlyIdentifyPlaidMatch(
+            sourceID: proposal.source.id, counterpartID: proposal.candidate.id
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Confirm both accounts")
+                            .font(.title3.weight(.semibold))
+                        Text("This is a suggested match, not a verified transfer. Compare both bank entries before linking them.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Money movement") {
+                    PlaidMatchAccountIdentity(
+                        title: "From · money leaving", leg: proposal.debit, budget: budget
+                    )
+                    .padding(.vertical, 6)
+                    Label("Money moved to", systemImage: "arrow.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    PlaidMatchAccountIdentity(
+                        title: "To · money arriving", leg: proposal.credit, budget: budget
+                    )
+                    .padding(.vertical, 6)
+                }
+
+                Section("Transactions recorded by your accounts") {
+                    LabeledContent("Amount", value:
+                        abs(proposal.debit.signedAmount).formatted(.currency(code: "USD"))
+                    )
+                    LabeledContent("Withdrawal date", value:
+                        proposal.debit.date.formatted(date: .abbreviated, time: .omitted)
+                    )
+                    LabeledContent("Deposit / payment date", value:
+                        proposal.credit.date.formatted(date: .abbreviated, time: .omitted)
+                    )
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Withdrawal description")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(proposal.debit.title)
+                            .font(.subheadline)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Receiving description")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(proposal.credit.title)
+                            .font(.subheadline)
+                    }
+                }
+
+                if !identifiable {
+                    Section {
+                        Label("Account names are not unique", systemImage: "exclamationmark.triangle")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Two linked accounts have identical names, institutions, and types. Distinguish their display names in account settings before confirming this match.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.circle")
+                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                    }
+                }
+
+                Section {
+                    Text("Confirming will link the two observed transactions and prevent double-counting. It will not initiate a transfer or change bank-reported balances. You can undo an incorrect match in Review transactions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Review transfer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    if onConfirm() {
+                        onMatched()
+                        dismiss()
+                    } else {
+                        errorMessage = "These entries could not be linked. Refresh both accounts and review the latest activity."
+                    }
+                } label: {
+                    Text("Confirm these accounts")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!identifiable)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
+            }
+        }
+    }
+}
+
 struct BudgetFinancialReviewView: View {
     @ObservedObject var budget: BudgetModel
     let onEditExpense: (Expense) -> Void
